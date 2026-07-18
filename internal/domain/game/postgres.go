@@ -43,6 +43,36 @@ func (repository *PostgresRepository) Find(ctx context.Context, roundID string) 
 	return round, nil
 }
 
+func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType string, limit int) ([]Round, error) {
+	if limit <= 0 {
+		return []Round{}, nil
+	}
+	rows, err := repository.pool.Query(ctx, `
+		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at
+		FROM rounds
+		JOIN game_types ON game_types.id = rounds.game_type_id
+		WHERE rounds.status = 'open' AND game_types.code = $1
+		ORDER BY rounds.bet_closes_at, rounds.id
+		LIMIT $2`, gameType, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rounds := make([]Round, 0)
+	for rows.Next() {
+		var round Round
+		if err := rows.Scan(&round.RoundID, &round.GameType, &round.Sequence, &round.Status, &round.BetClosesAt); err != nil {
+			return nil, err
+		}
+		rounds = append(rounds, round)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return rounds, nil
+}
+
 func (repository *PostgresRepository) CloseDue(ctx context.Context, now time.Time, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil

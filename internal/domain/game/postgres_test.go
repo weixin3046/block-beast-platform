@@ -73,6 +73,13 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 	if futureStatus != string(RoundOpen) {
 		t.Fatalf("future round status = %q, want open", futureStatus)
 	}
+	openRounds, err := repository.ListOpen(ctx, "test-"+gameTypeID, 10)
+	if err != nil {
+		t.Fatalf("list open rounds: %v", err)
+	}
+	if len(openRounds) != 1 || openRounds[0].RoundID != futureRoundID {
+		t.Fatalf("open rounds = %#v, want future round %q", openRounds, futureRoundID)
+	}
 	var eventCount int
 	err = pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = $2`, dueRoundID, events.RoundClosed).Scan(&eventCount)
 	if err != nil {

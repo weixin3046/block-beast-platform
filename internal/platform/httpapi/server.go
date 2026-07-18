@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/block-beast/platform/internal/application/betting"
@@ -37,6 +38,7 @@ type WalletReader interface {
 
 type RoundReader interface {
 	Find(ctx context.Context, roundID string) (game.Round, error)
+	ListOpen(ctx context.Context, gameType string, limit int) ([]game.Round, error)
 }
 
 func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader) *Server {
@@ -50,8 +52,36 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("POST /v1/bets", server.placeBet)
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.balance)
+	mux.HandleFunc("GET /v1/rounds", server.openRounds)
 	mux.HandleFunc("GET /v1/rounds/{roundID}", server.round)
 	return server.withRequestLog(mux)
+}
+
+func (server *Server) openRounds(writer http.ResponseWriter, request *http.Request) {
+	if server.rounds == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "rounds are unavailable"})
+		return
+	}
+	gameType := request.URL.Query().Get("game_type")
+	if gameType == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "game type is required"})
+		return
+	}
+	limit := 50
+	if value := request.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 || parsed > 100 {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "limit must be between 1 and 100"})
+			return
+		}
+		limit = parsed
+	}
+	rounds, err := server.rounds.ListOpen(request.Context(), gameType, limit)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list rounds"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, rounds)
 }
 
 func (server *Server) round(writer http.ResponseWriter, request *http.Request) {

@@ -85,6 +85,34 @@ func TestRoundReturnsRound(t *testing.T) {
 	}
 }
 
+func TestOpenRoundsListsBoundedGameTypeRounds(t *testing.T) {
+	rounds := &recordingRoundReader{rounds: []game.Round{{RoundID: "round-1", GameType: "dice", Status: game.RoundOpen}}}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds)
+	request := httptest.NewRequest(http.MethodGet, "/v1/rounds?game_type=dice&limit=25", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if rounds.gameType != "dice" || rounds.limit != 25 {
+		t.Fatalf("round query = game type %q, limit %d", rounds.gameType, rounds.limit)
+	}
+}
+
+func TestOpenRoundsRejectsInvalidLimit(t *testing.T) {
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, &recordingRoundReader{})
+	request := httptest.NewRequest(http.MethodGet, "/v1/rounds?game_type=dice&limit=101", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
+}
+
 type recordingBetPlacer struct {
 	request betting.PlaceBetRequest
 	bet     betting.PlacedBet
@@ -113,14 +141,23 @@ func (reader *recordingWalletReader) Balance(_ context.Context, accountID string
 }
 
 type recordingRoundReader struct {
-	roundID string
-	round   game.Round
-	err     error
+	roundID  string
+	round    game.Round
+	rounds   []game.Round
+	gameType string
+	limit    int
+	err      error
 }
 
 func (reader *recordingRoundReader) Find(_ context.Context, roundID string) (game.Round, error) {
 	reader.roundID = roundID
 	return reader.round, reader.err
+}
+
+func (reader *recordingRoundReader) ListOpen(_ context.Context, gameType string, limit int) ([]game.Round, error) {
+	reader.gameType = gameType
+	reader.limit = limit
+	return reader.rounds, reader.err
 }
 
 func (checker readinessChecker) Ping(context.Context) error {
