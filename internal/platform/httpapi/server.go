@@ -1,21 +1,31 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/betting"
 	"github.com/block-beast/platform/internal/config"
+	"github.com/block-beast/platform/internal/domain/game"
+	"github.com/block-beast/platform/internal/domain/wallet"
 )
 
 type Server struct {
-	config config.Config
-	logger *slog.Logger
+	config    config.Config
+	logger    *slog.Logger
+	betPlacer BetPlacer
 }
 
-func New(cfg config.Config, logger *slog.Logger) *Server {
-	return &Server{config: cfg, logger: logger}
+type BetPlacer interface {
+	PlaceBet(ctx context.Context, request betting.PlaceBetRequest) (betting.PlacedBet, error)
+}
+
+func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer) *Server {
+	return &Server{config: cfg, logger: logger, betPlacer: betPlacer}
 }
 
 func (server *Server) Handler() http.Handler {
@@ -23,7 +33,46 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
+	mux.HandleFunc("POST /v1/bets", server.placeBet)
 	return server.withRequestLog(mux)
+}
+
+func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request) {
+	if server.betPlacer == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "betting is unavailable"})
+		return
+	}
+	var input betting.PlaceBetRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if input.ClientRequestID == "" || input.RoundID == "" || input.AccountID == "" || input.Currency == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "missing required bet fields"})
+		return
+	}
+
+	bet, err := server.betPlacer.PlaceBet(request.Context(), input)
+	if err != nil {
+		writeBetError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, bet)
+}
+
+func writeBetError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, betting.ErrInvalidSelection), errors.Is(err, game.ErrInvalidStake):
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, betting.ErrRoundNotFound), errors.Is(err, wallet.ErrWalletNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to place bet"})
+	}
 }
 
 func (server *Server) health(writer http.ResponseWriter, _ *http.Request) {

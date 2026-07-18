@@ -10,14 +10,22 @@ import (
 	"syscall"   // 系统信号常量（SIGINT、SIGTERM）
 	"time"      // 时间、超时设置
 
-	"github.com/block-beast/platform/internal/config"           // 配置加载
-	"github.com/block-beast/platform/internal/platform/httpapi" // API路由/业务处理器
+	"github.com/block-beast/platform/internal/application/betting" // 下注应用服务
+	"github.com/block-beast/platform/internal/config"              // 配置加载
+	"github.com/block-beast/platform/internal/platform/httpapi"    // API路由/业务处理器
+	"github.com/jackc/pgx/v5/pgxpool"                              // PostgreSQL连接池
 )
 
 func main() {
-	cfg := config.Load()                                                                      // 加载配置文件
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))                                   // 创建JSON日志记录器
-	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger).Handler()} // 创建HTTP服务器实例
+	cfg := config.Load()                                    // 加载配置文件
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)) // 创建JSON日志记录器
+	pool, err := pgxpool.New(context.Background(), cfg.PostgresDSN)
+	if err != nil {
+		logger.Error("api failed to connect to PostgreSQL", "error", err)
+		return
+	}
+	defer pool.Close()
+	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, betting.NewService(pool)).Handler()} // 创建HTTP服务器实例
 
 	go func() {
 		logger.Info("api started", "address", cfg.APIAddress, "environment", cfg.Environment)
