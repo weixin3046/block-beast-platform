@@ -14,6 +14,7 @@ type Event struct {
 const (
 	BetPlaced       = "game.bet.placed"
 	RoundClosed     = "game.round.closed"
+	RoundSettling   = "game.round.settling"
 	RoundSettled    = "game.round.settled"
 	LedgerCommitted = "wallet.ledger.committed"
 	DepositCredited = "chain.deposit.credited"

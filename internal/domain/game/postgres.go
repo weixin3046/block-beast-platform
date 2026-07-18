@@ -73,6 +73,47 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 	return rounds, nil
 }
 
+func (repository *PostgresRepository) BeginSettlement(ctx context.Context, roundID string) error {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	result, err := tx.Exec(ctx, `
+		UPDATE rounds
+		SET status = 'settling', version = version + 1
+		WHERE id = $1 AND status = 'closed'`, roundID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		var status RoundStatus
+		err = tx.QueryRow(ctx, `SELECT status FROM rounds WHERE id = $1`, roundID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRoundNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return ErrInvalidTransition
+	}
+
+	payload, err := json.Marshal(struct {
+		RoundID string `json:"round_id"`
+	}{RoundID: roundID})
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload)
+		VALUES ($1, 'round', $2, $3, $4)`, uuid.NewString(), roundID, events.RoundSettling, payload)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (repository *PostgresRepository) CloseDue(ctx context.Context, now time.Time, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil

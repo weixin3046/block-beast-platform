@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -87,5 +88,25 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 	}
 	if eventCount != 1 {
 		t.Fatalf("round closed events = %d, want 1", eventCount)
+	}
+	if err := repository.BeginSettlement(ctx, dueRoundID); err != nil {
+		t.Fatalf("begin settlement: %v", err)
+	}
+	err = pool.QueryRow(ctx, `SELECT status, version FROM rounds WHERE id = $1`, dueRoundID).Scan(&dueStatus, &dueVersion)
+	if err != nil {
+		t.Fatalf("read settling round: %v", err)
+	}
+	if dueStatus != string(RoundSettling) || dueVersion != 2 {
+		t.Fatalf("settling round = status %q, version %d; want settling, 2", dueStatus, dueVersion)
+	}
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = $2`, dueRoundID, events.RoundSettling).Scan(&eventCount)
+	if err != nil {
+		t.Fatalf("count round settling events: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("round settling events = %d, want 1", eventCount)
+	}
+	if err := repository.BeginSettlement(ctx, dueRoundID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("repeat begin settlement error = %v, want invalid transition", err)
 	}
 }
