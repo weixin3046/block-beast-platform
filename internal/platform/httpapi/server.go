@@ -19,6 +19,7 @@ type Server struct {
 	logger    *slog.Logger
 	betPlacer BetPlacer
 	readiness ReadinessChecker
+	wallets   WalletReader
 }
 
 type BetPlacer interface {
@@ -29,8 +30,12 @@ type ReadinessChecker interface {
 	Ping(ctx context.Context) error
 }
 
-func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker) *Server {
-	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness}
+type WalletReader interface {
+	Balance(ctx context.Context, accountID string, currency string) (wallet.AccountBalance, error)
+}
+
+func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader) *Server {
+	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets}
 }
 
 func (server *Server) Handler() http.Handler {
@@ -39,7 +44,31 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("POST /v1/bets", server.placeBet)
+	mux.HandleFunc("GET /v1/wallets/{accountID}", server.balance)
 	return server.withRequestLog(mux)
+}
+
+func (server *Server) balance(writer http.ResponseWriter, request *http.Request) {
+	if server.wallets == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "wallets are unavailable"})
+		return
+	}
+	accountID := request.PathValue("accountID")
+	currency := request.URL.Query().Get("currency")
+	if accountID == "" || currency == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account ID and currency are required"})
+		return
+	}
+	balance, err := server.wallets.Balance(request.Context(), accountID, currency)
+	if errors.Is(err, wallet.ErrWalletNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read wallet balance"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, balance)
 }
 
 func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request) {

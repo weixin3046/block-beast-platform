@@ -12,6 +12,7 @@ import (
 
 	"github.com/block-beast/platform/internal/application/betting" // 下注应用服务
 	"github.com/block-beast/platform/internal/config"              // 配置加载
+	"github.com/block-beast/platform/internal/domain/wallet"       // 钱包仓储
 	"github.com/block-beast/platform/internal/platform/httpapi"    // API路由/业务处理器
 	"github.com/jackc/pgx/v5/pgxpool"                              // PostgreSQL连接池
 )
@@ -25,7 +26,7 @@ func main() {
 		return
 	}
 	defer pool.Close()
-	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, betting.NewService(pool), pool).Handler()} // 创建HTTP服务器实例
+	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, betting.NewService(pool), pool, wallet.NewPostgresRepository(pool)).Handler()} // 创建HTTP服务器实例
 
 	go func() {
 		logger.Info("api started", "address", cfg.APIAddress, "environment", cfg.Environment)
