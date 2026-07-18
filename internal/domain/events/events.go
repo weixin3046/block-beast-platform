@@ -16,6 +16,7 @@ const (
 	RoundClosed     = "game.round.closed"
 	RoundSettling   = "game.round.settling"
 	RoundSettled    = "game.round.settled"
+	RoundCancelled  = "game.round.cancelled"
 	LedgerCommitted = "wallet.ledger.committed"
 	DepositCredited = "chain.deposit.credited"
 	WithdrawalSent  = "chain.withdrawal.sent"
