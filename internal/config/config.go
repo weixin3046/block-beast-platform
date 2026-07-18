@@ -27,13 +27,14 @@ func Load() Config {
 	}
 }
 
+// 获取环境变量值，如果不存在则返回默认值
 func valueOrDefault(key string, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
 }
-
+// 时间间隔配置解析
 func durationOrDefault(key string, fallback time.Duration) time.Duration {
 	value, err := time.ParseDuration(os.Getenv(key))
 	if err != nil || value <= 0 {
