@@ -1,16 +1,16 @@
 package main
 
 import (
-	"context" // 上下文，用于超时控制、服务关闭
-	"errors" // 错误判断工具
-	"log/slog" // Go1.21+ 标准结构化日志库（JSON日志）
-	"net/http" // 标准http服务
-	"os" // 系统操作、进程退出
+	"context"   // 上下文，用于超时控制、服务关闭
+	"errors"    // 错误判断工具
+	"log/slog"  // Go1.21+ 标准结构化日志库（JSON日志）
+	"net/http"  // 标准http服务
+	"os"        // 系统操作、进程退出
 	"os/signal" // 操作系统信号捕获
-	"syscall" // 系统信号常量（SIGINT、SIGTERM）
-	"time" // 时间、超时设置
+	"syscall"   // 系统信号常量（SIGINT、SIGTERM）
+	"time"      // 时间、超时设置
 
-	"github.com/block-beast/platform/internal/config" // 配置加载
+	"github.com/block-beast/platform/internal/config"          // 配置加载
 	"github.com/block-beast/platform/internal/platform/httpapi" // API路由/业务处理器
 )
 

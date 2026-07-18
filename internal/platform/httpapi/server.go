@@ -37,7 +37,7 @@ func (server *Server) ready(writer http.ResponseWriter, _ *http.Request) {
 func (server *Server) platform(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"environment": server.config.Environment,
-		"domains": []string{"identity", "wallet", "game", "agent", "realtime", "chain", "operations"},
+		"domains":     []string{"identity", "wallet", "game", "agent", "realtime", "chain", "operations"},
 	})
 }
 

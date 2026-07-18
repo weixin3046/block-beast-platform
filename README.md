@@ -31,6 +31,18 @@ API 健康检查：`http://localhost:8080/healthz`。
 
 Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供健康检查，尚未实现根页面或 WebSocket 路由，因此访问 `http://localhost:8081/` 会返回 404。
 
+## 本地代码格式化
+
+团队统一使用 `gofmt`。`.editorconfig` 统一 IDE 的缩进、UTF-8、LF 换行符和文件末尾换行；`.gitattributes` 确保 Git 提交时采用 LF。
+
+提交前在项目根目录执行：
+
+```powershell
+go fmt ./...
+```
+
+在 VS Code 中安装 Go 扩展后，使用“格式化文档”或启用保存时格式化即可遵循相同规范。GitHub Actions 会在每次 push 和 pull request 中执行 `gofmt` 校验；格式不符合规范时检查会失败。
+
 ## 停止服务
 
 ```powershell

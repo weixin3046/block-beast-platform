@@ -9,29 +9,29 @@ import (
 type EntryType string
 
 const (
-	EntryBetDebit        EntryType = "bet_debit"
+	EntryBetDebit         EntryType = "bet_debit"
 	EntrySettlementCredit EntryType = "settlement_credit"
-	EntryRefund          EntryType = "refund"
-	EntryDeposit         EntryType = "deposit"
-	EntryWithdrawal      EntryType = "withdrawal"
-	EntryCommission      EntryType = "commission"
+	EntryRefund           EntryType = "refund"
+	EntryDeposit          EntryType = "deposit"
+	EntryWithdrawal       EntryType = "withdrawal"
+	EntryCommission       EntryType = "commission"
 )
 
 type LedgerEntry struct {
-	EntryID       string
-	AccountID     string
-	BusinessID    string
-	Type          EntryType
-	AmountMinor   int64
-	Currency      string
-	OccurredAt    time.Time
+	EntryID     string
+	AccountID   string
+	BusinessID  string
+	Type        EntryType
+	AmountMinor int64
+	Currency    string
+	OccurredAt  time.Time
 }
 
 type AccountBalance struct {
-	AccountID       string
-	Currency        string
-	AvailableMinor  int64
-	FrozenMinor     int64
+	AccountID      string
+	Currency       string
+	AvailableMinor int64
+	FrozenMinor    int64
 }
 
 type Repository interface {

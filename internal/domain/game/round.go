@@ -16,23 +16,23 @@ const (
 )
 
 type Round struct {
-	RoundID      string
-	GameType     string
-	Sequence     int64
-	Status       RoundStatus
-	BetClosesAt  time.Time
-	SettledAt    *time.Time
-	Outcome      []string
+	RoundID     string
+	GameType    string
+	Sequence    int64
+	Status      RoundStatus
+	BetClosesAt time.Time
+	SettledAt   *time.Time
+	Outcome     []string
 }
 
 type Bet struct {
-	BetID       string
-	RoundID     string
-	AccountID   string
-	Selection   string
-	StakeMinor  int64
-	Currency    string
-	PlacedAt    time.Time
+	BetID      string
+	RoundID    string
+	AccountID  string
+	Selection  string
+	StakeMinor int64
+	Currency   string
+	PlacedAt   time.Time
 }
 
 var ErrInvalidTransition = errors.New("invalid round state transition")
