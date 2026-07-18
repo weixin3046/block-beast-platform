@@ -36,6 +36,7 @@ type Bet struct {
 }
 
 var ErrInvalidTransition = errors.New("invalid round state transition")
+var ErrRoundNotFound = errors.New("round not found")
 var ErrBettingClosed = errors.New("betting is closed")
 var ErrInvalidStake = errors.New("stake must be positive")
 

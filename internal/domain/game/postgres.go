@@ -3,10 +3,12 @@ package game
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -16,6 +18,29 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
+}
+
+func (repository *PostgresRepository) Find(ctx context.Context, roundID string) (Round, error) {
+	var round Round
+	var outcome json.RawMessage
+	err := repository.pool.QueryRow(ctx, `
+		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at, rounds.settled_at, rounds.outcome
+		FROM rounds
+		JOIN game_types ON game_types.id = rounds.game_type_id
+		WHERE rounds.id = $1`, roundID).
+		Scan(&round.RoundID, &round.GameType, &round.Sequence, &round.Status, &round.BetClosesAt, &round.SettledAt, &outcome)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Round{}, ErrRoundNotFound
+	}
+	if err != nil {
+		return Round{}, err
+	}
+	if len(outcome) > 0 {
+		if err := json.Unmarshal(outcome, &round.Outcome); err != nil {
+			return Round{}, err
+		}
+	}
+	return round, nil
 }
 
 func (repository *PostgresRepository) CloseDue(ctx context.Context, now time.Time, limit int) ([]string, error) {

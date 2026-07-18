@@ -40,7 +40,16 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM game_types WHERE id = $1`, gameTypeID)
 	})
 
-	closed, err := NewPostgresRepository(pool).CloseDue(ctx, time.Now().UTC(), 10)
+	repository := NewPostgresRepository(pool)
+	found, err := repository.Find(ctx, dueRoundID)
+	if err != nil {
+		t.Fatalf("find due round: %v", err)
+	}
+	if found.RoundID != dueRoundID || found.GameType != "test-"+gameTypeID || found.Status != RoundOpen {
+		t.Fatalf("found round = %#v", found)
+	}
+
+	closed, err := repository.CloseDue(ctx, time.Now().UTC(), 10)
 	if err != nil {
 		t.Fatalf("close due rounds: %v", err)
 	}

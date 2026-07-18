@@ -14,12 +14,13 @@ import (
 
 	"github.com/block-beast/platform/internal/application/betting"
 	"github.com/block-beast/platform/internal/config"
+	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/domain/wallet"
 )
 
 func TestPlaceBetCreatesBet(t *testing.T) {
 	placer := &recordingBetPlacer{bet: betting.PlacedBet{BetID: "bet-1", PlacedAt: time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil, nil)
 	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"ClientRequestID":"request-1","RoundID":"round-1","AccountID":"player-1","Currency":"USDT","Selection":{"color":"red"},"StakeMinor":2500}`))
 	response := httptest.NewRecorder()
 
@@ -41,7 +42,7 @@ func TestPlaceBetCreatesBet(t *testing.T) {
 }
 
 func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	response := httptest.NewRecorder()
 
@@ -54,7 +55,7 @@ func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
 
 func TestBalanceReturnsWalletBalance(t *testing.T) {
 	wallets := &recordingWalletReader{balance: wallet.AccountBalance{AccountID: "player-1", Currency: "USDT", AvailableMinor: 7_500, FrozenMinor: 250}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, wallets)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, wallets, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/wallets/player-1?currency=USDT", nil)
 	response := httptest.NewRecorder()
 
@@ -65,6 +66,22 @@ func TestBalanceReturnsWalletBalance(t *testing.T) {
 	}
 	if wallets.accountID != "player-1" || wallets.currency != "USDT" {
 		t.Fatalf("wallet query = account %q, currency %q", wallets.accountID, wallets.currency)
+	}
+}
+
+func TestRoundReturnsRound(t *testing.T) {
+	rounds := &recordingRoundReader{round: game.Round{RoundID: "round-1", GameType: "dice", Status: game.RoundOpen}}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds)
+	request := httptest.NewRequest(http.MethodGet, "/v1/rounds/round-1", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if rounds.roundID != "round-1" {
+		t.Fatalf("round query = %q, want round-1", rounds.roundID)
 	}
 }
 
@@ -93,6 +110,17 @@ func (reader *recordingWalletReader) Balance(_ context.Context, accountID string
 	reader.accountID = accountID
 	reader.currency = currency
 	return reader.balance, reader.err
+}
+
+type recordingRoundReader struct {
+	roundID string
+	round   game.Round
+	err     error
+}
+
+func (reader *recordingRoundReader) Find(_ context.Context, roundID string) (game.Round, error) {
+	reader.roundID = roundID
+	return reader.round, reader.err
 }
 
 func (checker readinessChecker) Ping(context.Context) error {

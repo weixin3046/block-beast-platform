@@ -20,6 +20,7 @@ type Server struct {
 	betPlacer BetPlacer
 	readiness ReadinessChecker
 	wallets   WalletReader
+	rounds    RoundReader
 }
 
 type BetPlacer interface {
@@ -34,8 +35,12 @@ type WalletReader interface {
 	Balance(ctx context.Context, accountID string, currency string) (wallet.AccountBalance, error)
 }
 
-func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader) *Server {
-	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets}
+type RoundReader interface {
+	Find(ctx context.Context, roundID string) (game.Round, error)
+}
+
+func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader) *Server {
+	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets, rounds: rounds}
 }
 
 func (server *Server) Handler() http.Handler {
@@ -45,7 +50,25 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("POST /v1/bets", server.placeBet)
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.balance)
+	mux.HandleFunc("GET /v1/rounds/{roundID}", server.round)
 	return server.withRequestLog(mux)
+}
+
+func (server *Server) round(writer http.ResponseWriter, request *http.Request) {
+	if server.rounds == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "rounds are unavailable"})
+		return
+	}
+	round, err := server.rounds.Find(request.Context(), request.PathValue("roundID"))
+	if errors.Is(err, game.ErrRoundNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read round"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, round)
 }
 
 func (server *Server) balance(writer http.ResponseWriter, request *http.Request) {
