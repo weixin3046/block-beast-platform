@@ -76,6 +76,9 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 	if first.BetID != second.BetID {
 		t.Fatal("same client request ID must return the original bet")
 	}
+	if second.Currency != "USDT" || second.Status != "accepted" {
+		t.Fatalf("repeated bet = %#v, want complete accepted bet", second)
+	}
 	found, err := service.Find(ctx, first.BetID)
 	if err != nil {
 		t.Fatalf("find placed bet: %v", err)

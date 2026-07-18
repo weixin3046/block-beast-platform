@@ -189,9 +189,11 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 func findBet(ctx context.Context, tx pgx.Tx, accountID string, clientRequestID string) (PlacedBet, error) {
 	var bet PlacedBet
 	err := tx.QueryRow(ctx, `
-		SELECT id, client_request_id, round_id, user_id, selection, stake_minor, status, created_at
+		SELECT bets.id, bets.client_request_id, bets.round_id, bets.user_id, wallets.currency,
+			bets.selection, bets.stake_minor, bets.status, bets.created_at
 		FROM bets
-		WHERE user_id = $1 AND client_request_id = $2`, accountID, clientRequestID).
-		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PlacedAt)
+		JOIN wallets ON wallets.id = bets.wallet_id
+		WHERE bets.user_id = $1 AND bets.client_request_id = $2`, accountID, clientRequestID).
+		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PlacedAt)
 	return bet, err
 }
