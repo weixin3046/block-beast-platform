@@ -18,20 +18,20 @@ const (
 )
 
 type LedgerEntry struct {
-	EntryID     string
-	AccountID   string
-	BusinessID  string
-	Type        EntryType
-	AmountMinor int64
-	Currency    string
-	OccurredAt  time.Time
+	EntryID     string    `json:"entry_id"`
+	AccountID   string    `json:"account_id"`
+	BusinessID  string    `json:"business_id"`
+	Type        EntryType `json:"type"`
+	AmountMinor int64     `json:"amount_minor"`
+	Currency    string    `json:"currency"`
+	OccurredAt  time.Time `json:"occurred_at"`
 }
 
 type AccountBalance struct {
-	AccountID      string
-	Currency       string
-	AvailableMinor int64
-	FrozenMinor    int64
+	AccountID      string `json:"account_id"`
+	Currency       string `json:"currency"`
+	AvailableMinor int64  `json:"available_minor"`
+	FrozenMinor    int64  `json:"frozen_minor"`
 }
 
 type Repository interface {

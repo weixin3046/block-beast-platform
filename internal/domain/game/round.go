@@ -16,13 +16,13 @@ const (
 )
 
 type Round struct {
-	RoundID     string
-	GameType    string
-	Sequence    int64
-	Status      RoundStatus
-	BetClosesAt time.Time
-	SettledAt   *time.Time
-	Outcome     []string
+	RoundID     string      `json:"round_id"`
+	GameType    string      `json:"game_type"`
+	Sequence    int64       `json:"sequence"`
+	Status      RoundStatus `json:"status"`
+	BetClosesAt time.Time   `json:"bet_closes_at"`
+	SettledAt   *time.Time  `json:"settled_at,omitempty"`
+	Outcome     []string    `json:"outcome,omitempty"`
 }
 
 type Bet struct {

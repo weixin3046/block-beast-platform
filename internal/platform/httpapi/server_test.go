@@ -21,13 +21,16 @@ import (
 func TestPlaceBetCreatesBet(t *testing.T) {
 	placer := &recordingBetPlacer{bet: betting.PlacedBet{BetID: "bet-1", PlacedAt: time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)}}
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil, nil)
-	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"ClientRequestID":"request-1","RoundID":"round-1","AccountID":"player-1","Currency":"USDT","Selection":{"color":"red"},"StakeMinor":2500}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":"player-1","currency":"USDT","selection":{"color":"red"},"stake_minor":2500}`))
 	response := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(response, request)
 
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"bet_id":"bet-1"`) {
+		t.Fatalf("response body = %s, want snake_case bet ID", response.Body.String())
 	}
 	if placer.request.ClientRequestID != "request-1" || placer.request.StakeMinor != 2500 {
 		t.Fatalf("placer request = %#v", placer.request)

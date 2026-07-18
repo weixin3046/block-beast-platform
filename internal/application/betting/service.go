@@ -18,23 +18,23 @@ var ErrRoundNotFound = errors.New("round not found")
 var ErrInvalidSelection = errors.New("selection must be valid JSON")
 
 type PlaceBetRequest struct {
-	ClientRequestID string
-	RoundID         string
-	AccountID       string
-	Currency        string
-	Selection       json.RawMessage
-	StakeMinor      int64
+	ClientRequestID string          `json:"client_request_id"`
+	RoundID         string          `json:"round_id"`
+	AccountID       string          `json:"account_id"`
+	Currency        string          `json:"currency"`
+	Selection       json.RawMessage `json:"selection"`
+	StakeMinor      int64           `json:"stake_minor"`
 }
 
 type PlacedBet struct {
-	BetID           string
-	ClientRequestID string
-	RoundID         string
-	AccountID       string
-	Currency        string
-	Selection       json.RawMessage
-	StakeMinor      int64
-	PlacedAt        time.Time
+	BetID           string          `json:"bet_id"`
+	ClientRequestID string          `json:"client_request_id"`
+	RoundID         string          `json:"round_id"`
+	AccountID       string          `json:"account_id"`
+	Currency        string          `json:"currency"`
+	Selection       json.RawMessage `json:"selection"`
+	StakeMinor      int64           `json:"stake_minor"`
+	PlacedAt        time.Time       `json:"placed_at"`
 }
 
 type Service struct {
