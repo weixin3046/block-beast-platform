@@ -31,6 +31,34 @@ API 健康检查：`http://localhost:8080/healthz`。
 
 Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供健康检查，尚未实现根页面或 WebSocket 路由，因此访问 `http://localhost:8081/` 会返回 404。
 
+## 当前接口
+
+| 方法与地址 | 用途 |
+| --- | --- |
+| `GET /healthz` | API 存活检查。 |
+| `GET /readyz` | PostgreSQL 就绪检查。 |
+| `GET /v1/platform` | 查询当前环境与领域列表。 |
+| `GET /v1/rounds?game_type={code}&limit={1-100}` | 查询指定游戏类型的开放轮次。 |
+| `GET /v1/rounds/{round_id}` | 查询单个轮次。 |
+| `POST /v1/bets` | 创建幂等投注，同时扣减余额、写入账本和 outbox。 |
+| `GET /v1/bets/{bet_id}` | 查询投注记录与状态。 |
+| `GET /v1/wallets/{account_id}?currency={code}` | 查询钱包可用与冻结余额。 |
+
+`POST /v1/bets` 请求示例：
+
+```json
+{
+	"client_request_id": "request-001",
+	"round_id": "轮次 UUID",
+	"account_id": "用户 UUID",
+	"currency": "USDT",
+	"selection": { "color": "red" },
+	"stake_minor": 2500
+}
+```
+
+除健康检查和平台信息外，业务接口尚未接入身份认证，仅适用于本地开发。
+
 ## 本地代码格式化
 
 团队统一使用 `gofmt`。`.editorconfig` 统一 IDE 的缩进、UTF-8、LF 换行符和文件末尾换行；`.gitattributes` 确保 Git 提交时采用 LF。
@@ -57,10 +85,10 @@ docker compose down --volumes
 
 ## 下一步实现顺序
 
-1. PostgreSQL migration：账户、不可变账本、投注、结算和 outbox。
-2. 钱包事务：幂等扣款、派奖、退款、充值、提现。
-3. 游戏轮次状态机与结算 Worker。
-4. NATS JetStream 事件发布、消费者重试与死信。
-5. JWT/RBAC、后台审计、链上回调验签和实时 WebSocket 协议。
+1. 轮次结算：结算规则、状态迁移、派奖与退款。
+2. NATS JetStream 消费者重试、死信与事件处理监控。
+3. JWT/RBAC、业务接口鉴权和后台审计。
+4. 链上回调验签、充值确认与提现流程。
+5. 实时 WebSocket 协议、订阅和通知。
 
 不在仓库中保存私钥、数据库密码、第三方 API 密钥或生产环境配置。
