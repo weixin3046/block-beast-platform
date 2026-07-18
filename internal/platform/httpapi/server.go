@@ -18,14 +18,19 @@ type Server struct {
 	config    config.Config
 	logger    *slog.Logger
 	betPlacer BetPlacer
+	readiness ReadinessChecker
 }
 
 type BetPlacer interface {
 	PlaceBet(ctx context.Context, request betting.PlaceBetRequest) (betting.PlacedBet, error)
 }
 
-func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer) *Server {
-	return &Server{config: cfg, logger: logger, betPlacer: betPlacer}
+type ReadinessChecker interface {
+	Ping(ctx context.Context) error
+}
+
+func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker) *Server {
+	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness}
 }
 
 func (server *Server) Handler() http.Handler {
@@ -79,7 +84,17 @@ func (server *Server) health(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (server *Server) ready(writer http.ResponseWriter, _ *http.Request) {
+func (server *Server) ready(writer http.ResponseWriter, request *http.Request) {
+	if server.readiness == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+	defer cancel()
+	if err := server.readiness.Ping(ctx); err != nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 }
 
