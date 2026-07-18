@@ -15,6 +15,7 @@ import (
 )
 
 var ErrRoundNotFound = errors.New("round not found")
+var ErrBetNotFound = errors.New("bet not found")
 var ErrInvalidSelection = errors.New("selection must be valid JSON")
 
 type PlaceBetRequest struct {
@@ -34,6 +35,7 @@ type PlacedBet struct {
 	Currency        string          `json:"currency"`
 	Selection       json.RawMessage `json:"selection"`
 	StakeMinor      int64           `json:"stake_minor"`
+	Status          string          `json:"status"`
 	PlacedAt        time.Time       `json:"placed_at"`
 }
 
@@ -43,6 +45,24 @@ type Service struct {
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
+}
+
+func (service *Service) Find(ctx context.Context, betID string) (PlacedBet, error) {
+	var bet PlacedBet
+	err := service.pool.QueryRow(ctx, `
+		SELECT bets.id, bets.client_request_id, bets.round_id, bets.user_id, wallets.currency,
+			bets.selection, bets.stake_minor, bets.status, bets.created_at
+		FROM bets
+		JOIN wallets ON wallets.id = bets.wallet_id
+		WHERE bets.id = $1`, betID).
+		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PlacedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PlacedBet{}, ErrBetNotFound
+	}
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	return bet, nil
 }
 
 func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (PlacedBet, error) {
@@ -117,6 +137,7 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		Currency:        request.Currency,
 		Selection:       append(json.RawMessage(nil), request.Selection...),
 		StakeMinor:      request.StakeMinor,
+		Status:          "accepted",
 	}
 	availableMinor -= request.StakeMinor
 	_, err = tx.Exec(ctx, `
@@ -168,9 +189,9 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 func findBet(ctx context.Context, tx pgx.Tx, accountID string, clientRequestID string) (PlacedBet, error) {
 	var bet PlacedBet
 	err := tx.QueryRow(ctx, `
-		SELECT id, client_request_id, round_id, user_id, selection, stake_minor, created_at
+		SELECT id, client_request_id, round_id, user_id, selection, stake_minor, status, created_at
 		FROM bets
 		WHERE user_id = $1 AND client_request_id = $2`, accountID, clientRequestID).
-		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Selection, &bet.StakeMinor, &bet.PlacedAt)
+		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PlacedAt)
 	return bet, err
 }

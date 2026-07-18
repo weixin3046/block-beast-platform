@@ -76,6 +76,13 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 	if first.BetID != second.BetID {
 		t.Fatal("same client request ID must return the original bet")
 	}
+	found, err := service.Find(ctx, first.BetID)
+	if err != nil {
+		t.Fatalf("find placed bet: %v", err)
+	}
+	if found.BetID != first.BetID || found.Status != "accepted" || found.Currency != "USDT" {
+		t.Fatalf("found bet = %#v", found)
+	}
 
 	assertCount(t, ctx, pool, `SELECT count(*) FROM bets WHERE wallet_id = $1`, walletID, 1)
 	assertCount(t, ctx, pool, `SELECT count(*) FROM ledger_entries WHERE wallet_id = $1 AND entry_type = 'bet_debit'`, walletID, 1)

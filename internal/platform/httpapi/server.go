@@ -22,10 +22,15 @@ type Server struct {
 	readiness ReadinessChecker
 	wallets   WalletReader
 	rounds    RoundReader
+	bets      BetReader
 }
 
 type BetPlacer interface {
 	PlaceBet(ctx context.Context, request betting.PlaceBetRequest) (betting.PlacedBet, error)
+}
+
+type BetReader interface {
+	Find(ctx context.Context, betID string) (betting.PlacedBet, error)
 }
 
 type ReadinessChecker interface {
@@ -41,8 +46,8 @@ type RoundReader interface {
 	ListOpen(ctx context.Context, gameType string, limit int) ([]game.Round, error)
 }
 
-func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader) *Server {
-	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets, rounds: rounds}
+func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader, bets BetReader) *Server {
+	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets, rounds: rounds, bets: bets}
 }
 
 func (server *Server) Handler() http.Handler {
@@ -51,10 +56,28 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("POST /v1/bets", server.placeBet)
+	mux.HandleFunc("GET /v1/bets/{betID}", server.bet)
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.balance)
 	mux.HandleFunc("GET /v1/rounds", server.openRounds)
 	mux.HandleFunc("GET /v1/rounds/{roundID}", server.round)
 	return server.withRequestLog(mux)
+}
+
+func (server *Server) bet(writer http.ResponseWriter, request *http.Request) {
+	if server.bets == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "bets are unavailable"})
+		return
+	}
+	bet, err := server.bets.Find(request.Context(), request.PathValue("betID"))
+	if errors.Is(err, betting.ErrBetNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read bet"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, bet)
 }
 
 func (server *Server) openRounds(writer http.ResponseWriter, request *http.Request) {

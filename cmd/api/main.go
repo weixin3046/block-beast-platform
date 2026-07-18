@@ -27,7 +27,8 @@ func main() {
 		return
 	}
 	defer pool.Close()
-	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, betting.NewService(pool), pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool)).Handler()} // 创建HTTP服务器实例
+	bettingService := betting.NewService(pool)
+	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService).Handler()} // 创建HTTP服务器实例
 
 	go func() {
 		logger.Info("api started", "address", cfg.APIAddress, "environment", cfg.Environment)
