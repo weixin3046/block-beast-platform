@@ -2,8 +2,11 @@ package game
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
+	"github.com/block-beast/platform/internal/domain/events"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,7 +22,13 @@ func (repository *PostgresRepository) CloseDue(ctx context.Context, now time.Tim
 	if limit <= 0 {
 		return []string{}, nil
 	}
-	rows, err := repository.pool.Query(ctx, `
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
 		UPDATE rounds
 		SET status = 'closed', version = version + 1
 		WHERE id IN (
@@ -45,6 +54,23 @@ func (repository *PostgresRepository) CloseDue(ctx context.Context, now time.Tim
 		roundIDs = append(roundIDs, roundID)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, roundID := range roundIDs {
+		payload, err := json.Marshal(struct {
+			RoundID string `json:"round_id"`
+		}{RoundID: roundID})
+		if err != nil {
+			return nil, err
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, occurred_at)
+			VALUES ($1, 'round', $2, $3, $4, $5)`, uuid.NewString(), roundID, events.RoundClosed, payload, now)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return roundIDs, nil

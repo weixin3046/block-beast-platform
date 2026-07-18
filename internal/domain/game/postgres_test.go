@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -34,6 +35,7 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 		t.Fatalf("create rounds: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM outbox_events WHERE aggregate_id IN ($1, $2)`, dueRoundID, futureRoundID)
 		_, _ = pool.Exec(ctx, `DELETE FROM rounds WHERE game_type_id = $1`, gameTypeID)
 		_, _ = pool.Exec(ctx, `DELETE FROM game_types WHERE id = $1`, gameTypeID)
 	})
@@ -61,5 +63,13 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 	}
 	if futureStatus != string(RoundOpen) {
 		t.Fatalf("future round status = %q, want open", futureStatus)
+	}
+	var eventCount int
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = $2`, dueRoundID, events.RoundClosed).Scan(&eventCount)
+	if err != nil {
+		t.Fatalf("count round closed events: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("round closed events = %d, want 1", eventCount)
 	}
 }
