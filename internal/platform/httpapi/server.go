@@ -23,6 +23,7 @@ type Server struct {
 	wallets   WalletReader
 	rounds    RoundReader
 	bets      BetReader
+	canceller RoundCanceller
 }
 
 type BetPlacer interface {
@@ -46,8 +47,12 @@ type RoundReader interface {
 	ListOpen(ctx context.Context, gameType string, limit int) ([]game.Round, error)
 }
 
-func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader, bets BetReader) *Server {
-	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets, rounds: rounds, bets: bets}
+type RoundCanceller interface {
+	CancelRound(ctx context.Context, roundID string) (int, error)
+}
+
+func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader, bets BetReader, canceller RoundCanceller) *Server {
+	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets, rounds: rounds, bets: bets, canceller: canceller}
 }
 
 func (server *Server) Handler() http.Handler {
@@ -60,7 +65,34 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.balance)
 	mux.HandleFunc("GET /v1/rounds", server.openRounds)
 	mux.HandleFunc("GET /v1/rounds/{roundID}", server.round)
+	mux.HandleFunc("POST /v1/rounds/{roundID}/cancel", server.cancelRound)
 	return server.withRequestLog(mux)
+}
+
+func (server *Server) cancelRound(writer http.ResponseWriter, request *http.Request) {
+	if server.canceller == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "round cancellation is unavailable"})
+		return
+	}
+	roundID := request.PathValue("roundID")
+	refundedBetCount, err := server.canceller.CancelRound(request.Context(), roundID)
+	if errors.Is(err, game.ErrRoundNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, game.ErrInvalidTransition) {
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to cancel round"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, struct {
+		RoundID          string `json:"round_id"`
+		RefundedBetCount int    `json:"refunded_bet_count"`
+		Status           string `json:"status"`
+	}{RoundID: roundID, RefundedBetCount: refundedBetCount, Status: "cancelled"})
 }
 
 func (server *Server) bet(writer http.ResponseWriter, request *http.Request) {

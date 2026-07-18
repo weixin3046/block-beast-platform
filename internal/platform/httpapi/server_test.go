@@ -20,7 +20,7 @@ import (
 
 func TestPlaceBetCreatesBet(t *testing.T) {
 	placer := &recordingBetPlacer{bet: betting.PlacedBet{BetID: "bet-1", PlacedAt: time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil, nil, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":"player-1","currency":"USDT","selection":{"color":"red"},"stake_minor":2500}`))
 	response := httptest.NewRecorder()
 
@@ -45,7 +45,7 @@ func TestPlaceBetCreatesBet(t *testing.T) {
 }
 
 func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil, nil, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	response := httptest.NewRecorder()
 
@@ -58,7 +58,7 @@ func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
 
 func TestBalanceReturnsWalletBalance(t *testing.T) {
 	wallets := &recordingWalletReader{balance: wallet.AccountBalance{AccountID: "player-1", Currency: "USDT", AvailableMinor: 7_500, FrozenMinor: 250}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, wallets, nil, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, wallets, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/wallets/player-1?currency=USDT", nil)
 	response := httptest.NewRecorder()
 
@@ -74,7 +74,7 @@ func TestBalanceReturnsWalletBalance(t *testing.T) {
 
 func TestRoundReturnsRound(t *testing.T) {
 	rounds := &recordingRoundReader{round: game.Round{RoundID: "round-1", GameType: "dice", Status: game.RoundOpen}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds/round-1", nil)
 	response := httptest.NewRecorder()
 
@@ -90,7 +90,7 @@ func TestRoundReturnsRound(t *testing.T) {
 
 func TestOpenRoundsListsBoundedGameTypeRounds(t *testing.T) {
 	rounds := &recordingRoundReader{rounds: []game.Round{{RoundID: "round-1", GameType: "dice", Status: game.RoundOpen}}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds?game_type=dice&limit=25", nil)
 	response := httptest.NewRecorder()
 
@@ -105,7 +105,7 @@ func TestOpenRoundsListsBoundedGameTypeRounds(t *testing.T) {
 }
 
 func TestOpenRoundsRejectsInvalidLimit(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, &recordingRoundReader{}, nil)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, &recordingRoundReader{}, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds?game_type=dice&limit=101", nil)
 	response := httptest.NewRecorder()
 
@@ -118,7 +118,7 @@ func TestOpenRoundsRejectsInvalidLimit(t *testing.T) {
 
 func TestBetReturnsBet(t *testing.T) {
 	bets := &recordingBetReader{bet: betting.PlacedBet{BetID: "bet-1", Status: "accepted"}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets)
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/bets/bet-1", nil)
 	response := httptest.NewRecorder()
 
@@ -132,6 +132,25 @@ func TestBetReturnsBet(t *testing.T) {
 	}
 }
 
+func TestCancelRoundReturnsRefundedBetCount(t *testing.T) {
+	canceller := &recordingRoundCanceller{refundedBetCount: 2}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, canceller)
+	request := httptest.NewRequest(http.MethodPost, "/v1/rounds/round-1/cancel", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if canceller.roundID != "round-1" {
+		t.Fatalf("cancelled round = %q, want round-1", canceller.roundID)
+	}
+	if !strings.Contains(response.Body.String(), `"refunded_bet_count":2`) {
+		t.Fatalf("response body = %s, want refund count", response.Body.String())
+	}
+}
+
 type recordingBetPlacer struct {
 	request betting.PlaceBetRequest
 	bet     betting.PlacedBet
@@ -141,6 +160,17 @@ type recordingBetReader struct {
 	betID string
 	bet   betting.PlacedBet
 	err   error
+}
+
+type recordingRoundCanceller struct {
+	roundID          string
+	refundedBetCount int
+	err              error
+}
+
+func (canceller *recordingRoundCanceller) CancelRound(_ context.Context, roundID string) (int, error) {
+	canceller.roundID = roundID
+	return canceller.refundedBetCount, canceller.err
 }
 
 func (reader *recordingBetReader) Find(_ context.Context, betID string) (betting.PlacedBet, error) {
