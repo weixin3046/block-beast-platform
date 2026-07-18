@@ -11,6 +11,7 @@ import (
 	"github.com/block-beast/platform/internal/application/outbox"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/events"
+	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/platform/natsjs"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -33,9 +34,11 @@ func main() {
 	}
 	defer publisher.Close()
 	processor := outbox.NewProcessor(events.NewPostgresOutbox(pool), publisher)
+	roundRepository := game.NewPostgresRepository(pool)
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
 	defer ticker.Stop()
 	logger.Info("worker started", "poll_interval", cfg.WorkerPollInterval)
+	processDueRounds(ctx, logger, roundRepository)
 	processPending(logger, processor)
 
 	for {
@@ -44,8 +47,24 @@ func main() {
 			logger.Info("worker stopped")
 			return
 		case <-ticker.C:
+			processDueRounds(ctx, logger, roundRepository)
 			processPending(logger, processor)
 		}
+	}
+}
+
+type dueRoundCloser interface {
+	CloseDue(ctx context.Context, now time.Time, limit int) ([]string, error)
+}
+
+func processDueRounds(ctx context.Context, logger *slog.Logger, repository dueRoundCloser) {
+	closed, err := repository.CloseDue(ctx, time.Now().UTC(), 100)
+	if err != nil {
+		logger.Error("due round closure failed", "error", err)
+		return
+	}
+	if len(closed) > 0 {
+		logger.Info("due rounds closed", "count", len(closed))
 	}
 }
 
