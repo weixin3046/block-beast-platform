@@ -1,0 +1,47 @@
+package wallet
+
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+type EntryType string
+
+const (
+	EntryBetDebit        EntryType = "bet_debit"
+	EntrySettlementCredit EntryType = "settlement_credit"
+	EntryRefund          EntryType = "refund"
+	EntryDeposit         EntryType = "deposit"
+	EntryWithdrawal      EntryType = "withdrawal"
+	EntryCommission      EntryType = "commission"
+)
+
+type LedgerEntry struct {
+	EntryID       string
+	AccountID     string
+	BusinessID    string
+	Type          EntryType
+	AmountMinor   int64
+	Currency      string
+	OccurredAt    time.Time
+}
+
+type AccountBalance struct {
+	AccountID       string
+	Currency        string
+	AvailableMinor  int64
+	FrozenMinor     int64
+}
+
+type Repository interface {
+	DebitForBet(ctx context.Context, accountID string, businessID string, amountMinor int64, currency string) (LedgerEntry, error)
+	CreditSettlement(ctx context.Context, accountID string, businessID string, amountMinor int64, currency string) (LedgerEntry, error)
+	Balance(ctx context.Context, accountID string, currency string) (AccountBalance, error)
+}
+
+var ErrInsufficientFunds = errors.New("insufficient available funds")
+var ErrWalletNotFound = errors.New("wallet not found")
+var ErrInvalidAmount = errors.New("amount must be positive")
+
+// Every mutation must be idempotent by BusinessID and committed atomically with its ledger entry.
