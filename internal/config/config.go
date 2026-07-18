@@ -34,6 +34,7 @@ func valueOrDefault(key string, fallback string) string {
 	}
 	return fallback
 }
+
 // 时间间隔配置解析
 func durationOrDefault(key string, fallback time.Duration) time.Duration {
 	value, err := time.ParseDuration(os.Getenv(key))
