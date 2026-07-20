@@ -57,6 +57,26 @@ func TestProcessorLeavesFailedEventPending(t *testing.T) {
 	}
 }
 
+func TestProcessorDeadLettersEventAfterMaximumFailures(t *testing.T) {
+	memoryOutbox := events.NewMemoryOutbox()
+	event := events.Event{ID: "event-1", Type: events.BetPlaced, OccurredAt: time.Now().UTC()}
+	if err := memoryOutbox.Append(event); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+	publisher := &recordingPublisher{err: errors.New("NATS unavailable")}
+	processor := NewProcessor(memoryOutbox, publisher)
+	processor.maxAttempts = 2
+
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := processor.ProcessPending(10); !errors.Is(err, publisher.err) {
+			t.Fatalf("attempt %d error = %v, want publisher error", attempt+1, err)
+		}
+	}
+	if pending := memoryOutbox.Pending(10); len(pending) != 0 {
+		t.Fatalf("pending events = %#v, want none after dead letter", pending)
+	}
+}
+
 type recordingPublisher struct {
 	events []events.Event
 	err    error

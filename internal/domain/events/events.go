@@ -31,4 +31,5 @@ type Outbox interface {
 	Append(event Event) error
 	Pending(limit int) []Event
 	MarkPublished(eventID string, publishedAt time.Time) error
+	RecordFailure(eventID string, failedAt time.Time, reason string, maxAttempts int) (deadLettered bool, err error)
 }

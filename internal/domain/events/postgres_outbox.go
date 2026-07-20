@@ -30,7 +30,7 @@ func (outbox *PostgresOutbox) Pending(limit int) []Event {
 	query := `
 		SELECT id, event_type, aggregate_type, aggregate_id, occurred_at, payload
 		FROM outbox_events
-		WHERE published_at IS NULL
+		WHERE published_at IS NULL AND failed_at IS NULL
 		ORDER BY occurred_at, id`
 	var rows pgx.Rows
 	var err error
@@ -76,6 +76,36 @@ func (outbox *PostgresOutbox) MarkPublished(eventID string, publishedAt time.Tim
 		return ErrEventNotFound
 	}
 	return err
+}
+
+func (outbox *PostgresOutbox) RecordFailure(eventID string, failedAt time.Time, reason string, maxAttempts int) (bool, error) {
+	if maxAttempts <= 0 {
+		return false, errors.New("max attempts must be positive")
+	}
+	if len(reason) > 1024 {
+		reason = reason[:1024]
+	}
+	ctx := context.Background()
+	var deadLettered bool
+	err := outbox.pool.QueryRow(ctx, `
+		UPDATE outbox_events
+		SET attempts = attempts + 1,
+			failure_reason = $2,
+			failed_at = CASE WHEN attempts + 1 >= $3 THEN $4 ELSE NULL END
+		WHERE id = $1 AND published_at IS NULL AND failed_at IS NULL
+		RETURNING failed_at IS NOT NULL`, eventID, reason, maxAttempts, failedAt).Scan(&deadLettered)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var exists bool
+		err = outbox.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM outbox_events WHERE id = $1)`, eventID).Scan(&exists)
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, ErrEventNotFound
+		}
+		return false, nil
+	}
+	return deadLettered, err
 }
 
 var _ Outbox = (*PostgresOutbox)(nil)

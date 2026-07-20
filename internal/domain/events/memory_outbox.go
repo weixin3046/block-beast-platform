@@ -13,10 +13,12 @@ type MemoryOutbox struct {
 	mu        sync.Mutex
 	events    map[string]Event
 	published map[string]time.Time
+	attempts  map[string]int
+	dead      map[string]time.Time
 }
 
 func NewMemoryOutbox() *MemoryOutbox {
-	return &MemoryOutbox{events: make(map[string]Event), published: make(map[string]time.Time)}
+	return &MemoryOutbox{events: make(map[string]Event), published: make(map[string]time.Time), attempts: make(map[string]int), dead: make(map[string]time.Time)}
 }
 
 func (outbox *MemoryOutbox) Append(event Event) error {
@@ -35,6 +37,9 @@ func (outbox *MemoryOutbox) Pending(limit int) []Event {
 	pending := make([]Event, 0)
 	for id, event := range outbox.events {
 		if _, published := outbox.published[id]; !published {
+			if _, dead := outbox.dead[id]; dead {
+				continue
+			}
 			pending = append(pending, event)
 		}
 	}
@@ -43,6 +48,29 @@ func (outbox *MemoryOutbox) Pending(limit int) []Event {
 		return pending[:limit]
 	}
 	return pending
+}
+
+func (outbox *MemoryOutbox) RecordFailure(eventID string, failedAt time.Time, _ string, maxAttempts int) (bool, error) {
+	if maxAttempts <= 0 {
+		return false, errors.New("max attempts must be positive")
+	}
+	outbox.mu.Lock()
+	defer outbox.mu.Unlock()
+	if _, exists := outbox.events[eventID]; !exists {
+		return false, ErrEventNotFound
+	}
+	if _, published := outbox.published[eventID]; published {
+		return false, nil
+	}
+	if _, dead := outbox.dead[eventID]; dead {
+		return true, nil
+	}
+	outbox.attempts[eventID]++
+	if outbox.attempts[eventID] >= maxAttempts {
+		outbox.dead[eventID] = failedAt
+		return true, nil
+	}
+	return false, nil
 }
 
 func (outbox *MemoryOutbox) MarkPublished(eventID string, publishedAt time.Time) error {
