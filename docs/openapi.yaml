@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: Block Beast Platform API
+  version: 0.1.0
+  description: |
+    Block Beast 的 HTTP 接口。金额均以货币最小单位（minor unit）表示，例如 USDT 的 2500 表示由客户端与游戏规则共同约定的 2500 最小单位。
+
+    当前版本仅供本地开发：除健康检查和平台信息外的接口尚未接入身份认证，生产环境不得直接暴露。
+  license:
+    name: UNLICENSED
+security: []
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: System
+    description: 存活与依赖就绪检查。
+  - name: Platform
+    description: 平台元信息。
+  - name: Rounds
+    description: 游戏轮次查询与操作。
+  - name: Bets
+    description: 投注创建和查询。
+  - name: Wallets
+    description: 钱包余额查询。
+paths:
+  /healthz:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: API 存活检查
+      responses:
+        '200':
+          description: API 正常运行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+  /readyz:
+    get:
+      tags: [System]
+      operationId: getReadiness
+      summary: PostgreSQL 就绪检查
+      responses:
+        '200':
+          description: 依赖已就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/platform:
+    get:
+      tags: [Platform]
+      operationId: getPlatform
+      summary: 查询平台环境与领域列表
+      responses:
+        '200':
+          description: 平台信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Platform'
+  /v1/rounds:
+    get:
+      tags: [Rounds]
+      operationId: listOpenRounds
+      summary: 查询指定游戏的开放轮次
+      parameters:
+        - name: game_type
+          in: query
+          required: true
+          schema:
+            type: string
+          example: dice
+        - name: limit
+          in: query
+          required: false
+          description: 返回数量，默认 50，范围 1–100。
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: 开放轮次，按封盘时间升序。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Round'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/rounds/{roundID}:
+    get:
+      tags: [Rounds]
+      operationId: getRound
+      summary: 查询单个轮次
+      parameters:
+        - $ref: '#/components/parameters/RoundID'
+      responses:
+        '200':
+          description: 轮次详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Round'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/rounds/{roundID}/cancel:
+    post:
+      tags: [Rounds]
+      operationId: cancelRound
+      summary: 取消轮次并退款
+      description: 仅开放或已封盘轮次可以取消。已接受的投注会退款；重复取消不会重复退款。
+      parameters:
+        - $ref: '#/components/parameters/RoundID'
+      responses:
+        '200':
+          description: 轮次已取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cancellation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/bets:
+    post:
+      tags: [Bets]
+      operationId: placeBet
+      summary: 创建幂等投注
+      description: 对同一 account_id 和 client_request_id 的重复请求会返回既有投注，不会再次扣款。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceBetRequest'
+            example:
+              client_request_id: web-20260720-0001
+              round_id: 8374209d-069a-4e6a-b1f2-c166e3b5ee52
+              account_id: 4fb2b612-88cf-47cf-8312-cd76fa4d8869
+              currency: USDT
+              selection:
+                color: red
+              stake_minor: 2500
+      responses:
+        '201':
+          description: 投注已接受，或同一幂等键对应的既有投注。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/bets/{betID}:
+    get:
+      tags: [Bets]
+      operationId: getBet
+      summary: 查询投注记录
+      parameters:
+        - $ref: '#/components/parameters/BetID'
+      responses:
+        '200':
+          description: 投注详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bet'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/wallets/{accountID}:
+    get:
+      tags: [Wallets]
+      operationId: getWalletBalance
+      summary: 查询钱包余额
+      parameters:
+        - $ref: '#/components/parameters/AccountID'
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+          example: USDT
+      responses:
+        '200':
+          description: 钱包余额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletBalance'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  parameters:
+    RoundID:
+      name: roundID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BetID:
+      name: betID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AccountID:
+      name: accountID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: 请求参数或 JSON 请求体无效。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: 请求的资源不存在。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: 当前资源状态不允许该操作，或余额不足。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unavailable:
+      description: 服务依赖尚未就绪或对应能力未启用。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: round not found
+    Platform:
+      type: object
+      required: [environment, domains]
+      properties:
+        environment:
+          type: string
+          example: development
+        domains:
+          type: array
+          items:
+            type: string
+    Round:
+      type: object
+      required: [round_id, game_type, sequence, status, bet_closes_at]
+      properties:
+        round_id:
+          type: string
+          format: uuid
+        game_type:
+          type: string
+          example: dice
+        sequence:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [open, closed, settling, settled, cancelled]
+        bet_closes_at:
+          type: string
+          format: date-time
+        settled_at:
+          type: string
+          format: date-time
+        outcome:
+          type: array
+          items:
+            type: string
+    PlaceBetRequest:
+      type: object
+      additionalProperties: false
+      required: [client_request_id, round_id, account_id, currency, selection, stake_minor]
+      properties:
+        client_request_id:
+          type: string
+          minLength: 1
+          description: 客户端生成的幂等键；同一用户下必须唯一。
+        round_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+          minLength: 1
+          example: USDT
+        selection:
+          description: 玩法定义的有效 JSON 选择值。
+        stake_minor:
+          type: integer
+          format: int64
+          minimum: 1
+    Bet:
+      type: object
+      required: [bet_id, client_request_id, round_id, account_id, currency, selection, stake_minor, status, placed_at]
+      properties:
+        bet_id:
+          type: string
+          format: uuid
+        client_request_id:
+          type: string
+        round_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        selection: {}
+        stake_minor:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [accepted, cancelled, lost, won, refunded]
+        placed_at:
+          type: string
+          format: date-time
+    WalletBalance:
+      type: object
+      required: [account_id, currency, available_minor, frozen_minor]
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        available_minor:
+          type: integer
+          format: int64
+        frozen_minor:
+          type: integer
+          format: int64
+    Cancellation:
+      type: object
+      required: [round_id, refunded_bet_count, status]
+      properties:
+        round_id:
+          type: string
+          format: uuid
+        refunded_bet_count:
+          type: integer
+        status:
+          type: string
+          enum: [cancelled]
