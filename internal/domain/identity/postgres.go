@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrIdentityNotFound = errors.New("identity not found")
+var ErrLoginNameTaken = errors.New("login name is already taken")
 
 // PasswordCredentials 是 password 提供方下的登录凭证与账号状态。
 type PasswordCredentials struct {
@@ -41,6 +44,55 @@ func (repository *PostgresRepository) FindPasswordCredentials(ctx context.Contex
 		return PasswordCredentials{}, err
 	}
 	return credentials, nil
+}
+
+// RegisterPasswordUser 在单个事务中创建用户、密码凭证、指定角色和默认货币
+// 的零余额钱包。登录名冲突时返回 ErrLoginNameTaken。
+func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currency string) (string, error) {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO roles (id, code, description)
+		VALUES ($1, $2, $2)
+		ON CONFLICT (code) DO NOTHING`, uuid.NewString(), roleCode); err != nil {
+		return "", err
+	}
+	var roleID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE code = $1`, roleCode).Scan(&roleID); err != nil {
+		return "", err
+	}
+
+	userID := uuid.NewString()
+	if _, err := tx.Exec(ctx, `INSERT INTO users (id, login_name, display_name) VALUES ($1, $2, $3)`, userID, loginName, displayName); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return "", ErrLoginNameTaken
+		}
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_identities (id, user_id, provider, subject, password_hash)
+		VALUES ($1, $2, 'password', $3, $4)`, uuid.NewString(), userID, loginName, passwordHash); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return "", ErrLoginNameTaken
+		}
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`, userID, roleID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO wallets (id, user_id, currency) VALUES ($1, $2, $3)`, uuid.NewString(), userID, currency); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return userID, nil
 }
 
 // UserRoles 返回用户拥有的角色代码列表。

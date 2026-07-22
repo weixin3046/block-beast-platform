@@ -64,6 +64,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Platform'
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: 注册玩家账号并签发访问令牌
+      description: 在单个事务中创建用户、密码凭证、player 角色和默认 USDT 零余额钱包，注册完成即返回访问令牌。注册会写入审计日志。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              login_name: player-001
+              display_name: 玩家一号
+              password: correct-horse-battery
+      responses:
+        '201':
+          description: 注册成功，返回访问令牌。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /v1/auth/login:
     post:
       tags: [Auth]
@@ -351,6 +380,22 @@ components:
         status:
           type: string
           example: ok
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [login_name, password]
+      properties:
+        login_name:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{3,32}$'
+          description: 3–32 位字母、数字、连字符或下划线。
+        display_name:
+          type: string
+          description: 展示名，缺省与登录名相同。
+        password:
+          type: string
+          minLength: 12
+          format: password
     LoginRequest:
       type: object
       additionalProperties: false

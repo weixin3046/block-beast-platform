@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/auth"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/identity"
 )
@@ -116,6 +117,50 @@ func TestAuthorizeAccount(t *testing.T) {
 	}
 	if !authorizeAccount(withClaims("ops-1", []string{identity.RoleOperator}), "user-2") {
 		t.Fatal("operator must be allowed on any account")
+	}
+}
+
+type stubRegisterService struct {
+	result auth.LoginResult
+	err    error
+}
+
+func (stub stubRegisterService) Register(_ context.Context, _ string, _ string, _ string) (auth.LoginResult, error) {
+	return stub.result, stub.err
+}
+
+func TestRegisterEndpointMapsErrors(t *testing.T) {
+	newServer := func(stub stubRegisterService) *Server {
+		return New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithRegister(stub))
+	}
+	cases := []struct {
+		name string
+		stub stubRegisterService
+		want int
+	}{
+		{"invalid login name", stubRegisterService{err: auth.ErrInvalidLoginName}, http.StatusBadRequest},
+		{"invalid password", stubRegisterService{err: auth.ErrInvalidPassword}, http.StatusBadRequest},
+		{"login name taken", stubRegisterService{err: identity.ErrLoginNameTaken}, http.StatusConflict},
+		{"not configured", stubRegisterService{err: auth.ErrAuthNotConfigured}, http.StatusServiceUnavailable},
+		{"success", stubRegisterService{result: auth.LoginResult{AccessToken: "token", UserID: "u1", Roles: []string{"player"}}}, http.StatusCreated},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"login_name":"new-player","password":"some-password-12"}`))
+			response := httptest.NewRecorder()
+			newServer(testCase.stub).Handler().ServeHTTP(response, request)
+			if response.Code != testCase.want {
+				t.Fatalf("status = %d, want %d", response.Code, testCase.want)
+			}
+		})
+	}
+
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"login_name":"a"}`))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing register service status = %d, want 503", response.Code)
 	}
 }
 

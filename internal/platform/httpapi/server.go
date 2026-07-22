@@ -29,11 +29,16 @@ type Server struct {
 	canceller RoundCanceller
 	auth      *Authenticator
 	logins    LoginService
+	registers RegisterService
 	auditor   AuditRecorder
 }
 
 type LoginService interface {
 	Login(ctx context.Context, loginName string, password string) (auth.LoginResult, error)
+}
+
+type RegisterService interface {
+	Register(ctx context.Context, loginName string, displayName string, password string) (auth.LoginResult, error)
 }
 
 type AuditRecorder interface {
@@ -49,6 +54,10 @@ func WithAuth(authenticator *Authenticator) Option {
 
 func WithLogin(logins LoginService) Option {
 	return func(server *Server) { server.logins = logins }
+}
+
+func WithRegister(registers RegisterService) Option {
+	return func(server *Server) { server.registers = registers }
 }
 
 func WithAudit(auditor AuditRecorder) Option {
@@ -94,6 +103,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
+	mux.HandleFunc("POST /v1/auth/register", server.register)
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
 	mux.HandleFunc("GET /v1/bets/{betID}", server.protect(server.bet))
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.protect(server.balance))
@@ -126,6 +136,41 @@ func (server *Server) recordAudit(ctx context.Context, entry audit.Entry) {
 	if err := server.auditor.Record(ctx, entry); err != nil {
 		server.logger.Warn("audit record failed", "action", entry.Action, "target_id", entry.TargetID, "error", err)
 	}
+}
+
+func (server *Server) register(writer http.ResponseWriter, request *http.Request) {
+	if server.registers == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "registration is unavailable"})
+		return
+	}
+	var input struct {
+		LoginName   string `json:"login_name"`
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || input.LoginName == "" || input.Password == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "login_name and password are required"})
+		return
+	}
+	result, err := server.registers.Register(request.Context(), input.LoginName, input.DisplayName, input.Password)
+	switch {
+	case errors.Is(err, auth.ErrInvalidLoginName), errors.Is(err, auth.ErrInvalidPassword):
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	case errors.Is(err, identity.ErrLoginNameTaken):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	case errors.Is(err, auth.ErrAuthNotConfigured):
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to register"})
+		return
+	}
+	server.recordAudit(request.Context(), audit.Entry{ActorUserID: result.UserID, Action: "auth.register", TargetType: "user", TargetID: result.UserID, Payload: map[string]string{"login_name": input.LoginName}})
+	writeJSON(writer, http.StatusCreated, result)
 }
 
 func (server *Server) login(writer http.ResponseWriter, request *http.Request) {

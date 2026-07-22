@@ -37,8 +37,9 @@ func main() {
 	if cfg.AuthTokenSecret == "" {
 		logger.Warn("AUTH_TOKEN_SECRET is not set; business endpoints are unauthenticated")
 	} else {
-		loginService := auth.NewService(identity.NewPostgresRepository(pool), cfg.AuthTokenSecret, cfg.AccessTokenTTL)
-		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(loginService))
+		identityRepository := identity.NewPostgresRepository(pool)
+		authService := auth.NewService(identityRepository, cfg.AuthTokenSecret, cfg.AccessTokenTTL).WithRegistrar(identityRepository)
+		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService))
 	}
 	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService, cancellationService, options...).Handler()} // 创建HTTP服务器实例
 

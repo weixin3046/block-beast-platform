@@ -21,6 +21,103 @@ func TestLoginRejectsUnconfiguredService(t *testing.T) {
 	}
 }
 
+type stubRegistrar struct{}
+
+func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ string) (string, error) {
+	return "", nil
+}
+
+func TestRegisterValidatesInput(t *testing.T) {
+	newService := func() *Service {
+		return NewService(nil, testSecret, time.Minute).WithRegistrar(stubRegistrar{})
+	}
+	if _, err := newService().Register(context.Background(), "ab", "", "valid-password-12"); !errors.Is(err, ErrInvalidLoginName) {
+		t.Fatalf("short login name error = %v, want ErrInvalidLoginName", err)
+	}
+	if _, err := newService().Register(context.Background(), "bad name!", "", "valid-password-12"); !errors.Is(err, ErrInvalidLoginName) {
+		t.Fatalf("invalid chars error = %v, want ErrInvalidLoginName", err)
+	}
+	if _, err := newService().Register(context.Background(), "valid-name", "", "short"); !errors.Is(err, ErrInvalidPassword) {
+		t.Fatalf("short password error = %v, want ErrInvalidPassword", err)
+	}
+	service := NewService(nil, testSecret, time.Minute)
+	if _, err := service.Register(context.Background(), "valid-name", "", "valid-password-12"); !errors.Is(err, ErrAuthNotConfigured) {
+		t.Fatalf("missing registrar error = %v, want ErrAuthNotConfigured", err)
+	}
+}
+
+func TestRegisterCreatesPlayableAccount(t *testing.T) {
+	dsn := os.Getenv("POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("POSTGRES_TEST_DSN is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	loginName := "reg-" + uuid.NewString()[:8]
+	password := "register-test-password"
+	repository := identity.NewPostgresRepository(pool)
+	service := NewService(repository, testSecret, 15*time.Minute).WithRegistrar(repository)
+
+	result, err := service.Register(ctx, loginName, "", password)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	userID := result.UserID
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM wallets WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM auth_identities WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM roles WHERE code = 'player' AND id NOT IN (SELECT role_id FROM user_roles)`)
+	})
+	if result.AccessToken == "" || result.UserID == "" || len(result.Roles) != 1 || result.Roles[0] != "player" {
+		t.Fatalf("register result = %+v", result)
+	}
+	claims, err := identity.VerifyAccessToken([]byte(testSecret), result.AccessToken, time.Now().UTC())
+	if err != nil || claims.Subject != userID {
+		t.Fatalf("registered token claims = %+v, err = %v", claims, err)
+	}
+
+	// 注册后立即可登录。
+	login, err := service.Login(ctx, loginName, password)
+	if err != nil {
+		t.Fatalf("login after register: %v", err)
+	}
+	if login.UserID != userID {
+		t.Fatalf("login user = %s, want %s", login.UserID, userID)
+	}
+
+	// 默认 USDT 零余额钱包已创建。
+	var currency string
+	var availableMinor int64
+	err = pool.QueryRow(ctx, `SELECT currency, available_minor FROM wallets WHERE user_id = $1`, userID).Scan(&currency, &availableMinor)
+	if err != nil {
+		t.Fatalf("read wallet: %v", err)
+	}
+	if currency != DefaultWalletCurrency || availableMinor != 0 {
+		t.Fatalf("wallet = %s/%d, want %s/0", currency, availableMinor, DefaultWalletCurrency)
+	}
+
+	// display_name 缺省回退为登录名。
+	var displayName string
+	if err := pool.QueryRow(ctx, `SELECT display_name FROM users WHERE id = $1`, userID).Scan(&displayName); err != nil {
+		t.Fatalf("read display name: %v", err)
+	}
+	if displayName != loginName {
+		t.Fatalf("display name = %q, want %q", displayName, loginName)
+	}
+
+	// 重复注册同一登录名必须冲突。
+	if _, err := service.Register(ctx, loginName, "", password); !errors.Is(err, identity.ErrLoginNameTaken) {
+		t.Fatalf("duplicate register error = %v, want ErrLoginNameTaken", err)
+	}
+}
+
 func TestLoginIssuesTokenWithRoles(t *testing.T) {
 	dsn := os.Getenv("POSTGRES_TEST_DSN")
 	if dsn == "" {
