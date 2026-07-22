@@ -39,12 +39,25 @@ type PlacedBet struct {
 	PlacedAt        time.Time       `json:"placed_at"`
 }
 
+// BetTaskHook 在积分投注成交后累计任务进度（如投注达标送体力），可为 nil。
+// 在投注事务内调用，返回错误则整笔投注回滚。
+type BetTaskHook interface {
+	OnPointsBetPlaced(ctx context.Context, tx pgx.Tx, userID string, stakeMinor int64) error
+}
+
 type Service struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	taskHook BetTaskHook
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
+}
+
+// WithTaskHook 装配投注任务钩子；未装配时跳过任务进度累计。
+func (service *Service) WithTaskHook(hook BetTaskHook) *Service {
+	service.taskHook = hook
+	return service
 }
 
 func (service *Service) Find(ctx context.Context, betID string) (PlacedBet, error) {
@@ -178,6 +191,13 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		VALUES ($1, 'bet', $2, $3, $4)`, uuid.NewString(), bet.BetID, events.BetPlaced, payload)
 	if err != nil {
 		return PlacedBet{}, err
+	}
+
+	// 积分投注触发任务进度累计（如投注达标送体力）；重复请求已在上方返回，不会走到这里。
+	if service.taskHook != nil && request.Currency == "POINTS" {
+		if err := service.taskHook.OnPointsBetPlaced(ctx, tx, request.AccountID, request.StakeMinor); err != nil {
+			return PlacedBet{}, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

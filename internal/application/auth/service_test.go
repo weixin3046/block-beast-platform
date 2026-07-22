@@ -23,7 +23,7 @@ func TestLoginRejectsUnconfiguredService(t *testing.T) {
 
 type stubRegistrar struct{}
 
-func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ string) (string, error) {
+func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ []string) (string, error) {
 	return "", nil
 }
 
@@ -92,15 +92,25 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 		t.Fatalf("login user = %s, want %s", login.UserID, userID)
 	}
 
-	// 默认 USDT 零余额钱包已创建。
-	var currency string
-	var availableMinor int64
-	err = pool.QueryRow(ctx, `SELECT currency, available_minor FROM wallets WHERE user_id = $1`, userID).Scan(&currency, &availableMinor)
+	// 默认三种货币零余额钱包已创建。
+	rows, err := pool.Query(ctx, `SELECT currency, available_minor FROM wallets WHERE user_id = $1 ORDER BY currency`, userID)
 	if err != nil {
-		t.Fatalf("read wallet: %v", err)
+		t.Fatalf("read wallets: %v", err)
 	}
-	if currency != DefaultWalletCurrency || availableMinor != 0 {
-		t.Fatalf("wallet = %s/%d, want %s/0", currency, availableMinor, DefaultWalletCurrency)
+	defer rows.Close()
+	wallets := make(map[string]int64)
+	for rows.Next() {
+		var currency string
+		var availableMinor int64
+		if err := rows.Scan(&currency, &availableMinor); err != nil {
+			t.Fatalf("scan wallet: %v", err)
+		}
+		wallets[currency] = availableMinor
+	}
+	for _, currency := range DefaultWalletCurrencies {
+		if balance, ok := wallets[currency]; !ok || balance != 0 {
+			t.Fatalf("wallet %s = %d, want 0", currency, balance)
+		}
 	}
 
 	// display_name 缺省回退为登录名。

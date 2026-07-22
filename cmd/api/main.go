@@ -14,7 +14,9 @@ import (
 	"github.com/block-beast/platform/internal/application/auth"       // 登录认证应用服务
 	"github.com/block-beast/platform/internal/application/betting"    // 下注应用服务
 	"github.com/block-beast/platform/internal/application/chain"      // 链上充提应用服务
+	"github.com/block-beast/platform/internal/application/credit"     // 积分/体力充值应用服务
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
+	"github.com/block-beast/platform/internal/application/task"       // 任务/签到应用服务
 	"github.com/block-beast/platform/internal/config"                 // 配置加载
 	"github.com/block-beast/platform/internal/domain/game"            // 游戏轮次仓储
 	"github.com/block-beast/platform/internal/domain/identity"        // 身份认证仓储
@@ -32,7 +34,9 @@ func main() {
 		return
 	}
 	defer pool.Close()
-	bettingService := betting.NewService(pool)
+	creditService := credit.NewService(pool)
+	taskService := task.NewService(pool, creditService)
+	bettingService := betting.NewService(pool).WithTaskHook(taskService)
 	cancellationService := settlement.NewService(pool)
 	options := []httpapi.Option{httpapi.WithAudit(audit.NewService(pool))}
 	if cfg.AuthTokenSecret == "" {
@@ -44,6 +48,7 @@ func main() {
 	}
 	chainService := chain.NewService(pool)
 	options = append(options, httpapi.WithWithdrawals(chainService))
+	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
 	if cfg.ChainWebhookSecret == "" {
 		logger.Warn("CHAIN_WEBHOOK_SECRET is not set; chain deposit webhook is disabled")
 	} else {

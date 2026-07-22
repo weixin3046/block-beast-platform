@@ -33,6 +33,8 @@ type Server struct {
 	auditor      AuditRecorder
 	chainWebhook *chainWebhookConfig
 	withdrawals  WithdrawalService
+	credits      CreditService
+	tasks        TaskService
 }
 
 type LoginService interface {
@@ -115,6 +117,12 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/webhooks/chain/deposits", server.chainDepositWebhook)
 	mux.HandleFunc("POST /v1/withdrawals", server.protect(server.requestWithdrawal))
 	mux.HandleFunc("GET /v1/withdrawals/{withdrawalID}", server.protect(server.withdrawal))
+	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/stamina/consume", server.protect(server.consumeStamina))
+	mux.HandleFunc("POST /v1/tasks/checkin", server.protect(server.checkin))
+	mux.HandleFunc("GET /v1/wallets/{accountID}/all", server.protect(server.allBalances))
+	mux.HandleFunc("GET /v1/points/{accountID}/ledger", server.protect(server.pointsLedger))
+	mux.HandleFunc("GET /v1/stamina/{accountID}/ledger", server.protect(server.staminaLedger))
 	return server.withRequestLog(mux)
 }
 

@@ -16,8 +16,8 @@ var ErrAuthNotConfigured = errors.New("authentication is not configured")
 var ErrInvalidLoginName = errors.New("login name must be 3-32 chars of letters, digits, '-' or '_'")
 var ErrInvalidPassword = errors.New("password must contain at least 12 characters")
 
-// DefaultWalletCurrency 是注册时创建的零余额钱包货币。
-const DefaultWalletCurrency = "USDT"
+// DefaultWalletCurrencies 是注册时创建的零余额钱包货币列表。
+var DefaultWalletCurrencies = []string{"USDT", "POINTS", "STAMINA"}
 
 // loginNamePattern 约束登录名便于在 URL、日志与聊天中安全使用。
 var loginNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)
@@ -28,7 +28,7 @@ type CredentialsReader interface {
 }
 
 type UserRegistrar interface {
-	RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currency string) (string, error)
+	RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currencies []string) (string, error)
 }
 
 type Service struct {
@@ -111,7 +111,7 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 	if displayName == "" {
 		displayName = loginName
 	}
-	userID, err := service.registrar.RegisterPasswordUser(ctx, loginName, displayName, hash, identity.RolePlayer, DefaultWalletCurrency)
+	userID, err := service.registrar.RegisterPasswordUser(ctx, loginName, displayName, hash, identity.RolePlayer, DefaultWalletCurrencies)
 	if err != nil {
 		return LoginResult{}, err
 	}

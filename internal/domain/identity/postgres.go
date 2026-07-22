@@ -46,9 +46,9 @@ func (repository *PostgresRepository) FindPasswordCredentials(ctx context.Contex
 	return credentials, nil
 }
 
-// RegisterPasswordUser 在单个事务中创建用户、密码凭证、指定角色和默认货币
-// 的零余额钱包。登录名冲突时返回 ErrLoginNameTaken。
-func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currency string) (string, error) {
+// RegisterPasswordUser 在单个事务中创建用户、密码凭证、指定角色和一组货币的
+// 零余额钱包。登录名冲突时返回 ErrLoginNameTaken。
+func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currencies []string) (string, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -86,8 +86,10 @@ func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, 
 	if _, err := tx.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`, userID, roleID); err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO wallets (id, user_id, currency) VALUES ($1, $2, $3)`, uuid.NewString(), userID, currency); err != nil {
-		return "", err
+	for _, currency := range currencies {
+		if _, err := tx.Exec(ctx, `INSERT INTO wallets (id, user_id, currency) VALUES ($1, $2, $3)`, uuid.NewString(), userID, currency); err != nil {
+			return "", err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
