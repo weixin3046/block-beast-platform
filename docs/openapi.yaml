@@ -25,6 +25,8 @@ tags:
     description: 投注创建和查询。
   - name: Wallets
     description: 钱包余额查询。
+  - name: Chain
+    description: 链上充值回调与提现。
 paths:
   /healthz:
     get:
@@ -307,6 +309,95 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/webhooks/chain/deposits:
+    post:
+      tags: [Chain]
+      operationId: chainDepositWebhook
+      summary: 链上充值回调（服务商调用）
+      description: |
+        服务商推送已确认充值。请求必须携带 HMAC 签名头：`X-Chain-Timestamp`（毫秒）、`X-Chain-Nonce`、`X-Chain-Signature`。
+        签名内容为 `方法\n路径\n时间戳\n随机数\n正文SHA256(十六进制)` 的 HMAC-SHA256（十六进制），密钥由平台分配；时间戳允许偏移默认 5 分钟。
+        充值按服务商事件 ID 与交易哈希幂等，重复回调不会重复入账；非平台地址返回 `{"status":"ignored"}`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepositWebhookRequest'
+      responses:
+        '200':
+          description: 已处理（credited=true 表示本次入账；false 表示重复回调；ignored 表示非平台地址）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/withdrawals:
+    post:
+      tags: [Chain]
+      operationId: requestWithdrawal
+      summary: 创建提现申请
+      description: 从可用余额扣减并冻结申请金额，创建 requested 状态的提现申请。同一 client_request_id 重复请求返回既有申请，不重复冻结。身份取自访问令牌。申请会写入审计日志。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawalRequest'
+      responses:
+        '201':
+          description: 提现申请已创建（或幂等键对应的既有申请）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Withdrawal'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/withdrawals/{withdrawalID}:
+    get:
+      tags: [Chain]
+      operationId: getWithdrawal
+      summary: 查询提现申请
+      description: 仅本人或 operator/admin 可查看。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: withdrawalID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 提现申请详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Withdrawal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
 components:
   securitySchemes:
     bearerAuth:
@@ -380,6 +471,82 @@ components:
         status:
           type: string
           example: ok
+    DepositWebhookRequest:
+      type: object
+      required: [provider_event_id, tx_hash, chain_code, token_code, address, amount_minor]
+      properties:
+        provider_event_id:
+          type: string
+          description: 服务商事件唯一 ID，用于幂等。
+        tx_hash:
+          type: string
+        chain_code:
+          type: string
+          example: TRON
+        token_code:
+          type: string
+          example: USDT
+        address:
+          type: string
+          description: 平台分配给用户的充值地址。
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+    DepositResult:
+      type: object
+      required: [deposit_id, status, credited]
+      properties:
+        deposit_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [credited]
+        credited:
+          type: boolean
+          description: false 表示重复回调，未重复入账。
+    WithdrawalRequest:
+      type: object
+      additionalProperties: false
+      required: [client_request_id, destination_address, currency, amount_minor]
+      properties:
+        client_request_id:
+          type: string
+          minLength: 1
+          description: 客户端生成的幂等键；同一用户下必须唯一。
+        destination_address:
+          type: string
+          minLength: 1
+        currency:
+          type: string
+          example: USDT
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+    Withdrawal:
+      type: object
+      required: [withdrawal_id, client_request_id, destination_address, currency, amount_minor, status, created_at]
+      properties:
+        withdrawal_id:
+          type: string
+          format: uuid
+        client_request_id:
+          type: string
+        destination_address:
+          type: string
+        currency:
+          type: string
+        amount_minor:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [requested, approved, broadcasted, confirmed, failed, cancelled]
+        created_at:
+          type: string
+          format: date-time
     RegisterRequest:
       type: object
       additionalProperties: false

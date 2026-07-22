@@ -13,6 +13,7 @@ import (
 	"github.com/block-beast/platform/internal/application/audit"      // 审计应用服务
 	"github.com/block-beast/platform/internal/application/auth"       // 登录认证应用服务
 	"github.com/block-beast/platform/internal/application/betting"    // 下注应用服务
+	"github.com/block-beast/platform/internal/application/chain"      // 链上充提应用服务
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/config"                 // 配置加载
 	"github.com/block-beast/platform/internal/domain/game"            // 游戏轮次仓储
@@ -40,6 +41,13 @@ func main() {
 		identityRepository := identity.NewPostgresRepository(pool)
 		authService := auth.NewService(identityRepository, cfg.AuthTokenSecret, cfg.AccessTokenTTL).WithRegistrar(identityRepository)
 		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService))
+	}
+	chainService := chain.NewService(pool)
+	options = append(options, httpapi.WithWithdrawals(chainService))
+	if cfg.ChainWebhookSecret == "" {
+		logger.Warn("CHAIN_WEBHOOK_SECRET is not set; chain deposit webhook is disabled")
+	} else {
+		options = append(options, httpapi.WithChainDeposits(cfg.ChainWebhookSecret, cfg.ChainWebhookSkew, chainService))
 	}
 	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService, cancellationService, options...).Handler()} // 创建HTTP服务器实例
 

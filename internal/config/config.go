@@ -15,6 +15,8 @@ type Config struct {
 	NATSURL            string
 	AuthTokenSecret    string
 	AccessTokenTTL     time.Duration
+	ChainWebhookSecret string
+	ChainWebhookSkew   time.Duration
 }
 
 func Load() Config {
@@ -28,6 +30,8 @@ func Load() Config {
 		NATSURL:            os.Getenv("NATS_URL"),
 		AuthTokenSecret:    os.Getenv("AUTH_TOKEN_SECRET"),
 		AccessTokenTTL:     durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
+		ChainWebhookSecret: os.Getenv("CHAIN_WEBHOOK_SECRET"),
+		ChainWebhookSkew:   durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
 	}
 }
 

@@ -12,14 +12,15 @@ type Event struct {
 }
 
 const (
-	BetPlaced       = "game.bet.placed"
-	RoundClosed     = "game.round.closed"
-	RoundSettling   = "game.round.settling"
-	RoundSettled    = "game.round.settled"
-	RoundCancelled  = "game.round.cancelled"
-	LedgerCommitted = "wallet.ledger.committed"
-	DepositCredited = "chain.deposit.credited"
-	WithdrawalSent  = "chain.withdrawal.sent"
+	BetPlaced           = "game.bet.placed"
+	RoundClosed         = "game.round.closed"
+	RoundSettling       = "game.round.settling"
+	RoundSettled        = "game.round.settled"
+	RoundCancelled      = "game.round.cancelled"
+	LedgerCommitted     = "wallet.ledger.committed"
+	DepositCredited     = "chain.deposit.credited"
+	WithdrawalSent      = "chain.withdrawal.sent"
+	WithdrawalRequested = "wallet.withdrawal.requested"
 )
 
 // Publisher is backed by a transactional outbox before events reach NATS JetStream.
