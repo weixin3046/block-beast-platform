@@ -7,3 +7,4 @@ coverage.out
 compose.override.yaml
 *.log
 smoke_user.txt
+.codebuddy/
