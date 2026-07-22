@@ -27,6 +27,12 @@ tags:
     description: 钱包余额查询。
   - name: Chain
     description: 链上充值回调与提现。
+  - name: Admin
+    description: 管理后台操作（积分/USDT/体力充值）。
+  - name: Stamina
+    description: 体力消耗与流水。
+  - name: Tasks
+    description: 每日任务（签到）。
 paths:
   /healthz:
     get:
@@ -71,7 +77,7 @@ paths:
       tags: [Auth]
       operationId: register
       summary: 注册玩家账号并签发访问令牌
-      description: 在单个事务中创建用户、密码凭证、player 角色和默认 USDT 零余额钱包，注册完成即返回访问令牌。注册会写入审计日志。
+      description: 在单个事务中创建用户、密码凭证、player 角色和 USDT/POINTS/STAMINA 三种零余额钱包，注册完成即返回访问令牌。注册会写入审计日志。
       requestBody:
         required: true
         content:
@@ -398,6 +404,188 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/admin/credits:
+    post:
+      tags: [Admin]
+      operationId: adminCredit
+      summary: 管理员手动充值（积分/USDT/体力）
+      description: |
+        为指定用户充值积分、USDT 或体力。按 request_id 幂等，重复请求返回首次结果不重复入账。
+        积分流水写入 points_ledger，体力流水写入 stamina_ledger，USDT 流水写入 ledger_entries；
+        用户尚无该币种钱包时随充值创建。仅限 operator/admin 角色，调用写入审计日志。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreditRequest'
+            example:
+              user_id: 4fb2b612-88cf-47cf-8312-cd76fa4d8869
+              currency: POINTS
+              amount_minor: 10000
+              remark: 活动补偿
+              request_id: admin-20260723-0001
+      responses:
+        '200':
+          description: 充值结果（credited=false 表示重复请求未重复入账）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/stamina/consume:
+    post:
+      tags: [Stamina]
+      operationId: consumeStamina
+      summary: 参加活动消耗体力
+      description: 按 (user_id, activity_id) 幂等扣减体力，重复请求不重复扣减。仅本人或 operator/admin 可调用。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumeStaminaRequest'
+            example:
+              user_id: 4fb2b612-88cf-47cf-8312-cd76fa4d8869
+              amount_minor: 10
+              activity_id: lucky-draw-20260723
+              remark: 参与抽奖活动
+      responses:
+        '200':
+          description: 消耗结果（consumed=false 表示重复请求未重复扣减）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/tasks/checkin:
+    post:
+      tags: [Tasks]
+      operationId: checkin
+      summary: 每日签到领取体力
+      description: 按用户与日期幂等，当日重复签到返回首次记录不重复发放。奖励体力值由服务端配置。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 签到结果（checked_in=false 表示今日已签到）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckinResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/wallets/{accountID}/all:
+    get:
+      tags: [Wallets]
+      operationId: getAllBalances
+      summary: 查询账号全部币种余额
+      description: 返回 USDT/POINTS/STAMINA 等所有钱包余额，仅本人或 operator/admin 可查。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountID'
+      responses:
+        '200':
+          description: 全部币种余额列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WalletBalance'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/points/{accountID}/ledger:
+    get:
+      tags: [Wallets]
+      operationId: listPointsLedger
+      summary: 查询积分流水
+      description: 按时间倒序返回积分变动流水（管理员上分、任务奖励等），仅本人或 operator/admin 可查。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 积分流水列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/stamina/{accountID}/ledger:
+    get:
+      tags: [Stamina]
+      operationId: listStaminaLedger
+      summary: 查询体力流水
+      description: 按时间倒序返回体力变动流水（管理员充值、签到奖励、投注任务奖励、活动消耗），仅本人或 operator/admin 可查。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 体力流水列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
 components:
   securitySchemes:
     bearerAuth:
@@ -426,6 +614,25 @@ components:
       schema:
         type: string
         format: uuid
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: 返回数量，默认 50，范围 1–100。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: 分页偏移，默认 0。
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
   responses:
     BadRequest:
       description: 请求参数或 JSON 请求体无效。
@@ -721,3 +928,138 @@ components:
         status:
           type: string
           enum: [cancelled]
+    AdminCreditRequest:
+      type: object
+      additionalProperties: false
+      required: [user_id, currency, amount_minor, request_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: 目标用户 ID。
+        currency:
+          type: string
+          enum: [POINTS, USDT, STAMINA]
+          description: 充值币种。
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+        remark:
+          type: string
+          description: 备注，写入流水。
+        request_id:
+          type: string
+          minLength: 1
+          description: 幂等键；同一 request_id 不重复入账。
+    CreditResult:
+      type: object
+      required: [user_id, currency, amount_minor, balance_after_minor, credited, occurred_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        amount_minor:
+          type: integer
+          format: int64
+        balance_after_minor:
+          type: integer
+          format: int64
+        credited:
+          type: boolean
+          description: false 表示重复请求，未重复入账。
+        occurred_at:
+          type: string
+          format: date-time
+    ConsumeStaminaRequest:
+      type: object
+      additionalProperties: false
+      required: [user_id, amount_minor, activity_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+        activity_id:
+          type: string
+          minLength: 1
+          description: 活动标识；同一用户同一活动不重复扣减。
+        remark:
+          type: string
+    ConsumeResult:
+      type: object
+      required: [user_id, amount_minor, balance_after_minor, consumed, occurred_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        amount_minor:
+          type: integer
+          format: int64
+        balance_after_minor:
+          type: integer
+          format: int64
+        consumed:
+          type: boolean
+          description: false 表示重复请求，未重复扣减。
+        occurred_at:
+          type: string
+          format: date-time
+    CheckinResult:
+      type: object
+      required: [user_id, checkin_date, reward_minor, balance_after_minor, checked_in, occurred_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        checkin_date:
+          type: string
+          format: date
+        reward_minor:
+          type: integer
+          format: int64
+          description: 本次签到发放的体力值。
+        balance_after_minor:
+          type: integer
+          format: int64
+        checked_in:
+          type: boolean
+          description: false 表示今日已签到。
+        occurred_at:
+          type: string
+          format: date-time
+    LedgerEntry:
+      type: object
+      required: [id, user_id, business_type, business_id, amount_minor, balance_after_minor, remark, occurred_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        business_type:
+          type: string
+          description: 业务类型，如 admin_credit / checkin_reward / bet_task_reward / activity_consume。
+        business_id:
+          type: string
+        amount_minor:
+          type: integer
+          format: int64
+          description: 正数为入账，负数为出账。
+        balance_after_minor:
+          type: integer
+          format: int64
+        remark:
+          type: string
+        operator_id:
+          type: string
+          description: 操作人 ID（管理员操作时存在）。
+        occurred_at:
+          type: string
+          format: date-time
