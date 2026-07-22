@@ -1,5 +1,9 @@
 .env
+.env.local
 .idea/
 .vscode/
 bin/
 coverage.out
+compose.override.yaml
+*.log
+smoke_user.txt
