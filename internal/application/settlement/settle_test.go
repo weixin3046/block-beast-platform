@@ -1,25 +1,25 @@
 package settlement
 
 import (
-	"encoding/json"
 	"testing"
 )
 
-func TestSelectionWinsWhenAnOutcomeValueIsSelected(t *testing.T) {
-	selection := json.RawMessage(`{"color":"red","size":"large"}`)
-	if !selectionWins(selection, map[string]struct{}{"red": {}}) {
-		t.Fatal("selection should win when its color is in the outcome")
+func TestWithinPoolRejectsValuesOutsideThePool(t *testing.T) {
+	pool := []string{"red", "black"}
+	if !withinPool([]string{"red"}, pool) {
+		t.Fatal("outcome inside the pool should be accepted")
 	}
-	if selectionWins(selection, map[string]struct{}{"blue": {}}) {
-		t.Fatal("selection should lose when no selected value is in the outcome")
+	if withinPool([]string{"red", "blue"}, pool) {
+		t.Fatal("outcome with values outside the pool must be rejected")
 	}
+	// 空 outcome 由 SettleRound 的 ErrInvalidOutcome 前置校验拦截，withinPool 不做重复检查。
 }
 
 func TestSettlementInputValidation(t *testing.T) {
 	if !containsEmpty([]string{"red", ""}) {
 		t.Fatal("empty outcome should be rejected")
 	}
-	if !sameStrings([]string{"red", "blue"}, []string{"red", "blue"}) {
+	if sameStrings([]string{"red", "blue"}, []string{"red", "blue"}) != true {
 		t.Fatal("identical outcomes should match")
 	}
 	if sameStrings([]string{"red"}, []string{"blue"}) {

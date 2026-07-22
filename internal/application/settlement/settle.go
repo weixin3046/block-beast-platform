@@ -14,7 +14,8 @@ import (
 )
 
 var ErrInvalidOutcome = errors.New("outcome must contain at least one value")
-var ErrInvalidPayoutMultiplier = errors.New("payout multiplier must be positive")
+var ErrOutcomeOutsidePool = errors.New("outcome contains values outside the game rules pool")
+var ErrPayoutOverflow = errors.New("payout would overflow the wallet balance")
 var ErrSettlementOutcomeMismatch = errors.New("settlement outcome does not match the finalized round")
 
 // SettlementResult summarizes a completed (or idempotently repeated) settlement.
@@ -29,16 +30,18 @@ type SettlementResult struct {
 
 // SettleRound atomically marks all accepted bets as won or lost, credits winning
 // wallets, writes ledger entries, finalizes the round, and records an outbox event.
-// A selection wins when one of its JSON string values is present in outcome. This
-// intentionally supports simple selections such as {"color":"red"} while game
-// specific settlement code can still store richer selection objects.
-func (service *Service) SettleRound(ctx context.Context, roundID string, outcome []string, payoutMultiplier int64) (SettlementResult, error) {
+// 赔率与中奖判定由玩法规则 game.Rules 决定；开奖结果必须全部落在规则的结果池内。
+func (service *Service) SettleRound(ctx context.Context, roundID string, outcome []string, rules game.Rules) (SettlementResult, error) {
 	if len(outcome) == 0 || containsEmpty(outcome) {
 		return SettlementResult{}, ErrInvalidOutcome
 	}
-	if payoutMultiplier <= 0 {
-		return SettlementResult{}, ErrInvalidPayoutMultiplier
+	if err := rules.Validate(); err != nil {
+		return SettlementResult{}, err
 	}
+	if !withinPool(outcome, rules.Outcomes) {
+		return SettlementResult{}, ErrOutcomeOutsidePool
+	}
+	payoutMultiplier := rules.PayoutMultiplier
 
 	tx, err := service.pool.Begin(ctx)
 	if err != nil {
@@ -103,13 +106,9 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	}
 	rows.Close()
 
-	winningValues := make(map[string]struct{}, len(outcome))
-	for _, value := range outcome {
-		winningValues[value] = struct{}{}
-	}
 	result := SettlementResult{RoundID: roundID, Outcome: append([]string(nil), outcome...), SettledAt: time.Now().UTC()}
 	for _, bet := range bets {
-		won := selectionWins(bet.selection, winningValues)
+		won := rules.SelectionWins(bet.selection, outcome)
 		if !won {
 			if _, err := tx.Exec(ctx, `UPDATE bets SET status = 'lost', settled_at = $2 WHERE id = $1`, bet.betID, result.SettledAt); err != nil {
 				return SettlementResult{}, err
@@ -118,7 +117,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			continue
 		}
 		if bet.stake > math.MaxInt64/payoutMultiplier {
-			return SettlementResult{}, ErrInvalidPayoutMultiplier
+			return SettlementResult{}, ErrPayoutOverflow
 		}
 		payout := bet.stake * payoutMultiplier
 		var availableMinor int64
@@ -126,7 +125,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			return SettlementResult{}, err
 		}
 		if availableMinor > math.MaxInt64-payout {
-			return SettlementResult{}, ErrInvalidPayoutMultiplier
+			return SettlementResult{}, ErrPayoutOverflow
 		}
 		availableMinor += payout
 		if _, err := tx.Exec(ctx, `UPDATE wallets SET available_minor = $2, version = version + 1, updated_at = $3 WHERE id = $1`, bet.walletID, availableMinor, result.SettledAt); err != nil {
@@ -205,32 +204,16 @@ func sameStrings(left, right []string) bool {
 	return true
 }
 
-func selectionWins(selection json.RawMessage, winningValues map[string]struct{}) bool {
-	var value any
-	if json.Unmarshal(selection, &value) != nil {
-		return false
+// withinPool 校验开奖结果的每个值都属于规则定义的结果池。
+func withinPool(outcome []string, pool []string) bool {
+	allowed := make(map[string]struct{}, len(pool))
+	for _, value := range pool {
+		allowed[value] = struct{}{}
 	}
-	values := make([]string, 0)
-	collectStrings(value, &values)
-	for _, value := range values {
-		if _, ok := winningValues[value]; ok {
-			return true
+	for _, value := range outcome {
+		if _, ok := allowed[value]; !ok {
+			return false
 		}
 	}
-	return false
-}
-
-func collectStrings(value any, values *[]string) {
-	switch typed := value.(type) {
-	case string:
-		*values = append(*values, typed)
-	case []any:
-		for _, item := range typed {
-			collectStrings(item, values)
-		}
-	case map[string]any:
-		for _, item := range typed {
-			collectStrings(item, values)
-		}
-	}
+	return true
 }
