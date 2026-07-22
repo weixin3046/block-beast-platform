@@ -21,6 +21,12 @@ type Rules struct {
 	MatchField string `json:"match_field,omitempty"`
 	// ResultCount 是开奖时从结果池中选取的结果个数，默认为 1。
 	ResultCount int `json:"result_count,omitempty"`
+	// Source 标识外部数据源，如 "tron_hash"、"okx_kline"；为空时使用本地哈希回退。
+	Source string `json:"source,omitempty"`
+	// Extras 存储数据源参数，如 {"base_block_height":N,"block_interval":5} 或 {"symbol":"BTC-USDT"}。
+	Extras json.RawMessage `json:"extras,omitempty"`
+	// DodgeMode 为 true 时启用躲避玩法判定：选中值不在 outcome 中即赢。
+	DodgeMode bool `json:"dodge_mode,omitempty"`
 }
 
 // ParseRules 解析并校验 game_types.rules 中的玩法规则。
@@ -69,6 +75,7 @@ func (rules Rules) DrawCount() int {
 
 // SelectionWins 判定一份投注选择是否命中开奖结果。
 // 设置 MatchField 时仅比较该字段的值，否则比较 selection 中的所有字符串值。
+// DodgeMode 为 true 时判定反转：selection 选中值不在 outcome 中即赢（躲避玩法）。
 func (rules Rules) SelectionWins(selection json.RawMessage, outcome []string) bool {
 	winning := make(map[string]struct{}, len(outcome))
 	for _, value := range outcome {
@@ -83,6 +90,15 @@ func (rules Rules) SelectionWins(selection json.RawMessage, outcome []string) bo
 		collectFieldStrings(value, strings.Split(rules.MatchField, "."), &values)
 	} else {
 		collectAllStrings(value, &values)
+	}
+	if rules.DodgeMode {
+		// 躲避玩法：选中值对应的 dodge_X 不在 outcome 中即赢。
+		for _, value := range values {
+			if _, ok := winning["dodge_"+value]; !ok {
+				return true
+			}
+		}
+		return false
 	}
 	for _, value := range values {
 		if _, ok := winning[value]; ok {

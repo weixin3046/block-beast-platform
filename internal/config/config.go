@@ -17,6 +17,8 @@ type Config struct {
 	AccessTokenTTL     time.Duration
 	ChainWebhookSecret string
 	ChainWebhookSkew   time.Duration
+	TronRPCURL         string
+	OkxRESTURL         string
 }
 
 func Load() Config {
@@ -32,6 +34,8 @@ func Load() Config {
 		AccessTokenTTL:     durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 		ChainWebhookSecret: os.Getenv("CHAIN_WEBHOOK_SECRET"),
 		ChainWebhookSkew:   durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
+		TronRPCURL:         valueOrDefault("TRON_RPC_URL", "https://divine-greatest-valley.tron-mainnet.quiknode.pro/30d6aa253beb02c5229422c0a758e150311bd5cc/jsonrpc"),
+		OkxRESTURL:         valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
 	}
 }
 

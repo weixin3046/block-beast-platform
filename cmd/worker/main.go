@@ -51,7 +51,7 @@ func main() {
 	processor := outbox.NewProcessor(events.NewPostgresOutbox(pool), publisher)
 	roundRepository := game.NewPostgresRepository(pool)
 	settlementService := settlement.NewService(pool)
-	resultSource := settlement.NewHashResultSource()
+	resultSource := settlement.NewCompositeResultSource(cfg.TronRPCURL, cfg.OkxRESTURL)
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
 	defer ticker.Stop()
 	logger.Info("worker started", "poll_interval", cfg.WorkerPollInterval)
