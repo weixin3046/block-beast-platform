@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,6 +35,19 @@ func main() {
 		return
 	}
 	defer publisher.Close()
+	eventConsumer, err := natsjs.NewConsumer(cfg.NATSURL, natsjs.ConsumerConfig{Logger: logger})
+	if err != nil {
+		logger.Error("worker failed to start event consumer", "error", err)
+		return
+	}
+	defer eventConsumer.Close()
+	for _, subject := range []string{"game.>", "wallet.>", "chain.>"} {
+		durable := "worker-" + strings.ReplaceAll(strings.TrimSuffix(subject, ".>"), ".", "-")
+		if err := eventConsumer.Subscribe(subject, durable, logEvent(logger)); err != nil {
+			logger.Error("worker failed to subscribe", "subject", subject, "error", err)
+			return
+		}
+	}
 	processor := outbox.NewProcessor(events.NewPostgresOutbox(pool), publisher)
 	roundRepository := game.NewPostgresRepository(pool)
 	settlementService := settlement.NewService(pool)
@@ -44,16 +58,18 @@ func main() {
 	processDueRounds(ctx, logger, roundRepository)
 	settleDueRounds(ctx, logger, settlementService, resultSource)
 	processPending(logger, processor)
+	lastStats := natsjs.ConsumerStats{}
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("worker stopped")
+			logger.Info("worker stopped", "consumer_stats", eventConsumer.Stats())
 			return
 		case <-ticker.C:
 			processDueRounds(ctx, logger, roundRepository)
 			settleDueRounds(ctx, logger, settlementService, resultSource)
 			processPending(logger, processor)
+			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
 		}
 	}
 }
@@ -71,6 +87,27 @@ func processDueRounds(ctx context.Context, logger *slog.Logger, repository dueRo
 	if len(closed) > 0 {
 		logger.Info("due rounds closed", "count", len(closed))
 	}
+}
+
+// logEvent 是业务处理器落地前的占位处理器：确认事件已到达并记录日志。
+func logEvent(logger *slog.Logger) natsjs.Handler {
+	return func(_ context.Context, event events.Event) error {
+		logger.Info("event consumed", "event_id", event.ID, "event_type", event.Type)
+		return nil
+	}
+}
+
+// logConsumerStats 在计数器发生变化时输出监控快照，避免空转刷日志。
+func logConsumerStats(logger *slog.Logger, consumer *natsjs.Consumer, last natsjs.ConsumerStats) natsjs.ConsumerStats {
+	current := consumer.Stats()
+	if current != last {
+		logger.Info("consumer stats",
+			"received", current.Received,
+			"processed", current.Processed,
+			"retried", current.Retried,
+			"dead_lettered", current.DeadLettered)
+	}
+	return current
 }
 
 func settleDueRounds(ctx context.Context, logger *slog.Logger, service *settlement.Service, source settlement.ResultSource) {
