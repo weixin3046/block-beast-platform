@@ -13,6 +13,8 @@ type Config struct {
 	PostgresDSN        string
 	RedisAddress       string
 	NATSURL            string
+	AuthTokenSecret    string
+	AccessTokenTTL     time.Duration
 }
 
 func Load() Config {
@@ -24,6 +26,8 @@ func Load() Config {
 		PostgresDSN:        os.Getenv("POSTGRES_DSN"),
 		RedisAddress:       os.Getenv("REDIS_ADDRESS"),
 		NATSURL:            os.Getenv("NATS_URL"),
+		AuthTokenSecret:    os.Getenv("AUTH_TOKEN_SECRET"),
+		AccessTokenTTL:     durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 	}
 }
 

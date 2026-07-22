@@ -9,9 +9,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/audit"
+	"github.com/block-beast/platform/internal/application/auth"
 	"github.com/block-beast/platform/internal/application/betting"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/game"
+	"github.com/block-beast/platform/internal/domain/identity"
 	"github.com/block-beast/platform/internal/domain/wallet"
 )
 
@@ -24,6 +27,32 @@ type Server struct {
 	rounds    RoundReader
 	bets      BetReader
 	canceller RoundCanceller
+	auth      *Authenticator
+	logins    LoginService
+	auditor   AuditRecorder
+}
+
+type LoginService interface {
+	Login(ctx context.Context, loginName string, password string) (auth.LoginResult, error)
+}
+
+type AuditRecorder interface {
+	Record(ctx context.Context, entry audit.Entry) error
+}
+
+// Option 按需装配服务器的可选能力（鉴权、登录、审计）。
+type Option func(*Server)
+
+func WithAuth(authenticator *Authenticator) Option {
+	return func(server *Server) { server.auth = authenticator }
+}
+
+func WithLogin(logins LoginService) Option {
+	return func(server *Server) { server.logins = logins }
+}
+
+func WithAudit(auditor AuditRecorder) Option {
+	return func(server *Server) { server.auditor = auditor }
 }
 
 type BetPlacer interface {
@@ -51,8 +80,12 @@ type RoundCanceller interface {
 	CancelRound(ctx context.Context, roundID string) (int, error)
 }
 
-func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader, bets BetReader, canceller RoundCanceller) *Server {
-	return &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets, rounds: rounds, bets: bets, canceller: canceller}
+func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness ReadinessChecker, wallets WalletReader, rounds RoundReader, bets BetReader, canceller RoundCanceller, options ...Option) *Server {
+	server := &Server{config: cfg, logger: logger, betPlacer: betPlacer, readiness: readiness, wallets: wallets, rounds: rounds, bets: bets, canceller: canceller}
+	for _, option := range options {
+		option(server)
+	}
+	return server
 }
 
 func (server *Server) Handler() http.Handler {
@@ -60,13 +93,75 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
-	mux.HandleFunc("POST /v1/bets", server.placeBet)
-	mux.HandleFunc("GET /v1/bets/{betID}", server.bet)
-	mux.HandleFunc("GET /v1/wallets/{accountID}", server.balance)
-	mux.HandleFunc("GET /v1/rounds", server.openRounds)
-	mux.HandleFunc("GET /v1/rounds/{roundID}", server.round)
-	mux.HandleFunc("POST /v1/rounds/{roundID}/cancel", server.cancelRound)
+	mux.HandleFunc("POST /v1/auth/login", server.login)
+	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
+	mux.HandleFunc("GET /v1/bets/{betID}", server.protect(server.bet))
+	mux.HandleFunc("GET /v1/wallets/{accountID}", server.protect(server.balance))
+	mux.HandleFunc("GET /v1/rounds", server.protect(server.openRounds))
+	mux.HandleFunc("GET /v1/rounds/{roundID}", server.protect(server.round))
+	mux.HandleFunc("POST /v1/rounds/{roundID}/cancel", server.protectRoles(server.cancelRound, identity.RoleAdmin, identity.RoleOperator))
 	return server.withRequestLog(mux)
+}
+
+// protect 在未配置鉴权时放行（保持本地开发兼容），否则要求有效令牌。
+func (server *Server) protect(handler http.HandlerFunc) http.HandlerFunc {
+	if server.auth == nil {
+		return handler
+	}
+	return server.auth.Authenticate(handler)
+}
+
+func (server *Server) protectRoles(handler http.HandlerFunc, roles ...string) http.HandlerFunc {
+	if server.auth == nil {
+		return handler
+	}
+	return server.auth.RequireRoles(handler, roles...)
+}
+
+// recordAudit 追加审计记录；审计失败不阻断请求，仅记录警告。
+func (server *Server) recordAudit(ctx context.Context, entry audit.Entry) {
+	if server.auditor == nil {
+		return
+	}
+	if err := server.auditor.Record(ctx, entry); err != nil {
+		server.logger.Warn("audit record failed", "action", entry.Action, "target_id", entry.TargetID, "error", err)
+	}
+}
+
+func (server *Server) login(writer http.ResponseWriter, request *http.Request) {
+	if server.logins == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "authentication is unavailable"})
+		return
+	}
+	var input struct {
+		LoginName string `json:"login_name"`
+		Password  string `json:"password"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || input.LoginName == "" || input.Password == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "login_name and password are required"})
+		return
+	}
+	result, err := server.logins.Login(request.Context(), input.LoginName, input.Password)
+	switch {
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		server.recordAudit(request.Context(), audit.Entry{Action: "auth.login", TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "invalid_credentials"}})
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		return
+	case errors.Is(err, auth.ErrAccountDisabled):
+		server.recordAudit(request.Context(), audit.Entry{Action: "auth.login", TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "account_disabled"}})
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	case errors.Is(err, auth.ErrAuthNotConfigured):
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to login"})
+		return
+	}
+	server.recordAudit(request.Context(), audit.Entry{ActorUserID: result.UserID, Action: "auth.login", TargetType: "user", TargetID: result.UserID, Payload: map[string]string{"outcome": "success"}})
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (server *Server) cancelRound(writer http.ResponseWriter, request *http.Request) {
@@ -88,6 +183,14 @@ func (server *Server) cancelRound(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to cancel round"})
 		return
 	}
+	claims, _ := ClaimsFromContext(request.Context())
+	server.recordAudit(request.Context(), audit.Entry{
+		ActorUserID: claims.Subject,
+		Action:      "round.cancel",
+		TargetType:  "round",
+		TargetID:    roundID,
+		Payload:     map[string]int{"refunded_bet_count": refundedBetCount},
+	})
 	writeJSON(writer, http.StatusOK, struct {
 		RoundID          string `json:"round_id"`
 		RefundedBetCount int    `json:"refunded_bet_count"`
@@ -107,6 +210,10 @@ func (server *Server) bet(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read bet"})
+		return
+	}
+	if !authorizeAccount(request, bet.AccountID) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "bet belongs to another account"})
 		return
 	}
 	writeJSON(writer, http.StatusOK, bet)
@@ -167,6 +274,10 @@ func (server *Server) balance(writer http.ResponseWriter, request *http.Request)
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account ID and currency are required"})
 		return
 	}
+	if !authorizeAccount(request, accountID) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "wallet belongs to another account"})
+		return
+	}
 	balance, err := server.wallets.Balance(request.Context(), accountID, currency)
 	if errors.Is(err, wallet.ErrWalletNotFound) {
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -193,6 +304,10 @@ func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request
 	}
 	if input.ClientRequestID == "" || input.RoundID == "" || input.AccountID == "" || input.Currency == "" {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "missing required bet fields"})
+		return
+	}
+	if !authorizeAccount(request, input.AccountID) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "cannot place bets for another account"})
 		return
 	}
 

@@ -5,7 +5,7 @@ info:
   description: |
     Block Beast 的 HTTP 接口。金额均以货币最小单位（minor unit）表示，例如 USDT 的 2500 表示由客户端与游戏规则共同约定的 2500 最小单位。
 
-    当前版本仅供本地开发：除健康检查和平台信息外的接口尚未接入身份认证，生产环境不得直接暴露。
+    除健康检查、平台信息和登录外的业务接口均需携带 `Authorization: Bearer <access_token>` 访问令牌；令牌通过 `POST /v1/auth/login` 获取，默认有效期 15 分钟。投注、钱包等账号级资源仅本人或具备 operator/admin 角色的账号可访问；轮次取消仅限 operator/admin。
   license:
     name: UNLICENSED
 security: []
@@ -17,6 +17,8 @@ tags:
     description: 存活与依赖就绪检查。
   - name: Platform
     description: 平台元信息。
+  - name: Auth
+    description: 登录与访问令牌。
   - name: Rounds
     description: 游戏轮次查询与操作。
   - name: Bets
@@ -62,11 +64,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Platform'
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: 密码登录并签发访问令牌
+      description: 校验登录名与密码，为激活账号签发携带角色的短期 JWT。登录成功与失败均会写入审计日志。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              login_name: player-001
+              password: correct-horse-battery
+      responses:
+        '200':
+          description: 登录成功，返回访问令牌。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /v1/rounds:
     get:
       tags: [Rounds]
       operationId: listOpenRounds
       summary: 查询指定游戏的开放轮次
+      security:
+        - bearerAuth: []
       parameters:
         - name: game_type
           in: query
@@ -94,6 +128,8 @@ paths:
                   $ref: '#/components/schemas/Round'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/Unavailable'
   /v1/rounds/{roundID}:
@@ -101,6 +137,8 @@ paths:
       tags: [Rounds]
       operationId: getRound
       summary: 查询单个轮次
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/RoundID'
       responses:
@@ -110,6 +148,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Round'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
   /v1/rounds/{roundID}/cancel:
@@ -117,7 +157,9 @@ paths:
       tags: [Rounds]
       operationId: cancelRound
       summary: 取消轮次并退款
-      description: 仅开放或已封盘轮次可以取消。已接受的投注会退款；重复取消不会重复退款。
+      description: 仅开放或已封盘轮次可以取消。已接受的投注会退款；重复取消不会重复退款。仅限 operator/admin 角色调用，调用会写入审计日志。
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/RoundID'
       responses:
@@ -127,6 +169,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Cancellation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -138,7 +184,9 @@ paths:
       tags: [Bets]
       operationId: placeBet
       summary: 创建幂等投注
-      description: 对同一 account_id 和 client_request_id 的重复请求会返回既有投注，不会再次扣款。
+      description: 对同一 account_id 和 client_request_id 的重复请求会返回既有投注，不会再次扣款。仅本人或 operator/admin 可为指定账号投注。
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -162,6 +210,10 @@ paths:
                 $ref: '#/components/schemas/Bet'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -173,6 +225,9 @@ paths:
       tags: [Bets]
       operationId: getBet
       summary: 查询投注记录
+      description: 仅本人或 operator/admin 可查看对应账号的投注。
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/BetID'
       responses:
@@ -182,6 +237,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Bet'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
@@ -191,6 +250,9 @@ paths:
       tags: [Wallets]
       operationId: getWalletBalance
       summary: 查询钱包余额
+      description: 仅本人或 operator/admin 可查看对应账号的钱包。
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/AccountID'
         - name: currency
@@ -208,11 +270,20 @@ paths:
                 $ref: '#/components/schemas/WalletBalance'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/Unavailable'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     RoundID:
       name: roundID
@@ -238,6 +309,18 @@ components:
   responses:
     BadRequest:
       description: 请求参数或 JSON 请求体无效。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: 缺少访问令牌，或令牌无效、已过期、凭证错误。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: 已认证但角色不足、资源属于其他账号，或账号未激活。
       content:
         application/json:
           schema:
@@ -268,6 +351,41 @@ components:
         status:
           type: string
           example: ok
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [login_name, password]
+      properties:
+        login_name:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+          format: password
+    LoginResult:
+      type: object
+      required: [access_token, token_type, expires_in, user_id, roles]
+      properties:
+        access_token:
+          type: string
+          description: HS256 签发的 JWT 访问令牌。
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          format: int64
+          description: 令牌有效期（秒）。
+          example: 900
+        user_id:
+          type: string
+          format: uuid
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [player, operator, admin]
     Error:
       type: object
       required: [error]

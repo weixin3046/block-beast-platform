@@ -10,10 +10,13 @@ import (
 	"syscall"   // 系统信号常量（SIGINT、SIGTERM）
 	"time"      // 时间、超时设置
 
+	"github.com/block-beast/platform/internal/application/audit"      // 审计应用服务
+	"github.com/block-beast/platform/internal/application/auth"       // 登录认证应用服务
 	"github.com/block-beast/platform/internal/application/betting"    // 下注应用服务
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/config"                 // 配置加载
 	"github.com/block-beast/platform/internal/domain/game"            // 游戏轮次仓储
+	"github.com/block-beast/platform/internal/domain/identity"        // 身份认证仓储
 	"github.com/block-beast/platform/internal/domain/wallet"          // 钱包仓储
 	"github.com/block-beast/platform/internal/platform/httpapi"       // API路由/业务处理器
 	"github.com/jackc/pgx/v5/pgxpool"                                 // PostgreSQL连接池
@@ -30,7 +33,14 @@ func main() {
 	defer pool.Close()
 	bettingService := betting.NewService(pool)
 	cancellationService := settlement.NewService(pool)
-	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService, cancellationService).Handler()} // 创建HTTP服务器实例
+	options := []httpapi.Option{httpapi.WithAudit(audit.NewService(pool))}
+	if cfg.AuthTokenSecret == "" {
+		logger.Warn("AUTH_TOKEN_SECRET is not set; business endpoints are unauthenticated")
+	} else {
+		loginService := auth.NewService(identity.NewPostgresRepository(pool), cfg.AuthTokenSecret, cfg.AccessTokenTTL)
+		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(loginService))
+	}
+	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService, cancellationService, options...).Handler()} // 创建HTTP服务器实例
 
 	go func() {
 		logger.Info("api started", "address", cfg.APIAddress, "environment", cfg.Environment)
