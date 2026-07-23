@@ -255,6 +255,95 @@ paths:
       responses:
         '200':
           description: 审计日志列表。
+  /v1/admin/game-types:
+    get:
+      tags: [Admin]
+      operationId: adminListGameTypes
+      summary: 查询全部游戏玩法与结算规则
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 游戏玩法列表。
+    post:
+      tags: [Admin]
+      operationId: createGameType
+      summary: 创建游戏玩法
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameTypeInput'
+      responses:
+        '201':
+          description: 创建成功。
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/admin/game-types/{gameTypeID}:
+    put:
+      tags: [Admin]
+      operationId: updateGameType
+      summary: 修改或启停游戏玩法
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: gameTypeID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameTypeInput'
+      responses:
+        '200':
+          description: 更新成功。
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/admin/rounds:
+    get:
+      tags: [Admin]
+      operationId: adminListRounds
+      summary: 查询运营轮次
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 轮次列表。
+    post:
+      tags: [Admin]
+      operationId: createRound
+      summary: 创建固定封盘时间的新轮次
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [game_type_id, bet_closes_at]
+              properties:
+                game_type_id:
+                  type: string
+                  format: uuid
+                bet_closes_at:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: 轮次创建成功。
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/rounds:
     get:
       tags: [Rounds]
@@ -1076,6 +1165,37 @@ components:
             created_at:
               type: string
               format: date-time
+    GameTypeInput:
+      type: object
+      additionalProperties: false
+      required: [code, name, enabled, rules]
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
+        name:
+          type: string
+        enabled:
+          type: boolean
+        rules:
+          type: object
+          required: [outcomes, payout_multiplier]
+          properties:
+            outcomes:
+              type: array
+              minItems: 1
+              items:
+                type: string
+            payout_multiplier:
+              type: integer
+              minimum: 1
+            match_field:
+              type: string
+            result_count:
+              type: integer
+              minimum: 1
+            source:
+              type: string
     Error:
       type: object
       required: [error]

@@ -31,6 +31,10 @@
 
 管理后台可用 `GET/POST /v1/admin/announcements` 和 `PUT /v1/admin/announcements/{id}` 管理公告。`operator` 与 `admin` 均可管理公告；不可变审计日志 `GET /v1/admin/audit-logs?action={action}&actor_user_id={id}` 仅 `admin` 可查看。
 
+游戏运营可通过 `GET/POST /v1/admin/game-types` 创建玩法规则，通过
+`PUT /v1/admin/game-types/{id}` 修改或启停玩法；`POST /v1/admin/rounds`
+创建固定封盘时间的新轮次，轮次序号由系统按玩法自动递增。
+
 ## TypeScript 示例
 
 ```ts

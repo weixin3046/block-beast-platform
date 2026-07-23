@@ -43,6 +43,7 @@ type Server struct {
 	agents           AgentService
 	userAdmin        UserAdminService
 	operations       OperationsService
+	gameAdmin        GameAdminService
 }
 
 type LoginService interface {
@@ -171,6 +172,11 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/announcements", server.protectRoles(server.createAnnouncement, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/announcements/{announcementID}", server.protectRoles(server.updateAnnouncement, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/audit-logs", server.protectRoles(server.auditLogs, identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/admin/game-types", server.protectRoles(server.adminGameTypes, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/game-types", server.protectRoles(server.createGameType, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/game-types/{gameTypeID}", server.protectRoles(server.updateGameType, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/rounds", server.protectRoles(server.adminRounds, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/rounds", server.protectRoles(server.createRound, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/point-withdrawals", server.protect(server.requestPointWithdrawal))
 	mux.HandleFunc("GET /v1/point-withdrawals", server.protect(server.pointWithdrawals))
 	mux.HandleFunc("POST /v1/admin/point-withdrawals/{withdrawalID}/review", server.protectRoles(server.reviewPointWithdrawal, identity.RoleAdmin, identity.RoleOperator))

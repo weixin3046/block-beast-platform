@@ -65,6 +65,9 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供�
 | `GET/POST /v1/admin/announcements` | 后台查询或创建公告。仅 operator/admin。 |
 | `PUT /v1/admin/announcements/{announcement_id}` | 后台更新公告内容、启用状态和展示时间。仅 operator/admin。 |
 | `GET /v1/admin/audit-logs` | 按操作或管理员筛选不可变审计日志。仅 admin。 |
+| `GET/POST /v1/admin/game-types` | 查询或创建游戏玩法与结算规则。仅 operator/admin。 |
+| `PUT /v1/admin/game-types/{game_type_id}` | 修改玩法规则或启停玩法。仅 operator/admin。 |
+| `GET/POST /v1/admin/rounds` | 查询轮次或创建固定封盘时间的新轮次。仅 operator/admin。 |
 | `GET /v1/rounds?game_type={code}&limit={1-100}` | 查询指定游戏类型的开放轮次。 |
 | `GET /v1/rounds/{round_id}` | 查询单个轮次。 |
 | `POST /v1/rounds/{round_id}/cancel` | 取消开放或已封盘轮次，并退款全部接受中的投注。仅 operator/admin。 |
