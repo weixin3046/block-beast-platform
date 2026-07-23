@@ -112,6 +112,10 @@ func (stub stubWithdrawalService) RejectWithdrawal(_ context.Context, _ string, 
 	return stub.findResult, nil
 }
 
+func (stub stubWithdrawalService) ListWithdrawals(_ context.Context, _ string, _ int) ([]chainapp.Withdrawal, error) {
+	return []chainapp.Withdrawal{stub.findResult}, nil
+}
+
 func TestWithdrawalEndpointsRequireAuthAndOwnership(t *testing.T) {
 	authenticator := NewAuthenticator(testSecret)
 	stub := stubWithdrawalService{

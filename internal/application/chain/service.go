@@ -346,6 +346,35 @@ func (service *Service) FindWithdrawal(ctx context.Context, withdrawalID string)
 	return withdrawal, nil
 }
 
+func (service *Service) ListWithdrawals(ctx context.Context, status string, limit int) ([]Withdrawal, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	query := `SELECT withdrawals.id,withdrawals.user_id,withdrawals.client_request_id,withdrawals.destination_address,wallets.currency,withdrawals.amount_minor,withdrawals.status,withdrawals.created_at FROM withdrawals JOIN wallets ON wallets.id=withdrawals.wallet_id`
+	args := []any{limit}
+	if status != "" {
+		query += ` WHERE withdrawals.status=$2`
+	}
+	query += ` ORDER BY withdrawals.created_at DESC LIMIT $1`
+	if status != "" {
+		args = append(args, status)
+	}
+	rows, err := service.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	output := make([]Withdrawal, 0)
+	for rows.Next() {
+		var item Withdrawal
+		if err := rows.Scan(&item.WithdrawalID, &item.UserID, &item.ClientRequestID, &item.DestinationAddress, &item.Currency, &item.AmountMinor, &item.Status, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		output = append(output, item)
+	}
+	return output, rows.Err()
+}
+
 // ApproveWithdrawal records the back-office decision. The actual provider call
 // is dispatched from the transactional outbox after this transaction commits.
 func (service *Service) ApproveWithdrawal(ctx context.Context, withdrawalID, reviewerID string) (Withdrawal, error) {

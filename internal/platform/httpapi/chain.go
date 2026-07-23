@@ -27,6 +27,16 @@ type WithdrawalService interface {
 	FindWithdrawal(ctx context.Context, withdrawalID string) (chainapp.Withdrawal, error)
 	ApproveWithdrawal(ctx context.Context, withdrawalID, reviewerID string) (chainapp.Withdrawal, error)
 	RejectWithdrawal(ctx context.Context, withdrawalID, reviewerID, reason string) (chainapp.Withdrawal, error)
+	ListWithdrawals(ctx context.Context, status string, limit int) ([]chainapp.Withdrawal, error)
+}
+
+func (server *Server) adminWithdrawals(writer http.ResponseWriter, request *http.Request) {
+	items, err := server.withdrawals.ListWithdrawals(request.Context(), request.URL.Query().Get("status"), 50)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list withdrawals"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
 }
 
 func (server *Server) rejectWithdrawal(writer http.ResponseWriter, request *http.Request) {
