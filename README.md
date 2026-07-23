@@ -27,6 +27,8 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
+首次创建 PostgreSQL 数据卷时会按文件名顺序执行 `migrations/` 下的全部迁移。已有数据卷不会自动重新执行初始化脚本；升级已有数据库时需按顺序执行新增迁移，不能通过删除生产数据卷完成升级。
+
 API 健康检查：`http://localhost:8080/healthz`。
 
 Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供健康检查，尚未实现根页面或 WebSocket 路由，因此访问 `http://localhost:8081/` 会返回 404。
