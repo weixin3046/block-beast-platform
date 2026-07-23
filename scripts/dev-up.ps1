@@ -40,7 +40,6 @@ if ($Role -ne 'all') {
     if ($Role -eq 'api') {
         $env:API_ADDRESS = ':8080'
         $env:ACCESS_TOKEN_TTL = '15m'
-        $env:CHAIN_WEBHOOK_SECRET = 'dev-only-chain-webhook-secret-change-me-in-production'
         $env:CHAIN_WEBHOOK_ALLOWED_SKEW = '5m'
         Write-Host 'API 启动中 -> http://localhost:8080' -ForegroundColor Green
         go run ./cmd/api

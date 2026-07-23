@@ -35,9 +35,9 @@ func signedWebhookRequest(t *testing.T, body string) *http.Request {
 	nonce := "nonce-1"
 	signature := chaindomain.SignWebhook(webhookSecret, http.MethodPost, "/v1/webhooks/chain/deposits", timestamp, nonce, []byte(body))
 	request := httptest.NewRequest(http.MethodPost, "/v1/webhooks/chain/deposits", strings.NewReader(body))
-	request.Header.Set("X-Chain-Timestamp", timestamp)
-	request.Header.Set("X-Chain-Nonce", nonce)
-	request.Header.Set("X-Chain-Signature", signature)
+	request.Header.Set("X-Timestamp", timestamp)
+	request.Header.Set("X-Nonce", nonce)
+	request.Header.Set("X-Signature", signature)
 	return request
 }
 

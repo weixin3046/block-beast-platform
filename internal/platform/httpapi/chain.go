@@ -57,10 +57,10 @@ func (server *Server) chainDepositWebhook(writer http.ResponseWriter, request *h
 		server.chainWebhook.secret,
 		request.Method,
 		request.URL.Path,
-		request.Header.Get("X-Chain-Timestamp"),
-		request.Header.Get("X-Chain-Nonce"),
+		request.Header.Get("X-Timestamp"),
+		request.Header.Get("X-Nonce"),
 		rawBody,
-		request.Header.Get("X-Chain-Signature"),
+		request.Header.Get("X-Signature"),
 		time.Now().UTC(),
 		server.chainWebhook.skew,
 	)

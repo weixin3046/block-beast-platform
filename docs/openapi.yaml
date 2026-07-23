@@ -321,7 +321,7 @@ paths:
       operationId: chainDepositWebhook
       summary: 链上充值回调（服务商调用）
       description: |
-        服务商推送已确认充值。请求必须携带 HMAC 签名头：`X-Chain-Timestamp`（毫秒）、`X-Chain-Nonce`、`X-Chain-Signature`。
+        PQPA 推送已确认充值。请求必须携带 HMAC 签名头：`X-Timestamp`（毫秒）、`X-Nonce`、`X-Signature`，并使用 `PQPA_API_SECRET` 验签。
         签名内容为 `方法\n路径\n时间戳\n随机数\n正文SHA256(十六进制)` 的 HMAC-SHA256（十六进制），密钥由平台分配；时间戳允许偏移默认 5 分钟。
         充值按服务商事件 ID 与交易哈希幂等，重复回调不会重复入账；非平台地址返回 `{"status":"ignored"}`。
       requestBody:
