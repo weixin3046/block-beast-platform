@@ -148,6 +148,8 @@ if [ "${SKIP_INFRA}" = false ]; then
 else
   echo "      已跳过（--skip-infra）"
 fi
+echo "      检查数据库迁移..."
+"${SCRIPT_DIR}/dev-migrate.sh"
 
 if [ "${SWAGGER}" = true ]; then
   echo "[2/5] 启动 Swagger UI..."

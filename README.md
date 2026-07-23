@@ -45,7 +45,7 @@ Copy-Item .env.example .env
 .\scripts\dev-up.ps1
 ```
 
-首次创建 PostgreSQL 数据卷时会按文件名顺序执行 `migrations/` 下的全部迁移。已有数据卷不会自动重新执行初始化脚本；升级已有数据库时需按顺序执行新增迁移，不能通过删除生产数据卷完成升级。
+首次创建 PostgreSQL 数据卷时会按文件名顺序执行 `migrations/` 下的全部迁移。已有数据卷不会自动重新执行初始化脚本；macOS/Linux 使用 `scripts/dev-up.sh` 启动时会自动识别并补跑缺失迁移，也可单独运行 `scripts/dev-migrate.sh`。生产环境升级仍需在发布流程中按顺序执行新增迁移，不能通过删除数据卷完成升级。
 
 API 健康检查：`http://localhost:8080/healthz`。
 
