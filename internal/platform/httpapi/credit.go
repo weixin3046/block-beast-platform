@@ -19,6 +19,67 @@ type CreditService interface {
 	Balances(ctx context.Context, userID string) ([]credit.BalanceInfo, error)
 	ListPointsLedger(ctx context.Context, userID string, limit int, offset int) ([]credit.LedgerEntry, error)
 	ListStaminaLedger(ctx context.Context, userID string, limit int, offset int) ([]credit.LedgerEntry, error)
+	RequestPointWithdrawal(ctx context.Context, userID, requestID string, amount int64, remark string) (credit.PointWithdrawal, error)
+	ReviewPointWithdrawal(ctx context.Context, id, reviewerID string, approved bool) error
+}
+
+func (server *Server) requestPointWithdrawal(writer http.ResponseWriter, request *http.Request) {
+	if server.credits == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "credit service is unavailable"})
+		return
+	}
+	var input struct {
+		AccountID   string `json:"account_id"`
+		RequestID   string `json:"request_id"`
+		AmountMinor int64  `json:"amount_minor"`
+		Remark      string `json:"remark"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	userID := input.AccountID
+	if claims, ok := ClaimsFromContext(request.Context()); ok {
+		userID = claims.Subject
+	}
+	result, err := server.credits.RequestPointWithdrawal(request.Context(), userID, input.RequestID, input.AmountMinor, input.Remark)
+	switch {
+	case errors.Is(err, credit.ErrInvalidAmount), errors.Is(err, credit.ErrUserNotFound):
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, credit.ErrInsufficientStamina):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": "insufficient points balance"})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to request point withdrawal"})
+	default:
+		writeJSON(writer, http.StatusCreated, result)
+	}
+}
+
+func (server *Server) reviewPointWithdrawal(writer http.ResponseWriter, request *http.Request) {
+	if server.credits == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "credit service is unavailable"})
+		return
+	}
+	var input struct {
+		Approved bool `json:"approved"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	claims, _ := ClaimsFromContext(request.Context())
+	err := server.credits.ReviewPointWithdrawal(request.Context(), request.PathValue("withdrawalID"), claims.Subject, input.Approved)
+	switch {
+	case errors.Is(err, credit.ErrPointWithdrawalNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, credit.ErrPointWithdrawalState):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to review point withdrawal"})
+	default:
+		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "point_withdrawal.review", TargetType: "point_withdrawal", TargetID: request.PathValue("withdrawalID"), Payload: map[string]any{"approved": input.Approved}})
+		writeJSON(writer, http.StatusOK, map[string]string{"status": "processed"})
+	}
 }
 
 // TaskService 定义每日签到能力。
