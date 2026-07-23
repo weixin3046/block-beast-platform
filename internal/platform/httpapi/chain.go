@@ -21,6 +21,7 @@ type DepositCreditor interface {
 type WithdrawalService interface {
 	RequestWithdrawal(ctx context.Context, input chainapp.WithdrawalInput) (chainapp.Withdrawal, error)
 	FindWithdrawal(ctx context.Context, withdrawalID string) (chainapp.Withdrawal, error)
+	ApproveWithdrawal(ctx context.Context, withdrawalID, reviewerID string) (chainapp.Withdrawal, error)
 }
 
 type DepositAddressReader interface {
@@ -242,4 +243,30 @@ func (server *Server) withdrawal(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	writeJSON(writer, http.StatusOK, withdrawal)
+}
+
+func (server *Server) approveWithdrawal(writer http.ResponseWriter, request *http.Request) {
+	if server.withdrawals == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "withdrawals are unavailable"})
+		return
+	}
+	claims, ok := ClaimsFromContext(request.Context())
+	if !ok {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	withdrawal, err := server.withdrawals.ApproveWithdrawal(request.Context(), request.PathValue("withdrawalID"), claims.Subject)
+	switch {
+	case errors.Is(err, chainapp.ErrWithdrawalNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, chainapp.ErrWithdrawalState):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, chainapp.ErrMissingFields):
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to approve withdrawal"})
+	default:
+		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "withdrawal.approve", TargetType: "withdrawal", TargetID: withdrawal.WithdrawalID, Payload: map[string]any{"status": withdrawal.Status}})
+		writeJSON(writer, http.StatusOK, withdrawal)
+	}
 }

@@ -18,6 +18,7 @@ var ErrInvalidAmount = errors.New("amount must be positive")
 var ErrMissingFields = errors.New("missing required fields")
 var ErrWithdrawalNotFound = errors.New("withdrawal not found")
 var ErrDepositAddressNotFound = errors.New("deposit address not found")
+var ErrWithdrawalState = errors.New("withdrawal cannot transition from its current status")
 
 type Service struct {
 	pool            *pgxpool.Pool
@@ -328,6 +329,47 @@ func (service *Service) FindWithdrawal(ctx context.Context, withdrawalID string)
 	return withdrawal, nil
 }
 
+// ApproveWithdrawal records the back-office decision. The actual provider call
+// is dispatched from the transactional outbox after this transaction commits.
+func (service *Service) ApproveWithdrawal(ctx context.Context, withdrawalID, reviewerID string) (Withdrawal, error) {
+	if withdrawalID == "" || reviewerID == "" {
+		return Withdrawal{}, ErrMissingFields
+	}
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return Withdrawal{}, err
+	}
+	defer tx.Rollback(ctx)
+	withdrawal, err := findWithdrawalForUpdate(ctx, tx, withdrawalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Withdrawal{}, ErrWithdrawalNotFound
+	}
+	if err != nil {
+		return Withdrawal{}, err
+	}
+	if withdrawal.Status != "requested" {
+		return Withdrawal{}, ErrWithdrawalState
+	}
+	if _, err := tx.Exec(ctx, `UPDATE withdrawals SET status='approved', reviewed_by=$2, reviewed_at=now() WHERE id=$1`, withdrawalID, reviewerID); err != nil {
+		return Withdrawal{}, err
+	}
+	withdrawal.Status = "approved"
+	payload, err := json.Marshal(struct {
+		WithdrawalID string `json:"withdrawal_id"`
+		Currency     string `json:"currency"`
+	}{withdrawalID, withdrawal.Currency})
+	if err != nil {
+		return Withdrawal{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload) VALUES ($1, 'withdrawal', $2, $3, $4)`, uuid.NewString(), withdrawalID, events.WithdrawalApproved, payload); err != nil {
+		return Withdrawal{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Withdrawal{}, err
+	}
+	return withdrawal, nil
+}
+
 func findWithdrawalByRequestID(ctx context.Context, tx pgx.Tx, userID string, clientRequestID string) (Withdrawal, error) {
 	var withdrawal Withdrawal
 	err := tx.QueryRow(ctx, `
@@ -337,5 +379,11 @@ func findWithdrawalByRequestID(ctx context.Context, tx pgx.Tx, userID string, cl
 		JOIN wallets ON wallets.id = withdrawals.wallet_id
 		WHERE withdrawals.user_id = $1 AND withdrawals.client_request_id = $2`, userID, clientRequestID).
 		Scan(&withdrawal.WithdrawalID, &withdrawal.UserID, &withdrawal.ClientRequestID, &withdrawal.DestinationAddress, &withdrawal.Currency, &withdrawal.AmountMinor, &withdrawal.Status, &withdrawal.CreatedAt)
+	return withdrawal, err
+}
+
+func findWithdrawalForUpdate(ctx context.Context, tx pgx.Tx, withdrawalID string) (Withdrawal, error) {
+	var withdrawal Withdrawal
+	err := tx.QueryRow(ctx, `SELECT withdrawals.id, withdrawals.user_id, withdrawals.client_request_id, withdrawals.destination_address, wallets.currency, withdrawals.amount_minor, withdrawals.status, withdrawals.created_at FROM withdrawals JOIN wallets ON wallets.id=withdrawals.wallet_id WHERE withdrawals.id=$1 FOR UPDATE`, withdrawalID).Scan(&withdrawal.WithdrawalID, &withdrawal.UserID, &withdrawal.ClientRequestID, &withdrawal.DestinationAddress, &withdrawal.Currency, &withdrawal.AmountMinor, &withdrawal.Status, &withdrawal.CreatedAt)
 	return withdrawal, err
 }
