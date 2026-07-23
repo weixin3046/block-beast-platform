@@ -32,6 +32,9 @@ macOS / Linux：
 `http://localhost:8082` 的 Swagger UI。脚本会启动 API、Worker、Realtime，并在
 按下 `Ctrl+C` 时停止这三个 Go 进程。
 
+本地 PostgreSQL 容器映射到 `localhost:5433`，避免与 macOS/Linux
+上已安装的 PostgreSQL 默认端口 `5432` 冲突。
+
 Windows PowerShell：
 
 ```powershell

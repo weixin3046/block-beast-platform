@@ -82,7 +82,7 @@ if [ -f .env ]; then
 fi
 
 export APP_ENV="${APP_ENV:-development}"
-export POSTGRES_DSN="${POSTGRES_DSN:-postgres://blockbeast:blockbeast@localhost:5432/blockbeast?sslmode=disable}"
+export POSTGRES_DSN="${POSTGRES_DSN:-postgres://blockbeast:blockbeast@localhost:5433/blockbeast?sslmode=disable}"
 export AUTH_TOKEN_SECRET="${AUTH_TOKEN_SECRET:-dev-only-signing-secret-change-me-in-production-0123456789abcdef}"
 export API_ADDRESS="${API_ADDRESS:-:8080}"
 export REALTIME_ADDRESS="${REALTIME_ADDRESS:-:8081}"
@@ -146,7 +146,7 @@ SERVICE_PIDS="${SERVICE_PIDS} ${REALTIME_PID}"
 echo "[4/4] 本地开发环境已启动"
 echo "  API       -> http://localhost:8080"
 echo "  Realtime  -> ws://localhost:8081/v1/ws"
-echo "  PostgreSQL-> localhost:5432"
+echo "  PostgreSQL-> localhost:5433（容器内 5432）"
 echo "  NATS      -> localhost:4222（监控 http://localhost:8222）"
 echo "  Redis     -> localhost:6379"
 if [ "${SWAGGER}" = true ]; then

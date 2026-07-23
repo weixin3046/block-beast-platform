@@ -105,7 +105,7 @@ if ($Swagger) {
 Write-Host ''
 Write-Host '全部启动完成：' -ForegroundColor Green
 Write-Host '  API      -> http://localhost:8080'
-Write-Host '  Postgres -> localhost:5432 (容器内 5432)'
+Write-Host '  Postgres -> localhost:5433 (容器内 5432)'
 Write-Host '  NATS     -> localhost:4222 (监控 http://localhost:8222)'
 Write-Host '  Redis    -> localhost:6379'
 Write-Host ''
