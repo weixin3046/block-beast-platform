@@ -23,6 +23,10 @@ type WithdrawalService interface {
 	FindWithdrawal(ctx context.Context, withdrawalID string) (chainapp.Withdrawal, error)
 }
 
+type DepositAddressReader interface {
+	GetDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (chainapp.DepositAddress, error)
+}
+
 type chainWebhookConfig struct {
 	secret   string
 	skew     time.Duration
@@ -38,6 +42,10 @@ func WithChainDeposits(secret string, skew time.Duration, creditor DepositCredit
 
 func WithWithdrawals(withdrawals WithdrawalService) Option {
 	return func(server *Server) { server.withdrawals = withdrawals }
+}
+
+func WithDepositAddresses(addresses DepositAddressReader) Option {
+	return func(server *Server) { server.depositAddresses = addresses }
 }
 
 // chainDepositWebhook 接收链上服务商的充值回调。
@@ -145,6 +153,39 @@ func (server *Server) requestWithdrawal(writer http.ResponseWriter, request *htt
 		Payload:     map[string]any{"currency": withdrawal.Currency, "amount_minor": withdrawal.AmountMinor, "status": withdrawal.Status},
 	})
 	writeJSON(writer, http.StatusCreated, withdrawal)
+}
+
+func (server *Server) depositAddress(writer http.ResponseWriter, request *http.Request) {
+	if server.depositAddresses == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "deposit addresses are unavailable"})
+		return
+	}
+	userID := ""
+	if claims, ok := ClaimsFromContext(request.Context()); ok {
+		userID = claims.Subject
+	}
+	if userID == "" {
+		userID = request.URL.Query().Get("account_id")
+	}
+	chainCode, tokenCode := request.URL.Query().Get("chain_code"), request.URL.Query().Get("token_code")
+	if userID == "" || chainCode == "" || tokenCode == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account_id, chain_code and token_code are required"})
+		return
+	}
+	address, err := server.depositAddresses.GetDepositAddress(request.Context(), userID, chainCode, tokenCode)
+	if errors.Is(err, chainapp.ErrDepositAddressNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read deposit address"})
+		return
+	}
+	if !authorizeAccount(request, address.UserID) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "address belongs to another account"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, address)
 }
 
 func (server *Server) withdrawal(writer http.ResponseWriter, request *http.Request) {

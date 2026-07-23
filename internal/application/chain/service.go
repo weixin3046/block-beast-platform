@@ -17,9 +17,31 @@ var ErrUnknownDepositAddress = errors.New("deposit address is not registered")
 var ErrInvalidAmount = errors.New("amount must be positive")
 var ErrMissingFields = errors.New("missing required fields")
 var ErrWithdrawalNotFound = errors.New("withdrawal not found")
+var ErrDepositAddressNotFound = errors.New("deposit address not found")
 
 type Service struct {
 	pool *pgxpool.Pool
+}
+
+type DepositAddressProvider interface {
+	CreateAddress(ctx context.Context, userID, chainCode, tokenCode string) (providerID, address string, err error)
+}
+
+type DepositAddress struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	ChainCode string `json:"chain_code"`
+	TokenCode string `json:"token_code"`
+	Address   string `json:"address"`
+}
+
+func (service *Service) GetDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (DepositAddress, error) {
+	var output DepositAddress
+	err := service.pool.QueryRow(ctx, `SELECT id, user_id, chain_code, token_code, address FROM chain_addresses WHERE user_id=$1 AND chain_code=$2 AND token_code=$3`, userID, chainCode, tokenCode).Scan(&output.ID, &output.UserID, &output.ChainCode, &output.TokenCode, &output.Address)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DepositAddress{}, ErrDepositAddressNotFound
+	}
+	return output, err
 }
 
 func NewService(pool *pgxpool.Pool) *Service {

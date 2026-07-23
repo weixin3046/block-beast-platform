@@ -48,6 +48,7 @@ func main() {
 	}
 	chainService := chain.NewService(pool)
 	options = append(options, httpapi.WithWithdrawals(chainService))
+	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
 	if cfg.PQPAAPISecret == "" {
 		logger.Warn("PQPA_API_SECRET is not set; chain deposit webhook is disabled")

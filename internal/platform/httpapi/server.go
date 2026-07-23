@@ -19,22 +19,23 @@ import (
 )
 
 type Server struct {
-	config       config.Config
-	logger       *slog.Logger
-	betPlacer    BetPlacer
-	readiness    ReadinessChecker
-	wallets      WalletReader
-	rounds       RoundReader
-	bets         BetReader
-	canceller    RoundCanceller
-	auth         *Authenticator
-	logins       LoginService
-	registers    RegisterService
-	auditor      AuditRecorder
-	chainWebhook *chainWebhookConfig
-	withdrawals  WithdrawalService
-	credits      CreditService
-	tasks        TaskService
+	config           config.Config
+	logger           *slog.Logger
+	betPlacer        BetPlacer
+	readiness        ReadinessChecker
+	wallets          WalletReader
+	rounds           RoundReader
+	bets             BetReader
+	canceller        RoundCanceller
+	auth             *Authenticator
+	logins           LoginService
+	registers        RegisterService
+	auditor          AuditRecorder
+	chainWebhook     *chainWebhookConfig
+	withdrawals      WithdrawalService
+	depositAddresses DepositAddressReader
+	credits          CreditService
+	tasks            TaskService
 }
 
 type LoginService interface {
@@ -116,6 +117,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/rounds/{roundID}/cancel", server.protectRoles(server.cancelRound, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/webhooks/chain/deposits", server.chainDepositWebhook)
 	mux.HandleFunc("POST /v1/withdrawals", server.protect(server.requestWithdrawal))
+	mux.HandleFunc("GET /v1/deposit-addresses", server.protect(server.depositAddress))
 	mux.HandleFunc("GET /v1/withdrawals/{withdrawalID}", server.protect(server.withdrawal))
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/stamina/consume", server.protect(server.consumeStamina))
