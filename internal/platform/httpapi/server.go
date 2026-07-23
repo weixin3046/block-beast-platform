@@ -116,6 +116,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rounds/{roundID}", server.protect(server.round))
 	mux.HandleFunc("POST /v1/rounds/{roundID}/cancel", server.protectRoles(server.cancelRound, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/webhooks/chain/deposits", server.chainDepositWebhook)
+	mux.HandleFunc("POST /v1/webhooks/chain/withdrawals", server.chainWithdrawalWebhook)
 	mux.HandleFunc("POST /v1/withdrawals", server.protect(server.requestWithdrawal))
 	mux.HandleFunc("GET /v1/deposit-addresses", server.protect(server.depositAddress))
 	mux.HandleFunc("POST /v1/deposit-addresses", server.protect(server.createDepositAddress))

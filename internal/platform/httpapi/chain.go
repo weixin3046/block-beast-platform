@@ -18,6 +18,10 @@ type DepositCreditor interface {
 	CreditDeposit(ctx context.Context, input chainapp.DepositInput) (chainapp.DepositResult, error)
 }
 
+type WithdrawalStatusApplier interface {
+	ApplyWithdrawalStatus(ctx context.Context, input chainapp.WithdrawalStatusInput) error
+}
+
 type WithdrawalService interface {
 	RequestWithdrawal(ctx context.Context, input chainapp.WithdrawalInput) (chainapp.Withdrawal, error)
 	FindWithdrawal(ctx context.Context, withdrawalID string) (chainapp.Withdrawal, error)
@@ -34,15 +38,25 @@ type DepositAddressService interface {
 }
 
 type chainWebhookConfig struct {
-	secret   string
-	skew     time.Duration
-	creditor DepositCreditor
+	secret      string
+	skew        time.Duration
+	creditor    DepositCreditor
+	withdrawals WithdrawalStatusApplier
 }
 
 // WithChainDeposits 装配链上充值回调能力；secret 为空时端点返回 503。
 func WithChainDeposits(secret string, skew time.Duration, creditor DepositCreditor) Option {
 	return func(server *Server) {
 		server.chainWebhook = &chainWebhookConfig{secret: secret, skew: skew, creditor: creditor}
+	}
+}
+
+func WithChainWithdrawalStatuses(applier WithdrawalStatusApplier) Option {
+	return func(server *Server) {
+		if server.chainWebhook == nil {
+			server.chainWebhook = &chainWebhookConfig{}
+		}
+		server.chainWebhook.withdrawals = applier
 	}
 }
 
@@ -100,6 +114,41 @@ func (server *Server) chainDepositWebhook(writer http.ResponseWriter, request *h
 		return
 	}
 	writeJSON(writer, http.StatusOK, result)
+}
+
+func (server *Server) chainWithdrawalWebhook(writer http.ResponseWriter, request *http.Request) {
+	if server.chainWebhook == nil || server.chainWebhook.secret == "" || server.chainWebhook.withdrawals == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "chain withdrawal webhook is unavailable"})
+		return
+	}
+	rawBody, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 1<<20))
+	if err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "unable to read request body"})
+		return
+	}
+	err = chaindomain.VerifyWebhook(server.chainWebhook.secret, request.Method, request.URL.Path, request.Header.Get("X-Timestamp"), request.Header.Get("X-Nonce"), rawBody, request.Header.Get("X-Signature"), time.Now().UTC(), server.chainWebhook.skew)
+	if errors.Is(err, chaindomain.ErrTimestampOutOfRange) || errors.Is(err, chaindomain.ErrInvalidSignature) {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		return
+	}
+	var input chainapp.WithdrawalStatusInput
+	if err := json.Unmarshal(rawBody, &input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := server.chainWebhook.withdrawals.ApplyWithdrawalStatus(request.Context(), input); err != nil {
+		if errors.Is(err, chainapp.ErrWithdrawalNotFound) {
+			writeJSON(writer, http.StatusOK, map[string]string{"status": "ignored"})
+			return
+		}
+		if errors.Is(err, chainapp.ErrMissingFields) || errors.Is(err, chainapp.ErrWithdrawalState) {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to apply withdrawal status"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "processed"})
 }
 
 // requestWithdrawal 创建提现申请。用户身份以访问令牌为准；

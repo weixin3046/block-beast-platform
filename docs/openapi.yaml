@@ -343,6 +343,28 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/webhooks/chain/withdrawals:
+    post:
+      tags: [Chain]
+      operationId: chainWithdrawalWebhook
+      summary: PQPA 提现状态回调
+      description: 使用 `X-Timestamp`、`X-Nonce`、`X-Signature` 和 `PQPA_API_SECRET` 验签。`confirmed` 核销冻结余额，`failed` 自动解冻并恢复可用余额。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider_order_id, status]
+              properties:
+                provider_order_id: { type: string }
+                status: { type: string, enum: [confirmed, failed] }
+                tx_hash: { type: string }
+                failure_reason: { type: string }
+      responses:
+        '200': { description: 已处理或已忽略 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /v1/deposit-addresses:
     get:
       tags: [Chain]

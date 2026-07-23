@@ -59,7 +59,7 @@ func main() {
 	if cfg.PQPAAPISecret == "" {
 		logger.Warn("PQPA_API_SECRET is not set; chain deposit webhook is disabled")
 	} else {
-		options = append(options, httpapi.WithChainDeposits(cfg.PQPAAPISecret, cfg.ChainWebhookSkew, chainService))
+		options = append(options, httpapi.WithChainDeposits(cfg.PQPAAPISecret, cfg.ChainWebhookSkew, chainService), httpapi.WithChainWithdrawalStatuses(chainService))
 	}
 	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService, cancellationService, options...).Handler()} // 创建HTTP服务器实例
 
