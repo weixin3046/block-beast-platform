@@ -102,6 +102,15 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 流水按时间倒序返回，`amount_minor` 正数为入账、负数为出账；`business_type` 区分来源：`admin_credit`（管理员充值）、`checkin_reward`（签到）、`bet_task_reward`（投注达标奖励）、`activity_consume`（活动消耗）。
 
+## 链上充值
+
+充值网络与币种由 PQPA 应用配置决定，前端不得硬编码 TRON 或其他网络：
+
+1. 调用 `GET /v1/assets` 获取当前启用的 `chain_code`、`token_code` 和精度。
+2. 玩家选择资产后，调用 `GET /v1/deposit-addresses?chain_code=POLYGON&token_code=USDT` 查询既有地址。
+3. 地址不存在时，调用 `POST /v1/deposit-addresses` 并传入相同的 `chain_code` 和 `token_code` 创建地址。
+4. 切换网络或币种时必须清空之前展示的地址，避免跨链误充值。
+
 ## 管理后台接口
 
 管理员（operator/admin 角色）可调用 `POST /v1/admin/credits` 为用户充值任意币种：

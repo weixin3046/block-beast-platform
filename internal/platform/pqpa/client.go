@@ -27,17 +27,15 @@ type Client struct {
 }
 
 type CreateAddressRequest struct {
-	UserID    string `json:"user_id"`
-	ChainCode string `json:"chain_code"`
-	TokenCode string `json:"token_code"`
+	ExternalUserID string `json:"externalUserId"`
+	ChainCode      string `json:"chainCode"`
 }
 
 type Address struct {
-	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	ChainCode string `json:"chain_code"`
-	TokenCode string `json:"token_code"`
-	Address   string `json:"address"`
+	ID             json.Number `json:"id"`
+	ExternalUserID string      `json:"externalUserId"`
+	ChainCode      string      `json:"chainCode"`
+	Address        string      `json:"address"`
 }
 
 type CreateWithdrawalRequest struct {
@@ -69,9 +67,12 @@ type Token struct {
 }
 
 type ChainToken struct {
-	ChainCode string `json:"chain_code"`
-	TokenCode string `json:"token_code"`
-	Active    bool   `json:"active"`
+	ChainCode       string `json:"chainCode"`
+	ChainName       string `json:"chainName"`
+	TokenCode       string `json:"tokenSymbol"`
+	Decimals        int    `json:"decimals"`
+	SupportDeposit  bool   `json:"supportRecharge"`
+	SupportWithdraw bool   `json:"supportWithdraw"`
 }
 
 func NewClient(baseURL, apiKey, secret string, httpClient *http.Client) *Client {
@@ -122,8 +123,21 @@ func (client *Client) DoJSON(ctx context.Context, method, path string, requestBo
 		return fmt.Errorf("PQPA returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(response)))
 	}
 	if responseBody != nil && len(response) != 0 {
-		if err := json.Unmarshal(response, responseBody); err != nil {
+		var envelope struct {
+			Code int             `json:"code"`
+			Msg  string          `json:"msg"`
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(response, &envelope); err != nil {
 			return fmt.Errorf("decode PQPA response: %w", err)
+		}
+		if envelope.Code != 0 {
+			return fmt.Errorf("PQPA returned code %d: %s", envelope.Code, envelope.Msg)
+		}
+		if len(envelope.Data) != 0 && string(envelope.Data) != "null" {
+			if err := json.Unmarshal(envelope.Data, responseBody); err != nil {
+				return fmt.Errorf("decode PQPA response data: %w", err)
+			}
 		}
 	}
 	return nil
@@ -131,7 +145,7 @@ func (client *Client) DoJSON(ctx context.Context, method, path string, requestBo
 
 func (client *Client) CreateAddress(ctx context.Context, input CreateAddressRequest) (Address, error) {
 	var output Address
-	if err := client.DoJSON(ctx, http.MethodPost, "/v1/addresses", input, &output); err != nil {
+	if err := client.DoJSON(ctx, http.MethodPost, "/api/v1/wallet/address/create", input, &output); err != nil {
 		return Address{}, err
 	}
 	return output, nil
@@ -139,11 +153,11 @@ func (client *Client) CreateAddress(ctx context.Context, input CreateAddressRequ
 
 // CreateDepositAddress adapts PQPA's payload to the application-layer port.
 func (client *Client) CreateDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (providerID, address string, err error) {
-	result, err := client.CreateAddress(ctx, CreateAddressRequest{UserID: userID, ChainCode: chainCode, TokenCode: tokenCode})
+	result, err := client.CreateAddress(ctx, CreateAddressRequest{ExternalUserID: userID, ChainCode: chainCode})
 	if err != nil {
 		return "", "", err
 	}
-	return result.ID, result.Address, nil
+	return result.ID.String(), result.Address, nil
 }
 
 func (client *Client) CreateWithdrawal(ctx context.Context, input CreateWithdrawalRequest) (Withdrawal, error) {
@@ -181,7 +195,7 @@ func (client *Client) GetProviderWithdrawal(ctx context.Context, providerOrderID
 
 func (client *Client) ListChains(ctx context.Context) ([]Chain, error) {
 	var output []Chain
-	if err := client.DoJSON(ctx, http.MethodGet, "/v1/support/chains", nil, &output); err != nil {
+	if err := client.DoJSON(ctx, http.MethodGet, "/api/v1/wallet/support/chains", nil, &output); err != nil {
 		return nil, err
 	}
 	return output, nil
@@ -189,7 +203,7 @@ func (client *Client) ListChains(ctx context.Context) ([]Chain, error) {
 
 func (client *Client) ListTokens(ctx context.Context, chainCode string) ([]Token, error) {
 	var output []Token
-	path := "/v1/support/tokens?chain_code=" + url.QueryEscape(chainCode)
+	path := "/api/v1/wallet/support/tokens?chainCode=" + url.QueryEscape(chainCode)
 	if err := client.DoJSON(ctx, http.MethodGet, path, nil, &output); err != nil {
 		return nil, err
 	}
@@ -198,7 +212,7 @@ func (client *Client) ListTokens(ctx context.Context, chainCode string) ([]Token
 
 func (client *Client) ListChainTokens(ctx context.Context) ([]ChainToken, error) {
 	var output []ChainToken
-	if err := client.DoJSON(ctx, http.MethodGet, "/v1/support/chain-tokens", nil, &output); err != nil {
+	if err := client.DoJSON(ctx, http.MethodGet, "/api/v1/wallet/support/chain-tokens", nil, &output); err != nil {
 		return nil, err
 	}
 	return output, nil

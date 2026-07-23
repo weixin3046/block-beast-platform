@@ -611,12 +611,39 @@ paths:
               type: object
               required: [chain_code, token_code]
               properties:
-                chain_code: { type: string, example: TRON }
+                chain_code: { type: string, example: POLYGON }
                 token_code: { type: string, example: USDT }
       responses:
         '201': { description: 已创建或返回既有充值地址 }
         '400': { $ref: '#/components/responses/BadRequest' }
         '502': { description: PQPA 服务不可用 }
+  /v1/assets:
+    get:
+      tags: [Chain]
+      operationId: listProviderAssets
+      summary: 查询 PQPA 当前启用的充值网络和币种
+      description: 返回 Worker 从 PQPA 同步的动态配置。玩家端必须先读取此列表，再用选中的 `chain_code` 和 `token_code` 查询或创建充值地址，不能硬编码网络。
+      responses:
+        '200':
+          description: PQPA 当前启用的充值资产。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider, assets]
+                properties:
+                  provider: { type: string, example: pqpa }
+                  assets:
+                    type: array
+                    items:
+                      type: object
+                      required: [chain_code, token_code, token_name, decimals]
+                      properties:
+                        chain_code: { type: string, example: POLYGON }
+                        token_code: { type: string, example: USDT }
+                        token_name: { type: string, example: USDT }
+                        decimals: { type: integer, example: 6 }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /v1/withdrawals:
     post:
       tags: [Chain]

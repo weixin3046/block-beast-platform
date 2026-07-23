@@ -12,6 +12,8 @@ import (
 type ChainToken struct {
 	ChainCode string
 	TokenCode string
+	TokenName string
+	Decimals  int
 	Active    bool
 }
 
@@ -55,9 +57,14 @@ func (service *Service) Sync(ctx context.Context) (int, error) {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO provider_supported_assets (id, provider, chain_code, token_code, enabled, synced_at)
-			VALUES ($1, 'pqpa', $2, $3, $4, $5)
-			ON CONFLICT (provider, chain_code, token_code) DO UPDATE SET enabled = EXCLUDED.enabled, synced_at = EXCLUDED.synced_at`, uuid.NewString(), asset.ChainCode, asset.TokenCode, asset.Active, time.Now().UTC()); err != nil {
+			INSERT INTO provider_supported_assets (id, provider, chain_code, token_code, token_name, decimals, enabled, synced_at)
+			VALUES ($1, 'pqpa', $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (provider, chain_code, token_code) DO UPDATE SET
+				token_name = EXCLUDED.token_name,
+				decimals = EXCLUDED.decimals,
+				enabled = EXCLUDED.enabled,
+				synced_at = EXCLUDED.synced_at`,
+			uuid.NewString(), asset.ChainCode, asset.TokenCode, asset.TokenName, asset.Decimals, asset.Active, time.Now().UTC()); err != nil {
 			return 0, err
 		}
 	}
