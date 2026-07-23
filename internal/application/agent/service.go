@@ -10,6 +10,7 @@ import (
 
 var ErrInvalidRelation = errors.New("invalid agent relation")
 var ErrRelationExists = errors.New("agent relation already exists")
+var ErrInvalidCommissionRate = errors.New("commission rate must be between 0 and 10000 basis points")
 
 type Service struct{ pool *pgxpool.Pool }
 
@@ -70,4 +71,12 @@ func (service *Service) GetRelation(ctx context.Context, userID string) (Relatio
 		return Relation{UserID: userID}, nil
 	}
 	return relation, err
+}
+
+func (service *Service) SetCommissionRate(ctx context.Context, agentID string, rateBasisPoints int, operatorID string) error {
+	if agentID == "" || operatorID == "" || rateBasisPoints < 0 || rateBasisPoints > 10000 {
+		return ErrInvalidCommissionRate
+	}
+	_, err := service.pool.Exec(ctx, `INSERT INTO agent_commission_rates(agent_user_id,rate_basis_points,updated_by) VALUES($1,$2,$3) ON CONFLICT(agent_user_id) DO UPDATE SET rate_basis_points=EXCLUDED.rate_basis_points,updated_by=EXCLUDED.updated_by,updated_at=now()`, agentID, rateBasisPoints, operatorID)
+	return err
 }

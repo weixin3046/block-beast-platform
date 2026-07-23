@@ -12,6 +12,28 @@ import (
 type AgentService interface {
 	Bind(ctx context.Context, userID, parentID string) error
 	GetRelation(ctx context.Context, userID string) (agentapp.Relation, error)
+	SetCommissionRate(ctx context.Context, agentID string, rateBasisPoints int, operatorID string) error
+}
+
+func (server *Server) setAgentCommissionRate(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		RateBasisPoints int `json:"rate_basis_points"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	claims, _ := ClaimsFromContext(request.Context())
+	err := server.agents.SetCommissionRate(request.Context(), request.PathValue("agentID"), input.RateBasisPoints, claims.Subject)
+	if errors.Is(err, agentapp.ErrInvalidCommissionRate) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to set commission rate"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func (server *Server) agentRelation(writer http.ResponseWriter, request *http.Request) {
