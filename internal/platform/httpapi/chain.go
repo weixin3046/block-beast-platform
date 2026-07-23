@@ -26,6 +26,27 @@ type WithdrawalService interface {
 	RequestWithdrawal(ctx context.Context, input chainapp.WithdrawalInput) (chainapp.Withdrawal, error)
 	FindWithdrawal(ctx context.Context, withdrawalID string) (chainapp.Withdrawal, error)
 	ApproveWithdrawal(ctx context.Context, withdrawalID, reviewerID string) (chainapp.Withdrawal, error)
+	RejectWithdrawal(ctx context.Context, withdrawalID, reviewerID, reason string) (chainapp.Withdrawal, error)
+}
+
+func (server *Server) rejectWithdrawal(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input)
+	claims, _ := ClaimsFromContext(request.Context())
+	withdrawal, err := server.withdrawals.RejectWithdrawal(request.Context(), request.PathValue("withdrawalID"), claims.Subject, input.Reason)
+	switch {
+	case errors.Is(err, chainapp.ErrWithdrawalNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, chainapp.ErrWithdrawalState):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to reject withdrawal"})
+	default:
+		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "withdrawal.reject", TargetType: "withdrawal", TargetID: withdrawal.WithdrawalID, Payload: map[string]any{"reason": input.Reason}})
+		writeJSON(writer, http.StatusOK, withdrawal)
+	}
 }
 
 type DepositAddressReader interface {
