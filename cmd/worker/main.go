@@ -66,6 +66,7 @@ func main() {
 	processDueRounds(ctx, logger, roundRepository)
 	settleDueRounds(ctx, logger, settlementService, resultSource)
 	processPending(logger, processor)
+	reconcileWithdrawals(ctx, logger, withdrawalSender)
 	lastStats := natsjs.ConsumerStats{}
 	var assetSync *pqpaassets.Service
 	var assetTicker *time.Ticker
@@ -86,10 +87,28 @@ func main() {
 			processDueRounds(ctx, logger, roundRepository)
 			settleDueRounds(ctx, logger, settlementService, resultSource)
 			processPending(logger, processor)
+			reconcileWithdrawals(ctx, logger, withdrawalSender)
 			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
 		}
+	}
+}
+
+func reconcileWithdrawals(ctx context.Context, logger *slog.Logger, service *chainapp.Service) {
+	if service == nil {
+		return
+	}
+	result, err := service.ReconcileWithdrawals(ctx, 100)
+	if err != nil {
+		logger.Error("PQPA withdrawal reconciliation failed", "checked", result.Checked, "error", err)
+		return
+	}
+	if result.Checked > 0 {
+		logger.Info("PQPA withdrawals reconciled",
+			"checked", result.Checked,
+			"confirmed", result.Confirmed,
+			"failed", result.Failed)
 	}
 }
 

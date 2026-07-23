@@ -171,6 +171,14 @@ func (client *Client) GetWithdrawal(ctx context.Context, providerOrderID string)
 	return output, nil
 }
 
+func (client *Client) GetProviderWithdrawal(ctx context.Context, providerOrderID string) (status, txHash, failureReason string, err error) {
+	result, err := client.GetWithdrawal(ctx, providerOrderID)
+	if err != nil {
+		return "", "", "", err
+	}
+	return result.Status, result.TxHash, "", nil
+}
+
 func (client *Client) ListChains(ctx context.Context) ([]Chain, error) {
 	var output []Chain
 	if err := client.DoJSON(ctx, http.MethodGet, "/v1/support/chains", nil, &output); err != nil {
