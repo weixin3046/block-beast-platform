@@ -31,6 +31,7 @@ type Server struct {
 	auth             *Authenticator
 	logins           LoginService
 	registers        RegisterService
+	sessions         SessionService
 	auditor          AuditRecorder
 	chainWebhook     *chainWebhookConfig
 	withdrawals      WithdrawalService
@@ -49,6 +50,11 @@ type LoginService interface {
 
 type RegisterService interface {
 	Register(ctx context.Context, loginName string, displayName string, password string) (auth.LoginResult, error)
+}
+
+type SessionService interface {
+	Refresh(ctx context.Context, refreshToken string) (auth.LoginResult, error)
+	Logout(ctx context.Context, refreshToken string) error
 }
 
 type AuditRecorder interface {
@@ -76,6 +82,10 @@ func WithLogin(logins LoginService) Option {
 
 func WithRegister(registers RegisterService) Option {
 	return func(server *Server) { server.registers = registers }
+}
+
+func WithSessions(sessions SessionService) Option {
+	return func(server *Server) { server.sessions = sessions }
 }
 
 func WithAudit(auditor AuditRecorder) Option {
@@ -124,6 +134,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/assets", server.assets)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
 	mux.HandleFunc("POST /v1/auth/register", server.register)
+	mux.HandleFunc("POST /v1/auth/refresh", server.refresh)
+	mux.HandleFunc("POST /v1/auth/logout", server.logout)
 	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("GET /v1/agents/me", server.protect(server.agentRelation))
 	mux.HandleFunc("GET /v1/agents/me/commissions", server.protect(server.commissions))
@@ -287,6 +299,61 @@ func (server *Server) login(writer http.ResponseWriter, request *http.Request) {
 	}
 	server.recordAudit(request.Context(), audit.Entry{ActorUserID: result.UserID, Action: "auth.login", TargetType: "user", TargetID: result.UserID, Payload: map[string]string{"outcome": "success"}})
 	writeJSON(writer, http.StatusOK, result)
+}
+
+func (server *Server) refresh(writer http.ResponseWriter, request *http.Request) {
+	if server.sessions == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "session refresh is unavailable"})
+		return
+	}
+	token, ok := decodeRefreshToken(writer, request)
+	if !ok {
+		return
+	}
+	result, err := server.sessions.Refresh(request.Context(), token)
+	switch {
+	case errors.Is(err, auth.ErrInvalidRefreshToken):
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+	case errors.Is(err, auth.ErrAuthNotConfigured):
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to refresh session"})
+	default:
+		writeJSON(writer, http.StatusOK, result)
+	}
+}
+
+func (server *Server) logout(writer http.ResponseWriter, request *http.Request) {
+	if server.sessions == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "logout is unavailable"})
+		return
+	}
+	token, ok := decodeRefreshToken(writer, request)
+	if !ok {
+		return
+	}
+	if err := server.sessions.Logout(request.Context(), token); err != nil {
+		if errors.Is(err, auth.ErrInvalidRefreshToken) {
+			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to logout"})
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+func decodeRefreshToken(writer http.ResponseWriter, request *http.Request) (string, bool) {
+	var input struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || input.RefreshToken == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "refresh_token is required"})
+		return "", false
+	}
+	return input.RefreshToken, true
 }
 
 func (server *Server) cancelRound(writer http.ResponseWriter, request *http.Request) {

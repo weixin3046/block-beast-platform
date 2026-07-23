@@ -43,7 +43,9 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供�
 | `GET /readyz` | PostgreSQL 就绪检查。 |
 | `GET /v1/platform` | 查询当前环境与领域列表。 |
 | `POST /v1/auth/register` | 注册玩家账号（创建用户、player 角色和 USDT 零余额钱包），直接返回访问令牌。 |
-| `POST /v1/auth/login` | 密码登录，签发携带角色的短期 JWT（默认 15 分钟）。 |
+| `POST /v1/auth/login` | 密码登录，签发短期 JWT 和可轮换刷新令牌。 |
+| `POST /v1/auth/refresh` | 轮换刷新令牌并签发新访问令牌，旧刷新令牌立即失效。 |
+| `POST /v1/auth/logout` | 撤销刷新令牌并退出当前会话。 |
 | `GET /v1/rounds?game_type={code}&limit={1-100}` | 查询指定游戏类型的开放轮次。 |
 | `GET /v1/rounds/{round_id}` | 查询单个轮次。 |
 | `POST /v1/rounds/{round_id}/cancel` | 取消开放或已封盘轮次，并退款全部接受中的投注。仅 operator/admin。 |

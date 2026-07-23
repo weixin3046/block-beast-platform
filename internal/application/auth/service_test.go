@@ -27,6 +27,74 @@ func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string,
 	return "", nil
 }
 
+type stubCredentials struct {
+	roles []string
+}
+
+func (stubCredentials) FindPasswordCredentials(context.Context, string) (identity.PasswordCredentials, error) {
+	return identity.PasswordCredentials{}, identity.ErrIdentityNotFound
+}
+
+func (credentials stubCredentials) UserRoles(context.Context, string) ([]string, error) {
+	return credentials.roles, nil
+}
+
+type memorySessions struct {
+	userID  string
+	current string
+	revoked bool
+}
+
+func (sessions *memorySessions) CreateSession(_ context.Context, userID string, tokenHash string, _ time.Time) error {
+	sessions.userID = userID
+	sessions.current = tokenHash
+	return nil
+}
+
+func (sessions *memorySessions) RotateSession(_ context.Context, oldTokenHash string, newTokenHash string, _ time.Time) (string, error) {
+	if sessions.revoked || oldTokenHash != sessions.current {
+		return "", identity.ErrIdentityNotFound
+	}
+	sessions.current = newTokenHash
+	return sessions.userID, nil
+}
+
+func (sessions *memorySessions) RevokeSession(_ context.Context, tokenHash string) error {
+	if sessions.revoked || tokenHash != sessions.current {
+		return identity.ErrIdentityNotFound
+	}
+	sessions.revoked = true
+	return nil
+}
+
+func TestRefreshRotatesTokenAndLogoutRevokesIt(t *testing.T) {
+	sessions := &memorySessions{userID: "user-1"}
+	service := NewService(stubCredentials{roles: []string{"player"}}, testSecret, 15*time.Minute).
+		WithSessions(sessions, 30*24*time.Hour)
+	initial, err := randomRefreshToken()
+	if err != nil {
+		t.Fatalf("create initial token: %v", err)
+	}
+	sessions.current = hashRefreshToken(initial)
+
+	result, err := service.Refresh(context.Background(), initial)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if result.RefreshToken == "" || result.RefreshToken == initial || result.AccessToken == "" || result.UserID != "user-1" {
+		t.Fatalf("refresh result = %+v", result)
+	}
+	if _, err := service.Refresh(context.Background(), initial); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("reusing old token error = %v, want ErrInvalidRefreshToken", err)
+	}
+	if err := service.Logout(context.Background(), result.RefreshToken); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if _, err := service.Refresh(context.Background(), result.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("refresh after logout error = %v, want ErrInvalidRefreshToken", err)
+	}
+}
+
 func TestRegisterValidatesInput(t *testing.T) {
 	newService := func() *Service {
 		return NewService(nil, testSecret, time.Minute).WithRegistrar(stubRegistrar{})

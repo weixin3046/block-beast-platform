@@ -47,8 +47,10 @@ func main() {
 		logger.Warn("AUTH_TOKEN_SECRET is not set; business endpoints are unauthenticated")
 	} else {
 		identityRepository := identity.NewPostgresRepository(pool)
-		authService := auth.NewService(identityRepository, cfg.AuthTokenSecret, cfg.AccessTokenTTL).WithRegistrar(identityRepository)
-		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService))
+		authService := auth.NewService(identityRepository, cfg.AuthTokenSecret, cfg.AccessTokenTTL).
+			WithRegistrar(identityRepository).
+			WithSessions(identityRepository, cfg.RefreshTokenTTL)
+		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService), httpapi.WithSessions(authService))
 	}
 	chainService := chain.NewService(pool)
 	if cfg.PQPAAPIURL != "" && cfg.PQPAAPIKey != "" && cfg.PQPAAPISecret != "" {

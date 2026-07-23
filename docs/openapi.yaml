@@ -5,7 +5,7 @@ info:
   description: |
     Block Beast 的 HTTP 接口。金额均以货币最小单位（minor unit）表示，例如 USDT 的 2500 表示由客户端与游戏规则共同约定的 2500 最小单位。
 
-    除健康检查、平台信息和登录外的业务接口均需携带 `Authorization: Bearer <access_token>` 访问令牌；令牌通过 `POST /v1/auth/login` 获取，默认有效期 15 分钟。投注、钱包等账号级资源仅本人或具备 operator/admin 角色的账号可访问；轮次取消仅限 operator/admin。
+    除健康检查、平台信息和认证接口外的业务接口均需携带 `Authorization: Bearer <access_token>` 访问令牌；登录或注册返回默认有效期 15 分钟的访问令牌和可轮换的刷新令牌。投注、钱包等账号级资源仅本人或具备 operator/admin 角色的账号可访问；轮次取消仅限 operator/admin。
   license:
     name: UNLICENSED
 security: []
@@ -131,6 +131,46 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: 轮换刷新令牌并签发新访问令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: 刷新成功；原刷新令牌立即失效。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: 撤销刷新令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '204':
+          description: 已退出；刷新令牌不可再使用。
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/rounds:
     get:
       tags: [Rounds]
@@ -891,11 +931,14 @@ components:
           format: password
     LoginResult:
       type: object
-      required: [access_token, token_type, expires_in, user_id, roles]
+      required: [access_token, refresh_token, token_type, expires_in, user_id, roles]
       properties:
         access_token:
           type: string
           description: HS256 签发的 JWT 访问令牌。
+        refresh_token:
+          type: string
+          description: 仅返回给客户端的随机令牌；服务端只保存 SHA-256 摘要。
         token_type:
           type: string
           enum: [Bearer]
@@ -912,6 +955,14 @@ components:
           items:
             type: string
             enum: [player, operator, admin]
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
     Error:
       type: object
       required: [error]
