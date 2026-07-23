@@ -9,7 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SKIP_INFRA=false
 SWAGGER=false
-SERVICE_PIDS=""
+SERVICE_PIDS=()
+BUILD_DIR=""
 
 usage() {
   cat <<'EOF'
@@ -53,17 +54,47 @@ require_command() {
 }
 
 cleanup() {
+  exit_code=$?
   trap - INT TERM EXIT
-  if [ -n "${SERVICE_PIDS}" ]; then
+  set +e
+  if [ "${#SERVICE_PIDS[@]}" -gt 0 ]; then
     echo
     echo "正在停止 API、Worker 和 Realtime..."
-    # SERVICE_PIDS 由脚本自身启动的数字 PID 组成，不接受外部输入。
-    kill ${SERVICE_PIDS} 2>/dev/null || true
-    wait ${SERVICE_PIDS} 2>/dev/null || true
+    kill "${SERVICE_PIDS[@]}" 2>/dev/null
+
+    # 最多等待 5 秒完成优雅退出，之后强制清理仍存活的服务。
+    attempt=0
+    while [ "${attempt}" -lt 50 ]; do
+      alive=false
+      for pid in "${SERVICE_PIDS[@]}"; do
+        if kill -0 "${pid}" 2>/dev/null; then
+          alive=true
+          break
+        fi
+      done
+      if [ "${alive}" = false ]; then
+        break
+      fi
+      attempt=$((attempt + 1))
+      sleep 0.1
+    done
+    for pid in "${SERVICE_PIDS[@]}"; do
+      if kill -0 "${pid}" 2>/dev/null; then
+        kill -KILL "${pid}" 2>/dev/null
+      fi
+    done
+    wait "${SERVICE_PIDS[@]}" 2>/dev/null
+    echo "Go 服务已停止。"
   fi
+  if [ -n "${BUILD_DIR}" ] && [ -d "${BUILD_DIR}" ]; then
+    rm -rf "${BUILD_DIR}"
+  fi
+  exit "${exit_code}"
 }
 
-trap cleanup INT TERM EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap cleanup EXIT
 
 require_command go
 require_command docker
@@ -92,7 +123,7 @@ export CHAIN_WEBHOOK_ALLOWED_SKEW="${CHAIN_WEBHOOK_ALLOWED_SKEW:-5m}"
 export WORKER_POLL_INTERVAL="${WORKER_POLL_INTERVAL:-5s}"
 export NATS_URL="${NATS_URL:-nats://localhost:4222}"
 
-echo "[1/4] 检查基础设施..."
+echo "[1/5] 检查基础设施..."
 if [ "${SKIP_INFRA}" = false ]; then
   docker compose up -d postgres nats redis
   echo "      等待 PostgreSQL 就绪..."
@@ -115,7 +146,7 @@ else
 fi
 
 if [ "${SWAGGER}" = true ]; then
-  echo "[2/4] 启动 Swagger UI..."
+  echo "[2/5] 启动 Swagger UI..."
   SWAGGER_STATE="$(docker inspect -f '{{.State.Running}}' blockbeast-swagger-ui 2>/dev/null || true)"
   if [ "${SWAGGER_STATE}" = "true" ]; then
     echo "      Swagger UI 已在运行"
@@ -127,23 +158,29 @@ if [ "${SWAGGER}" = true ]; then
       -v "${ROOT_DIR}/docs:/docs:ro" swaggerapi/swagger-ui >/dev/null
   fi
 else
-  echo "[2/4] 跳过 Swagger UI（使用 --swagger 启用）"
+  echo "[2/5] 跳过 Swagger UI（使用 --swagger 启用）"
 fi
 
-echo "[3/4] 启动 API、Worker 与 Realtime..."
-go run ./cmd/api &
+echo "[3/5] 编译 API、Worker 与 Realtime..."
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/block-beast-dev.XXXXXX")"
+go build -o "${BUILD_DIR}/api" ./cmd/api
+go build -o "${BUILD_DIR}/worker" ./cmd/worker
+go build -o "${BUILD_DIR}/realtime" ./cmd/realtime
+
+echo "[4/5] 启动 API、Worker 与 Realtime..."
+"${BUILD_DIR}/api" &
 API_PID=$!
-SERVICE_PIDS="${API_PID}"
+SERVICE_PIDS+=("${API_PID}")
 
-go run ./cmd/worker &
+"${BUILD_DIR}/worker" &
 WORKER_PID=$!
-SERVICE_PIDS="${SERVICE_PIDS} ${WORKER_PID}"
+SERVICE_PIDS+=("${WORKER_PID}")
 
-go run ./cmd/realtime &
+"${BUILD_DIR}/realtime" &
 REALTIME_PID=$!
-SERVICE_PIDS="${SERVICE_PIDS} ${REALTIME_PID}"
+SERVICE_PIDS+=("${REALTIME_PID}")
 
-echo "[4/4] 本地开发环境已启动"
+echo "[5/5] 本地开发环境已启动"
 echo "  API       -> http://localhost:8080"
 echo "  Realtime  -> ws://localhost:8081/v1/ws"
 echo "  PostgreSQL-> localhost:5433（容器内 5432）"
