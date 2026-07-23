@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/block-beast/platform/internal/application/outbox"
+	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/platform/natsjs"
+	"github.com/block-beast/platform/internal/platform/pqpa"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -59,6 +61,15 @@ func main() {
 	settleDueRounds(ctx, logger, settlementService, resultSource)
 	processPending(logger, processor)
 	lastStats := natsjs.ConsumerStats{}
+	var assetSync *pqpaassets.Service
+	var assetTicker *time.Ticker
+	if cfg.PQPAAPIURL != "" && cfg.PQPAAPIKey != "" && cfg.PQPAAPISecret != "" {
+		client := pqpa.NewClient(cfg.PQPAAPIURL, cfg.PQPAAPIKey, cfg.PQPAAPISecret, nil)
+		assetSync = pqpaassets.NewService(pool, pqpa.AssetProvider{Client: client})
+		assetTicker = time.NewTicker(cfg.PQPAAssetSyncInterval)
+		defer assetTicker.Stop()
+		syncPQPAAssets(ctx, logger, assetSync)
+	}
 
 	for {
 		select {
@@ -70,8 +81,29 @@ func main() {
 			settleDueRounds(ctx, logger, settlementService, resultSource)
 			processPending(logger, processor)
 			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
+		case <-assetTick(assetTicker):
+			syncPQPAAssets(ctx, logger, assetSync)
 		}
 	}
+}
+
+func assetTick(ticker *time.Ticker) <-chan time.Time {
+	if ticker == nil {
+		return nil
+	}
+	return ticker.C
+}
+
+func syncPQPAAssets(ctx context.Context, logger *slog.Logger, service *pqpaassets.Service) {
+	if service == nil {
+		return
+	}
+	count, err := service.Sync(ctx)
+	if err != nil {
+		logger.Error("PQPA asset sync failed", "error", err)
+		return
+	}
+	logger.Info("PQPA assets synchronized", "count", count)
 }
 
 type dueRoundCloser interface {
