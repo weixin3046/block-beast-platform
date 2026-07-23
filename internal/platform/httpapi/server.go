@@ -42,6 +42,7 @@ type Server struct {
 	providerAssets   ProviderAssetReader
 	agents           AgentService
 	userAdmin        UserAdminService
+	operations       OperationsService
 }
 
 type LoginService interface {
@@ -132,6 +133,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("GET /v1/assets", server.assets)
+	mux.HandleFunc("GET /v1/announcements", server.announcements)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
 	mux.HandleFunc("POST /v1/auth/register", server.register)
 	mux.HandleFunc("POST /v1/auth/refresh", server.refresh)
@@ -165,6 +167,10 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/users", server.protectRoles(server.adminUsers, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/status", server.protectRoles(server.setUserStatus, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/announcements", server.protectRoles(server.adminAnnouncements, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/announcements", server.protectRoles(server.createAnnouncement, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/announcements/{announcementID}", server.protectRoles(server.updateAnnouncement, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/audit-logs", server.protectRoles(server.auditLogs, identity.RoleAdmin))
 	mux.HandleFunc("POST /v1/point-withdrawals", server.protect(server.requestPointWithdrawal))
 	mux.HandleFunc("GET /v1/point-withdrawals", server.protect(server.pointWithdrawals))
 	mux.HandleFunc("POST /v1/admin/point-withdrawals/{withdrawalID}/review", server.protectRoles(server.reviewPointWithdrawal, identity.RoleAdmin, identity.RoleOperator))
