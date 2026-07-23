@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +53,25 @@ type Withdrawal struct {
 	ProviderOrderID string `json:"provider_order_id"`
 	Status          string `json:"status"`
 	TxHash          string `json:"tx_hash"`
+}
+
+type Chain struct {
+	Code   string `json:"code"`
+	Name   string `json:"name"`
+	Active bool   `json:"active"`
+}
+
+type Token struct {
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Decimals int    `json:"decimals"`
+	Active   bool   `json:"active"`
+}
+
+type ChainToken struct {
+	ChainCode string `json:"chain_code"`
+	TokenCode string `json:"token_code"`
+	Active    bool   `json:"active"`
 }
 
 func NewClient(baseURL, apiKey, secret string, httpClient *http.Client) *Client {
@@ -130,6 +150,31 @@ func (client *Client) GetWithdrawal(ctx context.Context, providerOrderID string)
 	path := "/v1/withdrawals/" + providerOrderID
 	if err := client.DoJSON(ctx, http.MethodGet, path, nil, &output); err != nil {
 		return Withdrawal{}, err
+	}
+	return output, nil
+}
+
+func (client *Client) ListChains(ctx context.Context) ([]Chain, error) {
+	var output []Chain
+	if err := client.DoJSON(ctx, http.MethodGet, "/v1/support/chains", nil, &output); err != nil {
+		return nil, err
+	}
+	return output, nil
+}
+
+func (client *Client) ListTokens(ctx context.Context, chainCode string) ([]Token, error) {
+	var output []Token
+	path := "/v1/support/tokens?chain_code=" + url.QueryEscape(chainCode)
+	if err := client.DoJSON(ctx, http.MethodGet, path, nil, &output); err != nil {
+		return nil, err
+	}
+	return output, nil
+}
+
+func (client *Client) ListChainTokens(ctx context.Context) ([]ChainToken, error) {
+	var output []ChainToken
+	if err := client.DoJSON(ctx, http.MethodGet, "/v1/support/chain-tokens", nil, &output); err != nil {
+		return nil, err
 	}
 	return output, nil
 }
