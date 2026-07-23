@@ -16,6 +16,7 @@ import (
 	"github.com/block-beast/platform/internal/application/betting" // 下注应用服务
 	"github.com/block-beast/platform/internal/application/chain"   // 链上充提应用服务
 	"github.com/block-beast/platform/internal/application/credit"  // 积分/体力充值应用服务
+	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/application/task"       // 任务/签到应用服务
@@ -62,6 +63,7 @@ func main() {
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
+	options = append(options, httpapi.WithUserAdmin(operations.NewService(pool)))
 	if cfg.PQPAAPISecret == "" {
 		logger.Warn("PQPA_API_SECRET is not set; chain deposit webhook is disabled")
 	} else {

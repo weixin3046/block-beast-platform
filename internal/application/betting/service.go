@@ -17,6 +17,8 @@ import (
 var ErrRoundNotFound = errors.New("round not found")
 var ErrBetNotFound = errors.New("bet not found")
 var ErrInvalidSelection = errors.New("selection must be valid JSON")
+var ErrAccountDisabled = errors.New("account is disabled")
+var ErrBettingBanned = errors.New("account is banned from betting")
 
 type PlaceBetRequest struct {
 	ClientRequestID string          `json:"client_request_id"`
@@ -127,6 +129,17 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, err
+	}
+
+	var userStatus string
+	if err := tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1 FOR UPDATE`, request.AccountID).Scan(&userStatus); err != nil {
+		return PlacedBet{}, err
+	}
+	if userStatus == "disabled" {
+		return PlacedBet{}, ErrAccountDisabled
+	}
+	if userStatus == "bet_banned" {
+		return PlacedBet{}, ErrBettingBanned
 	}
 
 	var status game.RoundStatus

@@ -103,6 +103,13 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 `request_id` 是幂等键，重复请求返回首次结果（`credited=false`），不会重复入账。
 
+用户管理：
+
+- `GET /v1/admin/users?status=active&q=用户名`：查询和筛选用户。
+- `PUT /v1/admin/users/{userID}/status`：设置 `active`、`disabled` 或 `bet_banned`。
+
+`disabled` 用户不能登录或继续下注；`bet_banned` 用户可以登录和查看资产，但不能创建新投注。
+
 ## 代理返佣
 
 - `GET /v1/agents/me/commissions`：查询本人佣金明细。

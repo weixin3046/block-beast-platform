@@ -40,6 +40,7 @@ type Server struct {
 	tasks            TaskService
 	providerAssets   ProviderAssetReader
 	agents           AgentService
+	userAdmin        UserAdminService
 }
 
 type LoginService interface {
@@ -150,6 +151,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/withdrawals", server.protectRoles(server.adminWithdrawals, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/withdrawals/{withdrawalID}/reject", server.protectRoles(server.rejectWithdrawal, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/users", server.protectRoles(server.adminUsers, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/users/{userID}/status", server.protectRoles(server.setUserStatus, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/point-withdrawals", server.protect(server.requestPointWithdrawal))
 	mux.HandleFunc("GET /v1/point-withdrawals", server.protect(server.pointWithdrawals))
 	mux.HandleFunc("POST /v1/admin/point-withdrawals/{withdrawalID}/review", server.protectRoles(server.reviewPointWithdrawal, identity.RoleAdmin, identity.RoleOperator))
@@ -443,6 +446,8 @@ func writeBetError(writer http.ResponseWriter, err error) {
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
 	case errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, betting.ErrAccountDisabled), errors.Is(err, betting.ErrBettingBanned):
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 	default:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to place bet"})
 	}
