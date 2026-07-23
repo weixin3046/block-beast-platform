@@ -21,6 +21,27 @@ type CreditService interface {
 	ListStaminaLedger(ctx context.Context, userID string, limit int, offset int) ([]credit.LedgerEntry, error)
 	RequestPointWithdrawal(ctx context.Context, userID, requestID string, amount int64, remark string) (credit.PointWithdrawal, error)
 	ReviewPointWithdrawal(ctx context.Context, id, reviewerID string, approved bool) error
+	ListPointWithdrawals(ctx context.Context, userID, status string, limit int) ([]credit.PointWithdrawal, error)
+}
+
+func (server *Server) pointWithdrawals(writer http.ResponseWriter, request *http.Request) {
+	if server.credits == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "credit service is unavailable"})
+		return
+	}
+	userID := ""
+	if claims, ok := ClaimsFromContext(request.Context()); ok {
+		userID = claims.Subject
+	}
+	if userID == "" {
+		userID = request.URL.Query().Get("account_id")
+	}
+	items, err := server.credits.ListPointWithdrawals(request.Context(), userID, request.URL.Query().Get("status"), 50)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list point withdrawals"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
 }
 
 func (server *Server) requestPointWithdrawal(writer http.ResponseWriter, request *http.Request) {

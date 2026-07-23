@@ -135,6 +135,41 @@ func (service *Service) ReviewPointWithdrawal(ctx context.Context, id, reviewerI
 	return tx.Commit(ctx)
 }
 
+func (service *Service) ListPointWithdrawals(ctx context.Context, userID, status string, limit int) ([]PointWithdrawal, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	query := `SELECT id,user_id,client_request_id,amount_minor,status,created_at FROM point_withdrawals WHERE 1=1`
+	args := []any{}
+	index := 1
+	if userID != "" {
+		query += fmt.Sprintf(" AND user_id=$%d", index)
+		args = append(args, userID)
+		index++
+	}
+	if status != "" {
+		query += fmt.Sprintf(" AND status=$%d", index)
+		args = append(args, status)
+		index++
+	}
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", index)
+	args = append(args, limit)
+	rows, err := service.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	output := make([]PointWithdrawal, 0)
+	for rows.Next() {
+		var item PointWithdrawal
+		if err := rows.Scan(&item.ID, &item.UserID, &item.ClientRequestID, &item.AmountMinor, &item.Status, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		output = append(output, item)
+	}
+	return output, rows.Err()
+}
+
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
