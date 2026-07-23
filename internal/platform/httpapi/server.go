@@ -38,6 +38,7 @@ type Server struct {
 	credits          CreditService
 	tasks            TaskService
 	providerAssets   ProviderAssetReader
+	agents           AgentService
 }
 
 type LoginService interface {
@@ -120,6 +121,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/assets", server.assets)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
 	mux.HandleFunc("POST /v1/auth/register", server.register)
+	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
 	mux.HandleFunc("GET /v1/bets/{betID}", server.protect(server.bet))
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.protect(server.balance))

@@ -10,6 +10,7 @@ import (
 	"syscall"   // 系统信号常量（SIGINT、SIGTERM）
 	"time"      // 时间、超时设置
 
+	"github.com/block-beast/platform/internal/application/agent"
 	"github.com/block-beast/platform/internal/application/audit"   // 审计应用服务
 	"github.com/block-beast/platform/internal/application/auth"    // 登录认证应用服务
 	"github.com/block-beast/platform/internal/application/betting" // 下注应用服务
@@ -57,6 +58,7 @@ func main() {
 		logger.Warn("PQPA API configuration is incomplete; deposit address creation is disabled")
 	}
 	options = append(options, httpapi.WithWithdrawals(chainService))
+	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
 	if cfg.PQPAAPISecret == "" {
