@@ -30,7 +30,7 @@ func TestListChainTokensUsesPQPAEnvelopeAndFields(t *testing.T) {
 			"msg":  "",
 			"data": []map[string]any{{
 				"chainCode": "POLYGON", "chainName": "Polygon", "tokenSymbol": "USDT",
-				"decimals": 6, "supportRecharge": true, "supportWithdraw": true,
+				"chainTokenId": 19, "decimals": 6, "supportRecharge": true, "supportWithdraw": true,
 			}},
 		})
 	}))
@@ -40,7 +40,7 @@ func TestListChainTokensUsesPQPAEnvelopeAndFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list chain tokens: %v", err)
 	}
-	if len(items) != 1 || items[0].ChainCode != "POLYGON" || items[0].TokenCode != "USDT" || items[0].Decimals != 6 || !items[0].SupportDeposit {
+	if len(items) != 1 || items[0].ChainTokenID != 19 || items[0].ChainCode != "POLYGON" || items[0].TokenCode != "USDT" || items[0].Decimals != 6 || !items[0].SupportDeposit {
 		t.Fatalf("items = %+v", items)
 	}
 }
@@ -71,13 +71,13 @@ func TestCreateDepositAddressUsesOfficialPQPAContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	providerID, address, err := NewClient(server.URL, "key", "secret", server.Client()).
+	providerID, address, memo, err := NewClient(server.URL, "key", "secret", server.Client()).
 		CreateDepositAddress(context.Background(), "user-1", "POLYGON", "USDT")
 	if err != nil {
 		t.Fatalf("create deposit address: %v", err)
 	}
-	if providerID != "88001" || address != "0xabc" {
-		t.Fatalf("providerID = %q, address = %q", providerID, address)
+	if providerID != "88001" || address != "0xabc" || memo != "" {
+		t.Fatalf("providerID = %q, address = %q, memo = %q", providerID, address, memo)
 	}
 }
 

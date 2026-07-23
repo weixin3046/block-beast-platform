@@ -19,18 +19,13 @@ type Config struct {
 	AuthTokenSecret        string
 	AccessTokenTTL         time.Duration
 	RefreshTokenTTL        time.Duration
-	// ChainWebhookSecret is retained as a compatibility alias for older deployments.
-	// PQPA callbacks should use PQPAAPISecret.
-	ChainWebhookSecret    string
-	ChainWebhookSkew      time.Duration
-	TronRPCURL            string
-	OkxRESTURL            string
-	PQPAAPIURL            string
-	PQPAAPIKey            string
-	PQPAAPISecret         string
-	PQPAChainCode         string
-	PQPATokenCode         string
-	PQPAAssetSyncInterval time.Duration
+	ChainWebhookSkew       time.Duration
+	TronRPCURL             string
+	OkxRESTURL             string
+	PQPAAPIURL             string
+	PQPAAPIKey             string
+	PQPAAPISecret          string
+	PQPAAssetSyncInterval  time.Duration
 }
 
 func Load() Config {
@@ -47,15 +42,12 @@ func Load() Config {
 		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),
 		AccessTokenTTL:         durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:        durationOrDefault("REFRESH_TOKEN_TTL", 30*24*time.Hour),
-		ChainWebhookSecret:     os.Getenv("PQPA_API_SECRET"),
 		ChainWebhookSkew:       durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
 		TronRPCURL:             valueOrDefault("TRON_RPC_URL", "https://divine-greatest-valley.tron-mainnet.quiknode.pro/30d6aa253beb02c5229422c0a758e150311bd5cc/jsonrpc"),
 		OkxRESTURL:             valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
 		PQPAAPIURL:             os.Getenv("PQPA_API_URL"),
 		PQPAAPIKey:             os.Getenv("PQPA_API_KEY"),
 		PQPAAPISecret:          os.Getenv("PQPA_API_SECRET"),
-		PQPAChainCode:          valueOrDefault("PQPA_CHAIN_CODE", "TRON"),
-		PQPATokenCode:          valueOrDefault("PQPA_TOKEN_CODE", "USDT"),
 		PQPAAssetSyncInterval:  durationOrDefault("PQPA_ASSET_SYNC_INTERVAL", time.Hour),
 	}
 }

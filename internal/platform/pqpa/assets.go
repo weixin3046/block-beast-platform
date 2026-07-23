@@ -17,11 +17,13 @@ func (provider AssetProvider) ListChainTokens(ctx context.Context) ([]pqpaassets
 	output := make([]pqpaassets.ChainToken, 0, len(items))
 	for _, item := range items {
 		output = append(output, pqpaassets.ChainToken{
-			ChainCode: item.ChainCode,
-			TokenCode: item.TokenCode,
-			TokenName: item.TokenCode,
-			Decimals:  item.Decimals,
-			Active:    item.SupportDeposit,
+			ProviderChainTokenID: item.ChainTokenID,
+			ChainCode:            item.ChainCode,
+			TokenCode:            item.TokenCode,
+			TokenName:            item.TokenCode,
+			Decimals:             item.Decimals,
+			SupportDeposit:       item.SupportDeposit,
+			SupportWithdraw:      item.SupportWithdraw,
 		})
 	}
 	return output, nil

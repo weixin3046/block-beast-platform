@@ -534,9 +534,9 @@ paths:
       operationId: chainDepositWebhook
       summary: 链上充值回调（服务商调用）
       description: |
-        PQPA 推送已确认充值。请求必须携带 HMAC 签名头：`X-Timestamp`（毫秒）、`X-Nonce`、`X-Signature`，并使用 `PQPA_API_SECRET` 验签。
+        PQPA 推送充值状态。请求必须携带 `X-Api-Key`、`X-Timestamp`（毫秒）、`X-Nonce`、`X-Signature`，并使用 `PQPA_API_SECRET` 验签。
         签名内容为 `方法\n路径\n时间戳\n随机数\n正文SHA256(十六进制)` 的 HMAC-SHA256（十六进制），密钥由平台分配；时间戳允许偏移默认 5 分钟。
-        充值按服务商事件 ID 与交易哈希幂等，重复回调不会重复入账；非平台地址返回 `{"status":"ignored"}`。
+        仅 `txStatus=SETTLED` 入账。充值按服务商事件 ID 与交易哈希幂等，重复回调不会重复入账；未知资产或非平台地址也返回 PQPA 成功 ACK，供后台人工排查。
       requestBody:
         required: true
         content:
@@ -545,11 +545,15 @@ paths:
               $ref: '#/components/schemas/DepositWebhookRequest'
       responses:
         '200':
-          description: 已处理（credited=true 表示本次入账；false 表示重复回调；ignored 表示非平台地址）。
+          description: 已处理，响应必含 `{"code":0}`；首次入账时还包含 deposit。
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DepositResult'
+                type: object
+                required: [code]
+                properties:
+                  code: { type: integer, enum: [0] }
+                  deposit: { $ref: '#/components/schemas/DepositResult' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -561,19 +565,24 @@ paths:
       tags: [Chain]
       operationId: chainWithdrawalWebhook
       summary: PQPA 提现状态回调
-      description: 使用 `X-Timestamp`、`X-Nonce`、`X-Signature` 和 `PQPA_API_SECRET` 验签。`confirmed` 核销冻结余额，`failed` 自动解冻并恢复可用余额。
+      description: 使用 `X-Api-Key`、`X-Timestamp`、`X-Nonce`、`X-Signature` 和 `PQPA_API_SECRET` 验签。PQPA `SUCCESS` 核销冻结余额，`FAILED` 自动解冻；中间状态仅幂等记录并返回成功 ACK。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [provider_order_id, status]
+              required: [event, id, appOrderNo, chainTokenId, toAddress, amount, status]
               properties:
-                provider_order_id: { type: string }
-                status: { type: string, enum: [confirmed, failed] }
-                tx_hash: { type: string }
-                failure_reason: { type: string }
+                event: { type: string, enum: [withdraw] }
+                id: { type: integer, format: int64 }
+                appOrderNo: { type: string, description: 平台提现 UUID }
+                chainId: { type: integer, format: int64 }
+                chainTokenId: { type: integer, format: int64 }
+                toAddress: { type: string }
+                amount: { type: string }
+                txHash: { type: string }
+                status: { type: string, example: SUCCESS }
       responses:
         '200': { description: 已处理或已忽略 }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -621,8 +630,8 @@ paths:
     get:
       tags: [Chain]
       operationId: listProviderAssets
-      summary: 查询 PQPA 当前启用的充值网络和币种
-      description: 返回 Worker 从 PQPA 同步的动态配置。玩家端必须先读取此列表，再用选中的 `chain_code` 和 `token_code` 查询或创建充值地址，不能硬编码网络。
+      summary: 查询 PQPA 当前启用的链、币种和充提能力
+      description: 返回 Worker 从 PQPA 自动同步的动态配置。玩家端不得硬编码网络；充值只展示 `support_deposit=true`，提现只展示 `support_withdraw=true`。
       responses:
         '200':
           description: PQPA 当前启用的充值资产。
@@ -643,6 +652,8 @@ paths:
                         token_code: { type: string, example: USDT }
                         token_name: { type: string, example: USDT }
                         decimals: { type: integer, example: 6 }
+                        support_deposit: { type: boolean }
+                        support_withdraw: { type: boolean }
         '503': { $ref: '#/components/responses/Unavailable' }
   /v1/withdrawals:
     post:
@@ -1027,26 +1038,20 @@ components:
           example: ok
     DepositWebhookRequest:
       type: object
-      required: [provider_event_id, tx_hash, chain_code, token_code, address, amount_minor]
+      required: [event, id, chainTokenId, address, amount, txHash, txStatus]
       properties:
-        provider_event_id:
-          type: string
-          description: 服务商事件唯一 ID，用于幂等。
-        tx_hash:
-          type: string
-        chain_code:
-          type: string
-          example: TRON
-        token_code:
-          type: string
-          example: USDT
+        event: { type: string, enum: [recharge] }
+        id: { type: integer, format: int64, description: PQPA 充值事件 ID }
+        applicationId: { type: integer, format: int64 }
+        chainId: { type: integer, format: int64 }
+        chainTokenId: { type: integer, format: int64 }
         address:
           type: string
           description: 平台分配给用户的充值地址。
-        amount_minor:
-          type: integer
-          format: int64
-          minimum: 1
+        amount: { type: string, example: '100.00' }
+        txHash: { type: string }
+        blockHeight: { type: integer, format: int64 }
+        txStatus: { type: string, example: SETTLED }
     DepositResult:
       type: object
       required: [deposit_id, status, credited]
@@ -1063,7 +1068,7 @@ components:
     WithdrawalRequest:
       type: object
       additionalProperties: false
-      required: [client_request_id, destination_address, currency, amount_minor]
+      required: [client_request_id, destination_address, chain_code, currency, amount_minor]
       properties:
         client_request_id:
           type: string
@@ -1072,6 +1077,12 @@ components:
         destination_address:
           type: string
           minLength: 1
+        destination_memo:
+          type: string
+          description: 目标链要求 Memo/Tag 时填写。
+        chain_code:
+          type: string
+          example: POLYGON
         currency:
           type: string
           example: USDT
@@ -1081,7 +1092,7 @@ components:
           minimum: 1
     Withdrawal:
       type: object
-      required: [withdrawal_id, client_request_id, destination_address, currency, amount_minor, status, created_at]
+      required: [withdrawal_id, client_request_id, destination_address, chain_code, currency, amount_minor, status, created_at]
       properties:
         withdrawal_id:
           type: string
@@ -1089,6 +1100,10 @@ components:
         client_request_id:
           type: string
         destination_address:
+          type: string
+        destination_memo:
+          type: string
+        chain_code:
           type: string
         currency:
           type: string
@@ -1101,6 +1116,12 @@ components:
         created_at:
           type: string
           format: date-time
+        provider_order_id:
+          type: string
+        tx_hash:
+          type: string
+        failure_reason:
+          type: string
     RegisterRequest:
       type: object
       additionalProperties: false

@@ -106,10 +106,15 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 充值网络与币种由 PQPA 应用配置决定，前端不得硬编码 TRON 或其他网络：
 
-1. 调用 `GET /v1/assets` 获取当前启用的 `chain_code`、`token_code` 和精度。
+1. 调用 `GET /v1/assets` 获取当前启用的 `chain_code`、`token_code`、精度和 `support_withdraw`。
 2. 玩家选择资产后，调用 `GET /v1/deposit-addresses?chain_code=POLYGON&token_code=USDT` 查询既有地址。
 3. 地址不存在时，调用 `POST /v1/deposit-addresses` 并传入相同的 `chain_code` 和 `token_code` 创建地址。
 4. 切换网络或币种时必须清空之前展示的地址，避免跨链误充值。
+5. 创建地址响应可能包含 `memo`；存在时必须与地址一起展示和复制。
+
+## USDT 提现
+
+提现网络同样来自 `GET /v1/assets`，只允许选择 `support_withdraw=true` 的资产。调用 `POST /v1/withdrawals` 时必须提交 `chain_code`、`currency`、目标地址、可选的 `destination_memo`、最小单位整数金额和客户端幂等键。后台审批通过后由 Worker 调用 PQPA 出金；最终状态由 PQPA Webhook 更新，回调丢失时由 Worker 主动对账补偿。
 
 ## 管理后台接口
 

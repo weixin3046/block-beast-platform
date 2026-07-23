@@ -51,7 +51,7 @@ func main() {
 	}
 	for _, subject := range []string{"game.>", "wallet.>", "chain.>"} {
 		durable := "worker-" + strings.ReplaceAll(strings.TrimSuffix(subject, ".>"), ".", "-")
-		if err := eventConsumer.Subscribe(subject, durable, processEvent(logger, withdrawalSender, cfg.PQPAChainCode)); err != nil {
+		if err := eventConsumer.Subscribe(subject, durable, processEvent(logger, withdrawalSender)); err != nil {
 			logger.Error("worker failed to subscribe", "subject", subject, "error", err)
 			return
 		}
@@ -147,7 +147,7 @@ func processDueRounds(ctx context.Context, logger *slog.Logger, repository dueRo
 }
 
 // logEvent 是业务处理器落地前的占位处理器：确认事件已到达并记录日志。
-func processEvent(logger *slog.Logger, withdrawals *chainapp.Service, chainCode string) natsjs.Handler {
+func processEvent(logger *slog.Logger, withdrawals *chainapp.Service) natsjs.Handler {
 	return func(ctx context.Context, event events.Event) error {
 		if event.Type == events.WithdrawalApproved && withdrawals != nil {
 			var payload struct {
@@ -156,7 +156,7 @@ func processEvent(logger *slog.Logger, withdrawals *chainapp.Service, chainCode 
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				return err
 			}
-			if err := withdrawals.SendApprovedWithdrawal(ctx, payload.WithdrawalID, chainCode); err != nil {
+			if err := withdrawals.SendApprovedWithdrawal(ctx, payload.WithdrawalID); err != nil {
 				return err
 			}
 			logger.Info("PQPA withdrawal sent", "withdrawal_id", payload.WithdrawalID)

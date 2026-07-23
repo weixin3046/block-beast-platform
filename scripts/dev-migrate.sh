@@ -34,6 +34,8 @@ migration_is_present() {
     0008) psql_command -Atqc "SELECT to_regclass('public.agent_commission_rates') IS NOT NULL" ;;
     0009) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'commission_entries' AND column_name = 'currency')" ;;
     0010) psql_command -Atqc "SELECT to_regclass('public.commission_adjustments') IS NOT NULL" ;;
+    0011) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'withdrawals' AND column_name = 'provider_chain_token_id')" ;;
+    0012) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'provider_supported_assets' AND column_name = 'support_deposit')" ;;
     *) printf 'f\n' ;;
   esac
 }
@@ -55,4 +57,3 @@ for migration_path in migrations/*.sql; do
 
   psql_command -c "INSERT INTO schema_migrations (version) VALUES ('${version}') ON CONFLICT DO NOTHING" >/dev/null
 done
-

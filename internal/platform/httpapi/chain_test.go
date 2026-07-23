@@ -19,14 +19,15 @@ import (
 )
 
 const webhookSecret = "dev-webhook-secret-for-tests"
+const webhookAPIKey = "test-api-key"
 
 type stubDepositCreditor struct {
 	result chainapp.DepositResult
 	err    error
 }
 
-func (stub stubDepositCreditor) CreditDeposit(_ context.Context, _ chainapp.DepositInput) (chainapp.DepositResult, error) {
-	return stub.result, stub.err
+func (stub stubDepositCreditor) CreditPQPADeposit(_ context.Context, _ chainapp.PQPADepositWebhook) (chainapp.DepositResult, bool, error) {
+	return stub.result, stub.err == nil, stub.err
 }
 
 func signedWebhookRequest(t *testing.T, body string) *http.Request {
@@ -38,17 +39,18 @@ func signedWebhookRequest(t *testing.T, body string) *http.Request {
 	request.Header.Set("X-Timestamp", timestamp)
 	request.Header.Set("X-Nonce", nonce)
 	request.Header.Set("X-Signature", signature)
+	request.Header.Set("X-Api-Key", webhookAPIKey)
 	return request
 }
 
 func webhookServer(creditor DepositCreditor) *Server {
 	return New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
-		WithChainDeposits(webhookSecret, 5*time.Minute, creditor))
+		WithChainDeposits(webhookAPIKey, webhookSecret, 5*time.Minute, creditor))
 }
 
 func TestChainDepositWebhookVerifiesSignature(t *testing.T) {
 	server := webhookServer(stubDepositCreditor{result: chainapp.DepositResult{DepositID: "d1", Status: "credited", Credited: true}})
-	body := `{"provider_event_id":"e1","tx_hash":"t1","chain_code":"TRON","token_code":"USDT","address":"T1","amount_minor":100}`
+	body := `{"event":"recharge","id":1,"chainTokenId":19,"address":"0x1","amount":"1.00","txHash":"0xabc","txStatus":"SETTLED"}`
 
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, signedWebhookRequest(t, body))
@@ -58,7 +60,7 @@ func TestChainDepositWebhookVerifiesSignature(t *testing.T) {
 
 	// 篡改正文后签名不再匹配。
 	tampered := signedWebhookRequest(t, body)
-	tampered.Body = io.NopCloser(strings.NewReader(`{"provider_event_id":"e2","tx_hash":"t2","chain_code":"TRON","token_code":"USDT","address":"T1","amount_minor":999}`))
+	tampered.Body = io.NopCloser(strings.NewReader(`{"event":"recharge","id":2,"chainTokenId":19,"address":"0x1","amount":"9.99","txHash":"0xdef","txStatus":"SETTLED"}`))
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, tampered)
 	if response.Code != http.StatusUnauthorized {
@@ -76,9 +78,9 @@ func TestChainDepositWebhookVerifiesSignature(t *testing.T) {
 func TestChainDepositWebhookMapsResults(t *testing.T) {
 	server := webhookServer(stubDepositCreditor{err: chainapp.ErrUnknownDepositAddress})
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, signedWebhookRequest(t, `{"provider_event_id":"e1","tx_hash":"t1","chain_code":"TRON","token_code":"USDT","address":"foreign","amount_minor":100}`))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "ignored") {
-		t.Fatalf("unknown address = %d %q, want 200 ignored", response.Code, response.Body.String())
+	server.Handler().ServeHTTP(response, signedWebhookRequest(t, `{"event":"recharge","id":1,"chainTokenId":19,"address":"foreign","amount":"1","txHash":"0x1","txStatus":"SETTLED"}`))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"code":0`) {
+		t.Fatalf("unknown address = %d %q, want PQPA ACK", response.Code, response.Body.String())
 	}
 
 	unconfigured := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
@@ -131,14 +133,14 @@ func TestWithdrawalEndpointsRequireAuthAndOwnership(t *testing.T) {
 
 	// 无令牌创建提现。
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"T1","currency":"USDT","amount_minor":100}`)))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount_minor":100}`)))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("no token status = %d, want 401", response.Code)
 	}
 
 	// 有令牌创建提现：身份取自令牌而非请求体。
 	token := issueTestToken(t, "user-1", []string{identity.RolePlayer})
-	request := httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"T1","currency":"USDT","amount_minor":100}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount_minor":100}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -167,7 +169,7 @@ func TestWithdrawalEndpointsRequireAuthAndOwnership(t *testing.T) {
 	stub.requestErr = wallet.ErrInsufficientFunds
 	insufficientServer := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
 		WithAuth(authenticator), WithWithdrawals(stub))
-	request = httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c2","destination_address":"T1","currency":"USDT","amount_minor":999999}`))
+	request = httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c2","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount_minor":999999}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response = httptest.NewRecorder()
 	insufficientServer.Handler().ServeHTTP(response, request)
