@@ -22,9 +22,21 @@
 
 ## 本地启动
 
+macOS / Linux：
+
+```bash
+./scripts/dev-up.sh
+```
+
+可选参数：`--skip-infra` 跳过基础设施容器，`--swagger` 同时启动
+`http://localhost:8082` 的 Swagger UI。脚本会启动 API、Worker、Realtime，并在
+按下 `Ctrl+C` 时停止这三个 Go 进程。
+
+Windows PowerShell：
+
 ```powershell
 Copy-Item .env.example .env
-docker compose up --build
+.\scripts\dev-up.ps1
 ```
 
 首次创建 PostgreSQL 数据卷时会按文件名顺序执行 `migrations/` 下的全部迁移。已有数据卷不会自动重新执行初始化脚本；升级已有数据库时需按顺序执行新增迁移，不能通过删除生产数据卷完成升级。
