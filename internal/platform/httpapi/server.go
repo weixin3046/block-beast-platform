@@ -123,6 +123,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/auth/register", server.register)
 	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("GET /v1/agents/me", server.protect(server.agentRelation))
+	mux.HandleFunc("GET /v1/agents/me/commissions", server.protect(server.commissions))
 	mux.HandleFunc("PUT /v1/admin/agents/{agentID}/commission-rate", server.protectRoles(server.setAgentCommissionRate, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
 	mux.HandleFunc("GET /v1/bets/{betID}", server.protect(server.bet))

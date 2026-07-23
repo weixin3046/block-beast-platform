@@ -19,6 +19,33 @@ type Relation struct {
 	ParentUserID string `json:"parent_user_id"`
 }
 
+type Commission struct {
+	ID          string `json:"id"`
+	BetID       string `json:"bet_id"`
+	AmountMinor int64  `json:"amount_minor"`
+	Status      string `json:"status"`
+}
+
+func (service *Service) ListCommissions(ctx context.Context, agentID string, limit int) ([]Commission, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := service.pool.Query(ctx, `SELECT id::text,source_bet_id::text,amount_minor,status FROM commission_entries WHERE beneficiary_user_id=$1 ORDER BY id DESC LIMIT $2`, agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Commission, 0)
+	for rows.Next() {
+		var item Commission
+		if err := rows.Scan(&item.ID, &item.BetID, &item.AmountMinor, &item.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 // Bind creates an immutable direct referral relation and a materialized ltree path.

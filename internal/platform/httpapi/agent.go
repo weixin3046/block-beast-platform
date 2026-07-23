@@ -13,6 +13,21 @@ type AgentService interface {
 	Bind(ctx context.Context, userID, parentID string) error
 	GetRelation(ctx context.Context, userID string) (agentapp.Relation, error)
 	SetCommissionRate(ctx context.Context, agentID string, rateBasisPoints int, operatorID string) error
+	ListCommissions(ctx context.Context, agentID string, limit int) ([]agentapp.Commission, error)
+}
+
+func (server *Server) commissions(writer http.ResponseWriter, request *http.Request) {
+	claims, ok := ClaimsFromContext(request.Context())
+	if !ok || claims.Subject == "" {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	items, err := server.agents.ListCommissions(request.Context(), claims.Subject, 50)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list commissions"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
 }
 
 func (server *Server) setAgentCommissionRate(writer http.ResponseWriter, request *http.Request) {
