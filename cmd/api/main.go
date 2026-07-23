@@ -10,11 +10,12 @@ import (
 	"syscall"   // 系统信号常量（SIGINT、SIGTERM）
 	"time"      // 时间、超时设置
 
-	"github.com/block-beast/platform/internal/application/audit"      // 审计应用服务
-	"github.com/block-beast/platform/internal/application/auth"       // 登录认证应用服务
-	"github.com/block-beast/platform/internal/application/betting"    // 下注应用服务
-	"github.com/block-beast/platform/internal/application/chain"      // 链上充提应用服务
-	"github.com/block-beast/platform/internal/application/credit"     // 积分/体力充值应用服务
+	"github.com/block-beast/platform/internal/application/audit"   // 审计应用服务
+	"github.com/block-beast/platform/internal/application/auth"    // 登录认证应用服务
+	"github.com/block-beast/platform/internal/application/betting" // 下注应用服务
+	"github.com/block-beast/platform/internal/application/chain"   // 链上充提应用服务
+	"github.com/block-beast/platform/internal/application/credit"  // 积分/体力充值应用服务
+	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/application/task"       // 任务/签到应用服务
 	"github.com/block-beast/platform/internal/config"                 // 配置加载
@@ -49,7 +50,9 @@ func main() {
 	}
 	chainService := chain.NewService(pool)
 	if cfg.PQPAAPIURL != "" && cfg.PQPAAPIKey != "" && cfg.PQPAAPISecret != "" {
-		chainService.WithDepositAddressProvider(pqpa.NewClient(cfg.PQPAAPIURL, cfg.PQPAAPIKey, cfg.PQPAAPISecret, nil))
+		pqpaClient := pqpa.NewClient(cfg.PQPAAPIURL, cfg.PQPAAPIKey, cfg.PQPAAPISecret, nil)
+		chainService.WithDepositAddressProvider(pqpaClient)
+		options = append(options, httpapi.WithProviderAssets(pqpaassets.NewService(pool, pqpa.AssetProvider{Client: pqpaClient})))
 	} else {
 		logger.Warn("PQPA API configuration is incomplete; deposit address creation is disabled")
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/block-beast/platform/internal/application/audit"
 	"github.com/block-beast/platform/internal/application/auth"
 	"github.com/block-beast/platform/internal/application/betting"
+	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/domain/identity"
@@ -36,6 +37,7 @@ type Server struct {
 	depositAddresses DepositAddressService
 	credits          CreditService
 	tasks            TaskService
+	providerAssets   ProviderAssetReader
 }
 
 type LoginService interface {
@@ -52,6 +54,14 @@ type AuditRecorder interface {
 
 // Option 按需装配服务器的可选能力（鉴权、登录、审计）。
 type Option func(*Server)
+
+type ProviderAssetReader interface {
+	ListEnabled(ctx context.Context) ([]pqpaassets.Asset, error)
+}
+
+func WithProviderAssets(reader ProviderAssetReader) Option {
+	return func(server *Server) { server.providerAssets = reader }
+}
 
 func WithAuth(authenticator *Authenticator) Option {
 	return func(server *Server) { server.auth = authenticator }
@@ -107,6 +117,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
+	mux.HandleFunc("GET /v1/assets", server.assets)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
 	mux.HandleFunc("POST /v1/auth/register", server.register)
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))

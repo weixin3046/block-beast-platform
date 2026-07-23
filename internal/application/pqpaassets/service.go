@@ -24,6 +24,13 @@ type Service struct {
 	provider Provider
 }
 
+type Asset struct {
+	ChainCode string `json:"chain_code"`
+	TokenCode string `json:"token_code"`
+	TokenName string `json:"token_name"`
+	Decimals  int    `json:"decimals"`
+}
+
 func NewService(pool *pgxpool.Pool, provider Provider) *Service {
 	return &Service{pool: pool, provider: provider}
 }
@@ -58,4 +65,21 @@ func (service *Service) Sync(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return len(assets), nil
+}
+
+func (service *Service) ListEnabled(ctx context.Context) ([]Asset, error) {
+	rows, err := service.pool.Query(ctx, `SELECT chain_code, token_code, COALESCE(token_name, ''), decimals FROM provider_supported_assets WHERE provider='pqpa' AND enabled=true ORDER BY chain_code, token_code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	assets := make([]Asset, 0)
+	for rows.Next() {
+		var item Asset
+		if err := rows.Scan(&item.ChainCode, &item.TokenCode, &item.TokenName, &item.Decimals); err != nil {
+			return nil, err
+		}
+		assets = append(assets, item)
+	}
+	return assets, rows.Err()
 }
