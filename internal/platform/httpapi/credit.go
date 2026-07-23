@@ -44,6 +44,19 @@ func (server *Server) pointWithdrawals(writer http.ResponseWriter, request *http
 	writeJSON(writer, http.StatusOK, items)
 }
 
+func (server *Server) adminPointWithdrawals(writer http.ResponseWriter, request *http.Request) {
+	if server.credits == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "credit service is unavailable"})
+		return
+	}
+	items, err := server.credits.ListPointWithdrawals(request.Context(), "", request.URL.Query().Get("status"), 50)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list point withdrawals"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
+}
+
 func (server *Server) requestPointWithdrawal(writer http.ResponseWriter, request *http.Request) {
 	if server.credits == nil {
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "credit service is unavailable"})

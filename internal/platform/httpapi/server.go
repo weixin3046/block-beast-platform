@@ -139,6 +139,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/point-withdrawals", server.protect(server.requestPointWithdrawal))
 	mux.HandleFunc("GET /v1/point-withdrawals", server.protect(server.pointWithdrawals))
 	mux.HandleFunc("POST /v1/admin/point-withdrawals/{withdrawalID}/review", server.protectRoles(server.reviewPointWithdrawal, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/point-withdrawals", server.protectRoles(server.adminPointWithdrawals, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/stamina/consume", server.protect(server.consumeStamina))
 	mux.HandleFunc("POST /v1/tasks/checkin", server.protect(server.checkin))
 	mux.HandleFunc("GET /v1/wallets/{accountID}/all", server.protect(server.allBalances))
