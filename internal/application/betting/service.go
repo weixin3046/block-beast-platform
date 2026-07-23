@@ -36,7 +36,9 @@ type PlacedBet struct {
 	Selection       json.RawMessage `json:"selection"`
 	StakeMinor      int64           `json:"stake_minor"`
 	Status          string          `json:"status"`
+	PayoutMinor     int64           `json:"payout_minor"`
 	PlacedAt        time.Time       `json:"placed_at"`
+	SettledAt       *time.Time      `json:"settled_at,omitempty"`
 }
 
 // BetTaskHook 在积分投注成交后累计任务进度（如投注达标送体力），可为 nil。
@@ -64,11 +66,11 @@ func (service *Service) Find(ctx context.Context, betID string) (PlacedBet, erro
 	var bet PlacedBet
 	err := service.pool.QueryRow(ctx, `
 		SELECT bets.id, bets.client_request_id, bets.round_id, bets.user_id, wallets.currency,
-			bets.selection, bets.stake_minor, bets.status, bets.created_at
+			bets.selection, bets.stake_minor, bets.status, bets.payout_minor, bets.created_at, bets.settled_at
 		FROM bets
 		JOIN wallets ON wallets.id = bets.wallet_id
 		WHERE bets.id = $1`, betID).
-		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PlacedAt)
+		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PayoutMinor, &bet.PlacedAt, &bet.SettledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, ErrBetNotFound
 	}
@@ -76,6 +78,33 @@ func (service *Service) Find(ctx context.Context, betID string) (PlacedBet, erro
 		return PlacedBet{}, err
 	}
 	return bet, nil
+}
+
+func (service *Service) ListUserBets(ctx context.Context, userID, status string, limit int) ([]PlacedBet, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	query := `SELECT bets.id,bets.client_request_id,bets.round_id,bets.user_id,wallets.currency,bets.selection,bets.stake_minor,bets.status,bets.payout_minor,bets.created_at,bets.settled_at FROM bets JOIN wallets ON wallets.id=bets.wallet_id WHERE bets.user_id=$1`
+	args := []any{userID, limit}
+	if status != "" {
+		query += ` AND bets.status=$3`
+		args = append(args, status)
+	}
+	query += ` ORDER BY bets.created_at DESC LIMIT $2`
+	rows, err := service.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]PlacedBet, 0)
+	for rows.Next() {
+		var bet PlacedBet
+		if err := rows.Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PayoutMinor, &bet.PlacedAt, &bet.SettledAt); err != nil {
+			return nil, err
+		}
+		items = append(items, bet)
+	}
+	return items, rows.Err()
 }
 
 func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (PlacedBet, error) {

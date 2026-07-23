@@ -83,6 +83,7 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 - 体力流水：`GET /v1/stamina/{accountID}/ledger?limit=50&offset=0`
 - USDT 充值记录：`GET /v1/deposits`
 - USDT 提现记录：`GET /v1/withdrawals`
+- 投注与结算记录：`GET /v1/bets?status=won`
 
 流水按时间倒序返回，`amount_minor` 正数为入账、负数为出账；`business_type` 区分来源：`admin_credit`（管理员充值）、`checkin_reward`（签到）、`bet_task_reward`（投注达标奖励）、`activity_consume`（活动消耗）。
 

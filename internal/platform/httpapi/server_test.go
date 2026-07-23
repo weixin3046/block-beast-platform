@@ -178,6 +178,10 @@ func (reader *recordingBetReader) Find(_ context.Context, betID string) (betting
 	return reader.bet, reader.err
 }
 
+func (reader *recordingBetReader) ListUserBets(_ context.Context, _ string, _ string, _ int) ([]betting.PlacedBet, error) {
+	return nil, nil
+}
+
 func (placer *recordingBetPlacer) PlaceBet(_ context.Context, request betting.PlaceBetRequest) (betting.PlacedBet, error) {
 	placer.request = request
 	return placer.bet, nil

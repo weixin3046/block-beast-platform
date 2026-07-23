@@ -87,6 +87,7 @@ type BetPlacer interface {
 
 type BetReader interface {
 	Find(ctx context.Context, betID string) (betting.PlacedBet, error)
+	ListUserBets(ctx context.Context, userID, status string, limit int) ([]betting.PlacedBet, error)
 }
 
 type ReadinessChecker interface {
@@ -132,6 +133,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/agents/{agentID}/commissions", server.protectRoles(server.grantCommission, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
 	mux.HandleFunc("GET /v1/bets/{betID}", server.protect(server.bet))
+	mux.HandleFunc("GET /v1/bets", server.protect(server.userBets))
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.protect(server.balance))
 	mux.HandleFunc("GET /v1/rounds", server.protect(server.openRounds))
 	mux.HandleFunc("GET /v1/rounds/{roundID}", server.protect(server.round))
@@ -309,6 +311,28 @@ func (server *Server) bet(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, bet)
+}
+
+func (server *Server) userBets(writer http.ResponseWriter, request *http.Request) {
+	if server.bets == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "bets are unavailable"})
+		return
+	}
+	claims, ok := ClaimsFromContext(request.Context())
+	userID := request.URL.Query().Get("account_id")
+	if ok {
+		userID = claims.Subject
+	}
+	if userID == "" {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	items, err := server.bets.ListUserBets(request.Context(), userID, request.URL.Query().Get("status"), 50)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list bets"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
 }
 
 func (server *Server) openRounds(writer http.ResponseWriter, request *http.Request) {
