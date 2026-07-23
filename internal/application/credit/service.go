@@ -30,9 +30,109 @@ var ErrInvalidAmount = errors.New("amount must be positive")
 var ErrInvalidCurrency = errors.New("currency must be one of POINTS, USDT, STAMINA")
 var ErrInsufficientStamina = errors.New("insufficient stamina balance")
 var ErrUserNotFound = errors.New("user not found")
+var ErrPointWithdrawalNotFound = errors.New("point withdrawal not found")
+var ErrPointWithdrawalState = errors.New("point withdrawal cannot transition from its current status")
 
 type Service struct {
 	pool *pgxpool.Pool
+}
+
+type PointWithdrawal struct {
+	ID              string    `json:"id"`
+	UserID          string    `json:"user_id"`
+	ClientRequestID string    `json:"client_request_id"`
+	AmountMinor     int64     `json:"amount_minor"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (service *Service) RequestPointWithdrawal(ctx context.Context, userID, requestID string, amount int64, remark string) (PointWithdrawal, error) {
+	if userID == "" || requestID == "" {
+		return PointWithdrawal{}, ErrUserNotFound
+	}
+	if amount <= 0 {
+		return PointWithdrawal{}, ErrInvalidAmount
+	}
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return PointWithdrawal{}, err
+	}
+	defer tx.Rollback(ctx)
+	var existing PointWithdrawal
+	err = tx.QueryRow(ctx, `SELECT id,user_id,client_request_id,amount_minor,status,created_at FROM point_withdrawals WHERE user_id=$1 AND client_request_id=$2`, userID, requestID).Scan(&existing.ID, &existing.UserID, &existing.ClientRequestID, &existing.AmountMinor, &existing.Status, &existing.CreatedAt)
+	if err == nil {
+		return existing, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return PointWithdrawal{}, err
+	}
+	var walletID string
+	var available, frozen int64
+	err = tx.QueryRow(ctx, `SELECT id,available_minor,frozen_minor FROM wallets WHERE user_id=$1 AND currency='POINTS' FOR UPDATE`, userID).Scan(&walletID, &available, &frozen)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PointWithdrawal{}, ErrUserNotFound
+	}
+	if err != nil {
+		return PointWithdrawal{}, err
+	}
+	if available < amount {
+		return PointWithdrawal{}, ErrInsufficientStamina
+	}
+	if _, err = tx.Exec(ctx, `UPDATE wallets SET available_minor=$2,frozen_minor=$3,version=version+1,updated_at=now() WHERE id=$1`, walletID, available-amount, frozen+amount); err != nil {
+		return PointWithdrawal{}, err
+	}
+	output := PointWithdrawal{ID: uuid.NewString(), UserID: userID, ClientRequestID: requestID, AmountMinor: amount, Status: "requested"}
+	err = tx.QueryRow(ctx, `INSERT INTO point_withdrawals(id,user_id,wallet_id,client_request_id,amount_minor,status,remark) VALUES($1,$2,$3,$4,$5,'requested',$6) RETURNING created_at`, output.ID, userID, walletID, requestID, amount, remark).Scan(&output.CreatedAt)
+	if err != nil {
+		return PointWithdrawal{}, err
+	}
+	if err := writeLedger(ctx, tx, userID, CurrencyPoints, "point_withdrawal", output.ID, -amount, available-amount, remark, ""); err != nil {
+		return PointWithdrawal{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PointWithdrawal{}, err
+	}
+	return output, nil
+}
+
+func (service *Service) ReviewPointWithdrawal(ctx context.Context, id, reviewerID string, approved bool) error {
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var walletID, status, userID string
+	var amount, available, frozen int64
+	err = tx.QueryRow(ctx, `SELECT p.wallet_id,p.status,p.user_id,p.amount_minor,w.available_minor,w.frozen_minor FROM point_withdrawals p JOIN wallets w ON w.id=p.wallet_id WHERE p.id=$1 FOR UPDATE`, id).Scan(&walletID, &status, &userID, &amount, &available, &frozen)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrPointWithdrawalNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if status != "requested" || frozen < amount {
+		return ErrPointWithdrawalState
+	}
+	newStatus := "approved"
+	balanceAfter := available
+	entryType := "point_withdrawal_debit"
+	entryAmount := -amount
+	if !approved {
+		newStatus = "rejected"
+		balanceAfter = available + amount
+		entryType = "point_withdrawal_unfreeze"
+		entryAmount = amount
+	}
+	if _, err = tx.Exec(ctx, `UPDATE wallets SET available_minor=$2,frozen_minor=$3,version=version+1,updated_at=now() WHERE id=$1`, walletID, balanceAfter, frozen-amount); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE point_withdrawals SET status=$2,reviewed_by=$3,reviewed_at=now() WHERE id=$1`, id, newStatus, reviewerID); err != nil {
+		return err
+	}
+	if err := writeLedger(ctx, tx, userID, CurrencyPoints, entryType, id, entryAmount, balanceAfter, "", reviewerID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
@@ -45,7 +145,7 @@ type AdminCreditInput struct {
 	Currency    string `json:"currency"`     // POINTS / USDT / STAMINA
 	AmountMinor int64  `json:"amount_minor"` // 正数
 	Remark      string `json:"remark"`
-	OperatorID  string `json:"-"` // 从访问令牌注入，不信任请求体
+	OperatorID  string `json:"-"`          // 从访问令牌注入，不信任请求体
 	RequestID   string `json:"request_id"` // 幂等键，同一 request_id 不重复入账
 }
 
@@ -234,15 +334,15 @@ type BalanceInfo struct {
 
 // LedgerEntry 是一条积分或体力流水。
 type LedgerEntry struct {
-	ID               string    `json:"id"`
-	UserID           string    `json:"user_id"`
-	BusinessType     string    `json:"business_type"`
-	BusinessID       string    `json:"business_id"`
-	AmountMinor      int64     `json:"amount_minor"`
-	BalanceAfterMinor int64    `json:"balance_after_minor"`
-	Remark           string    `json:"remark"`
-	OperatorID       string    `json:"operator_id,omitempty"`
-	OccurredAt       time.Time `json:"occurred_at"`
+	ID                string    `json:"id"`
+	UserID            string    `json:"user_id"`
+	BusinessType      string    `json:"business_type"`
+	BusinessID        string    `json:"business_id"`
+	AmountMinor       int64     `json:"amount_minor"`
+	BalanceAfterMinor int64     `json:"balance_after_minor"`
+	Remark            string    `json:"remark"`
+	OperatorID        string    `json:"operator_id,omitempty"`
+	OccurredAt        time.Time `json:"occurred_at"`
 }
 
 // ListPointsLedger 分页查询用户积分流水（按时间倒序）。
