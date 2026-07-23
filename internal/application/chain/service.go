@@ -183,6 +183,44 @@ type DepositResult struct {
 	Credited bool `json:"credited"`
 }
 
+type Deposit struct {
+	DepositID   string     `json:"deposit_id"`
+	TxHash      string     `json:"tx_hash"`
+	ChainCode   string     `json:"chain_code"`
+	TokenCode   string     `json:"token_code"`
+	Address     string     `json:"address"`
+	AmountMinor int64      `json:"amount_minor"`
+	Status      string     `json:"status"`
+	ConfirmedAt *time.Time `json:"confirmed_at,omitempty"`
+}
+
+func (service *Service) ListDeposits(ctx context.Context, userID string, limit int) ([]Deposit, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := service.pool.Query(ctx, `
+		SELECT deposits.id::text,deposits.tx_hash,chain_addresses.chain_code,chain_addresses.token_code,
+			chain_addresses.address,deposits.amount_minor,deposits.status,deposits.confirmed_at
+		FROM deposits
+		JOIN chain_addresses ON chain_addresses.id=deposits.chain_address_id
+		WHERE chain_addresses.user_id=$1
+		ORDER BY deposits.confirmed_at DESC NULLS LAST,deposits.id DESC
+		LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Deposit, 0)
+	for rows.Next() {
+		var item Deposit
+		if err := rows.Scan(&item.DepositID, &item.TxHash, &item.ChainCode, &item.TokenCode, &item.Address, &item.AmountMinor, &item.Status, &item.ConfirmedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // CreditDeposit 幂等处理充值回调：按服务商事件 ID 与交易哈希去重，
 // 首次回调在同一事务中创建充值记录、锁钱包入账、写账本和 outbox 事件。
 // 用户尚无该币种钱包时随充值创建。
@@ -446,6 +484,32 @@ func (service *Service) ListWithdrawals(ctx context.Context, status string, limi
 		output = append(output, item)
 	}
 	return output, rows.Err()
+}
+
+func (service *Service) ListUserWithdrawals(ctx context.Context, userID string, limit int) ([]Withdrawal, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := service.pool.Query(ctx, `
+		SELECT withdrawals.id,withdrawals.user_id,withdrawals.client_request_id,withdrawals.destination_address,
+			wallets.currency,withdrawals.amount_minor,withdrawals.status,withdrawals.created_at
+		FROM withdrawals
+		JOIN wallets ON wallets.id=withdrawals.wallet_id
+		WHERE withdrawals.user_id=$1
+		ORDER BY withdrawals.created_at DESC LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Withdrawal, 0)
+	for rows.Next() {
+		var item Withdrawal
+		if err := rows.Scan(&item.WithdrawalID, &item.UserID, &item.ClientRequestID, &item.DestinationAddress, &item.Currency, &item.AmountMinor, &item.Status, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 // ApproveWithdrawal records the back-office decision. The actual provider call

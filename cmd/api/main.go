@@ -58,6 +58,7 @@ func main() {
 		logger.Warn("PQPA API configuration is incomplete; deposit address creation is disabled")
 	}
 	options = append(options, httpapi.WithWithdrawals(chainService))
+	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))

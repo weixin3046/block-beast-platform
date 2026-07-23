@@ -18,6 +18,10 @@ type DepositCreditor interface {
 	CreditDeposit(ctx context.Context, input chainapp.DepositInput) (chainapp.DepositResult, error)
 }
 
+type DepositReader interface {
+	ListDeposits(ctx context.Context, userID string, limit int) ([]chainapp.Deposit, error)
+}
+
 type WithdrawalStatusApplier interface {
 	ApplyWithdrawalStatus(ctx context.Context, input chainapp.WithdrawalStatusInput) error
 }
@@ -28,6 +32,51 @@ type WithdrawalService interface {
 	ApproveWithdrawal(ctx context.Context, withdrawalID, reviewerID string) (chainapp.Withdrawal, error)
 	RejectWithdrawal(ctx context.Context, withdrawalID, reviewerID, reason string) (chainapp.Withdrawal, error)
 	ListWithdrawals(ctx context.Context, status string, limit int) ([]chainapp.Withdrawal, error)
+	ListUserWithdrawals(ctx context.Context, userID string, limit int) ([]chainapp.Withdrawal, error)
+}
+
+func WithDepositHistory(reader DepositReader) Option {
+	return func(server *Server) { server.depositHistory = reader }
+}
+
+func (server *Server) userDeposits(writer http.ResponseWriter, request *http.Request) {
+	if server.depositHistory == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "deposit history is unavailable"})
+		return
+	}
+	claims, ok := ClaimsFromContext(request.Context())
+	userID := request.URL.Query().Get("account_id")
+	if ok {
+		userID = claims.Subject
+	}
+	if userID == "" {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	items, err := server.depositHistory.ListDeposits(request.Context(), userID, 50)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list deposits"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
+}
+
+func (server *Server) userWithdrawals(writer http.ResponseWriter, request *http.Request) {
+	claims, ok := ClaimsFromContext(request.Context())
+	userID := request.URL.Query().Get("account_id")
+	if ok {
+		userID = claims.Subject
+	}
+	if userID == "" {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	items, err := server.withdrawals.ListUserWithdrawals(request.Context(), userID, 50)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list withdrawals"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
 }
 
 func (server *Server) adminWithdrawals(writer http.ResponseWriter, request *http.Request) {
