@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -9,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	chainapp "github.com/block-beast/platform/internal/application/chain"
 	"github.com/block-beast/platform/internal/application/outbox"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement"
@@ -43,9 +45,13 @@ func main() {
 		return
 	}
 	defer eventConsumer.Close()
+	var withdrawalSender *chainapp.Service
+	if cfg.PQPAAPIURL != "" && cfg.PQPAAPIKey != "" && cfg.PQPAAPISecret != "" {
+		withdrawalSender = chainapp.NewService(pool).WithWithdrawalProvider(pqpa.NewClient(cfg.PQPAAPIURL, cfg.PQPAAPIKey, cfg.PQPAAPISecret, nil))
+	}
 	for _, subject := range []string{"game.>", "wallet.>", "chain.>"} {
 		durable := "worker-" + strings.ReplaceAll(strings.TrimSuffix(subject, ".>"), ".", "-")
-		if err := eventConsumer.Subscribe(subject, durable, logEvent(logger)); err != nil {
+		if err := eventConsumer.Subscribe(subject, durable, processEvent(logger, withdrawalSender, cfg.PQPAChainCode)); err != nil {
 			logger.Error("worker failed to subscribe", "subject", subject, "error", err)
 			return
 		}
@@ -122,8 +128,21 @@ func processDueRounds(ctx context.Context, logger *slog.Logger, repository dueRo
 }
 
 // logEvent 是业务处理器落地前的占位处理器：确认事件已到达并记录日志。
-func logEvent(logger *slog.Logger) natsjs.Handler {
-	return func(_ context.Context, event events.Event) error {
+func processEvent(logger *slog.Logger, withdrawals *chainapp.Service, chainCode string) natsjs.Handler {
+	return func(ctx context.Context, event events.Event) error {
+		if event.Type == events.WithdrawalApproved && withdrawals != nil {
+			var payload struct {
+				WithdrawalID string `json:"withdrawal_id"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return err
+			}
+			if err := withdrawals.SendApprovedWithdrawal(ctx, payload.WithdrawalID, chainCode); err != nil {
+				return err
+			}
+			logger.Info("PQPA withdrawal sent", "withdrawal_id", payload.WithdrawalID)
+			return nil
+		}
 		logger.Info("event consumed", "event_id", event.ID, "event_type", event.Type)
 		return nil
 	}

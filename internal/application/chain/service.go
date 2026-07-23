@@ -21,12 +21,17 @@ var ErrDepositAddressNotFound = errors.New("deposit address not found")
 var ErrWithdrawalState = errors.New("withdrawal cannot transition from its current status")
 
 type Service struct {
-	pool            *pgxpool.Pool
-	addressProvider DepositAddressProvider
+	pool               *pgxpool.Pool
+	addressProvider    DepositAddressProvider
+	withdrawalProvider WithdrawalProvider
 }
 
 type DepositAddressProvider interface {
 	CreateDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (providerID, address string, err error)
+}
+
+type WithdrawalProvider interface {
+	CreateProviderWithdrawal(ctx context.Context, requestID, chainCode, tokenCode, address string, amountMinor int64) (providerOrderID, txHash, status string, err error)
 }
 
 type DepositAddress struct {
@@ -80,6 +85,11 @@ func NewService(pool *pgxpool.Pool) *Service {
 
 func (service *Service) WithDepositAddressProvider(provider DepositAddressProvider) *Service {
 	service.addressProvider = provider
+	return service
+}
+
+func (service *Service) WithWithdrawalProvider(provider WithdrawalProvider) *Service {
+	service.withdrawalProvider = provider
 	return service
 }
 
@@ -368,6 +378,52 @@ func (service *Service) ApproveWithdrawal(ctx context.Context, withdrawalID, rev
 		return Withdrawal{}, err
 	}
 	return withdrawal, nil
+}
+
+// SendApprovedWithdrawal performs the external call after approval has been
+// committed. The platform withdrawal ID is reused as PQPA's idempotency key.
+func (service *Service) SendApprovedWithdrawal(ctx context.Context, withdrawalID, chainCode string) error {
+	if service.withdrawalProvider == nil {
+		return errors.New("withdrawal provider is unavailable")
+	}
+	withdrawal, err := service.FindWithdrawal(ctx, withdrawalID)
+	if err != nil {
+		return err
+	}
+	if withdrawal.Status == "broadcasted" || withdrawal.Status == "confirmed" {
+		return nil
+	}
+	if withdrawal.Status != "approved" {
+		return ErrWithdrawalState
+	}
+	providerOrderID, txHash, _, err := service.withdrawalProvider.CreateProviderWithdrawal(ctx, withdrawal.WithdrawalID, chainCode, withdrawal.Currency, withdrawal.DestinationAddress, withdrawal.AmountMinor)
+	if err != nil {
+		return err
+	}
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	command, err := tx.Exec(ctx, `UPDATE withdrawals SET status='broadcasted', provider_order_id=$2, tx_hash=NULLIF($3, '') WHERE id=$1 AND status='approved'`, withdrawalID, providerOrderID, txHash)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return tx.Commit(ctx)
+	}
+	payload, err := json.Marshal(struct {
+		WithdrawalID    string `json:"withdrawal_id"`
+		ProviderOrderID string `json:"provider_order_id"`
+		TxHash          string `json:"tx_hash"`
+	}{withdrawalID, providerOrderID, txHash})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload) VALUES ($1, 'withdrawal', $2, $3, $4)`, uuid.NewString(), withdrawalID, events.WithdrawalSent, payload); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func findWithdrawalByRequestID(ctx context.Context, tx pgx.Tx, userID string, clientRequestID string) (Withdrawal, error) {

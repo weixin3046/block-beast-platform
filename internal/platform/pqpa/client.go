@@ -154,6 +154,14 @@ func (client *Client) CreateWithdrawal(ctx context.Context, input CreateWithdraw
 	return output, nil
 }
 
+func (client *Client) CreateProviderWithdrawal(ctx context.Context, requestID, chainCode, tokenCode, address string, amountMinor int64) (providerOrderID, txHash, status string, err error) {
+	result, err := client.CreateWithdrawal(ctx, CreateWithdrawalRequest{ClientRequestID: requestID, ChainCode: chainCode, TokenCode: tokenCode, Address: address, AmountMinor: amountMinor})
+	if err != nil {
+		return "", "", "", err
+	}
+	return result.ProviderOrderID, result.TxHash, result.Status, nil
+}
+
 func (client *Client) GetWithdrawal(ctx context.Context, providerOrderID string) (Withdrawal, error) {
 	var output Withdrawal
 	path := "/v1/withdrawals/" + providerOrderID
