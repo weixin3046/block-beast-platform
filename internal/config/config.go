@@ -2,19 +2,21 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 )
 
 type Config struct {
-	Environment        string
-	APIAddress         string
-	RealtimeAddress    string
-	WorkerPollInterval time.Duration
-	PostgresDSN        string
-	RedisAddress       string
-	NATSURL            string
-	AuthTokenSecret    string
-	AccessTokenTTL     time.Duration
+	Environment            string
+	APIAddress             string
+	RealtimeAddress        string
+	RealtimeAllowedOrigins []string
+	WorkerPollInterval     time.Duration
+	PostgresDSN            string
+	RedisAddress           string
+	NATSURL                string
+	AuthTokenSecret        string
+	AccessTokenTTL         time.Duration
 	// ChainWebhookSecret is retained as a compatibility alias for older deployments.
 	// PQPA callbacks should use PQPAAPISecret.
 	ChainWebhookSecret    string
@@ -31,26 +33,44 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Environment:           valueOrDefault("APP_ENV", "development"),
-		APIAddress:            valueOrDefault("API_ADDRESS", ":8080"),
-		RealtimeAddress:       valueOrDefault("REALTIME_ADDRESS", ":8081"),
-		WorkerPollInterval:    durationOrDefault("WORKER_POLL_INTERVAL", 5*time.Second),
-		PostgresDSN:           os.Getenv("POSTGRES_DSN"),
-		RedisAddress:          os.Getenv("REDIS_ADDRESS"),
-		NATSURL:               os.Getenv("NATS_URL"),
-		AuthTokenSecret:       os.Getenv("AUTH_TOKEN_SECRET"),
-		AccessTokenTTL:        durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
-		ChainWebhookSecret:    os.Getenv("PQPA_API_SECRET"),
-		ChainWebhookSkew:      durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
-		TronRPCURL:            valueOrDefault("TRON_RPC_URL", "https://divine-greatest-valley.tron-mainnet.quiknode.pro/30d6aa253beb02c5229422c0a758e150311bd5cc/jsonrpc"),
-		OkxRESTURL:            valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
-		PQPAAPIURL:            os.Getenv("PQPA_API_URL"),
-		PQPAAPIKey:            os.Getenv("PQPA_API_KEY"),
-		PQPAAPISecret:         os.Getenv("PQPA_API_SECRET"),
-		PQPAChainCode:         valueOrDefault("PQPA_CHAIN_CODE", "TRON"),
-		PQPATokenCode:         valueOrDefault("PQPA_TOKEN_CODE", "USDT"),
-		PQPAAssetSyncInterval: durationOrDefault("PQPA_ASSET_SYNC_INTERVAL", time.Hour),
+		Environment:            valueOrDefault("APP_ENV", "development"),
+		APIAddress:             valueOrDefault("API_ADDRESS", ":8080"),
+		RealtimeAddress:        valueOrDefault("REALTIME_ADDRESS", ":8081"),
+		RealtimeAllowedOrigins: splitOrDefault("REALTIME_ALLOWED_ORIGINS", []string{"localhost:*", "127.0.0.1:*"}),
+		WorkerPollInterval:     durationOrDefault("WORKER_POLL_INTERVAL", 5*time.Second),
+		PostgresDSN:            os.Getenv("POSTGRES_DSN"),
+		RedisAddress:           os.Getenv("REDIS_ADDRESS"),
+		NATSURL:                os.Getenv("NATS_URL"),
+		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),
+		AccessTokenTTL:         durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
+		ChainWebhookSecret:     os.Getenv("PQPA_API_SECRET"),
+		ChainWebhookSkew:       durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
+		TronRPCURL:             valueOrDefault("TRON_RPC_URL", "https://divine-greatest-valley.tron-mainnet.quiknode.pro/30d6aa253beb02c5229422c0a758e150311bd5cc/jsonrpc"),
+		OkxRESTURL:             valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
+		PQPAAPIURL:             os.Getenv("PQPA_API_URL"),
+		PQPAAPIKey:             os.Getenv("PQPA_API_KEY"),
+		PQPAAPISecret:          os.Getenv("PQPA_API_SECRET"),
+		PQPAChainCode:          valueOrDefault("PQPA_CHAIN_CODE", "TRON"),
+		PQPATokenCode:          valueOrDefault("PQPA_TOKEN_CODE", "USDT"),
+		PQPAAssetSyncInterval:  durationOrDefault("PQPA_ASSET_SYNC_INTERVAL", time.Hour),
 	}
+}
+
+func splitOrDefault(key string, fallback []string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	output := make([]string, 0)
+	for _, item := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			output = append(output, trimmed)
+		}
+	}
+	if len(output) == 0 {
+		return fallback
+	}
+	return output
 }
 
 // 获取环境变量值，如果不存在则返回默认值

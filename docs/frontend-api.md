@@ -117,3 +117,7 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 ## 当前限制
 
 当前 API 还没有跨域（CORS）策略和令牌刷新机制：访问令牌有效期 15 分钟，过期后需重新登录。前端在本地开发时应通过同源代理访问 API；生产环境接入前必须配置明确的允许来源。
+
+## 实时连接
+
+浏览器通过子协议连接：`new WebSocket("ws://localhost:8081/v1/ws", ["bearer." + accessToken])`。`game.*` 事件广播给所有已认证连接；`wallet.*` 和 `chain.*` 事件仅发送给事件 `user_id` 对应的玩家。生产环境必须使用 `wss://`，并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。

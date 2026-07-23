@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/block-beast/platform/internal/config"
+	realtimeplatform "github.com/block-beast/platform/internal/platform/realtime"
 )
 
 func main() {
@@ -21,6 +22,13 @@ func main() {
 		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write([]byte("ok\n"))
 	})
+	hub := realtimeplatform.NewHub(cfg.AuthTokenSecret, cfg.RealtimeAllowedOrigins)
+	if err := hub.ConnectNATS(cfg.NATSURL); err != nil {
+		logger.Error("realtime gateway failed to connect to NATS", "error", err)
+		return
+	}
+	defer hub.Close()
+	mux.Handle("GET /v1/ws", hub)
 
 	server := &http.Server{Addr: cfg.RealtimeAddress, Handler: mux}
 	go func() {
