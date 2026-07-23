@@ -27,6 +27,11 @@ type DepositAddressReader interface {
 	GetDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (chainapp.DepositAddress, error)
 }
 
+type DepositAddressService interface {
+	DepositAddressReader
+	CreateDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (chainapp.DepositAddress, error)
+}
+
 type chainWebhookConfig struct {
 	secret   string
 	skew     time.Duration
@@ -44,7 +49,7 @@ func WithWithdrawals(withdrawals WithdrawalService) Option {
 	return func(server *Server) { server.withdrawals = withdrawals }
 }
 
-func WithDepositAddresses(addresses DepositAddressReader) Option {
+func WithDepositAddresses(addresses DepositAddressService) Option {
 	return func(server *Server) { server.depositAddresses = addresses }
 }
 
@@ -186,6 +191,36 @@ func (server *Server) depositAddress(writer http.ResponseWriter, request *http.R
 		return
 	}
 	writeJSON(writer, http.StatusOK, address)
+}
+
+func (server *Server) createDepositAddress(writer http.ResponseWriter, request *http.Request) {
+	if server.depositAddresses == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "deposit addresses are unavailable"})
+		return
+	}
+	var input struct {
+		AccountID string `json:"account_id"`
+		ChainCode string `json:"chain_code"`
+		TokenCode string `json:"token_code"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	userID := input.AccountID
+	if claims, ok := ClaimsFromContext(request.Context()); ok {
+		userID = claims.Subject
+	}
+	address, err := server.depositAddresses.CreateDepositAddress(request.Context(), userID, input.ChainCode, input.TokenCode)
+	if errors.Is(err, chainapp.ErrMissingFields) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusBadGateway, map[string]string{"error": "unable to create deposit address"})
+		return
+	}
+	writeJSON(writer, http.StatusCreated, address)
 }
 
 func (server *Server) withdrawal(writer http.ResponseWriter, request *http.Request) {

@@ -20,11 +20,12 @@ var ErrWithdrawalNotFound = errors.New("withdrawal not found")
 var ErrDepositAddressNotFound = errors.New("deposit address not found")
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool            *pgxpool.Pool
+	addressProvider DepositAddressProvider
 }
 
 type DepositAddressProvider interface {
-	CreateAddress(ctx context.Context, userID, chainCode, tokenCode string) (providerID, address string, err error)
+	CreateDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (providerID, address string, err error)
 }
 
 type DepositAddress struct {
@@ -44,8 +45,41 @@ func (service *Service) GetDepositAddress(ctx context.Context, userID, chainCode
 	return output, err
 }
 
+func (service *Service) CreateDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (DepositAddress, error) {
+	if userID == "" || chainCode == "" || tokenCode == "" {
+		return DepositAddress{}, ErrMissingFields
+	}
+	if existing, err := service.GetDepositAddress(ctx, userID, chainCode, tokenCode); err == nil {
+		return existing, nil
+	} else if !errors.Is(err, ErrDepositAddressNotFound) {
+		return DepositAddress{}, err
+	}
+	if service.addressProvider == nil {
+		return DepositAddress{}, errors.New("deposit address provider is unavailable")
+	}
+	providerID, address, err := service.addressProvider.CreateDepositAddress(ctx, userID, chainCode, tokenCode)
+	if err != nil {
+		return DepositAddress{}, err
+	}
+	output := DepositAddress{ID: uuid.NewString(), UserID: userID, ChainCode: chainCode, TokenCode: tokenCode, Address: address}
+	if err := service.pool.QueryRow(ctx, `
+		INSERT INTO chain_addresses (id, user_id, chain_code, token_code, address, provider_address_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (chain_code, token_code, address) DO UPDATE SET user_id = EXCLUDED.user_id
+		RETURNING id, user_id, chain_code, token_code, address`, output.ID, userID, chainCode, tokenCode, address, providerID).
+		Scan(&output.ID, &output.UserID, &output.ChainCode, &output.TokenCode, &output.Address); err != nil {
+		return DepositAddress{}, err
+	}
+	return output, nil
+}
+
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
+}
+
+func (service *Service) WithDepositAddressProvider(provider DepositAddressProvider) *Service {
+	service.addressProvider = provider
+	return service
 }
 
 // DepositInput 是链上服务商推送的一笔已确认充值。

@@ -22,7 +22,8 @@ import (
 	"github.com/block-beast/platform/internal/domain/identity"        // 身份认证仓储
 	"github.com/block-beast/platform/internal/domain/wallet"          // 钱包仓储
 	"github.com/block-beast/platform/internal/platform/httpapi"       // API路由/业务处理器
-	"github.com/jackc/pgx/v5/pgxpool"                                 // PostgreSQL连接池
+	"github.com/block-beast/platform/internal/platform/pqpa"
+	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL连接池
 )
 
 func main() {
@@ -47,6 +48,11 @@ func main() {
 		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService))
 	}
 	chainService := chain.NewService(pool)
+	if cfg.PQPAAPIURL != "" && cfg.PQPAAPIKey != "" && cfg.PQPAAPISecret != "" {
+		chainService.WithDepositAddressProvider(pqpa.NewClient(cfg.PQPAAPIURL, cfg.PQPAAPIKey, cfg.PQPAAPISecret, nil))
+	} else {
+		logger.Warn("PQPA API configuration is incomplete; deposit address creation is disabled")
+	}
 	options = append(options, httpapi.WithWithdrawals(chainService))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))

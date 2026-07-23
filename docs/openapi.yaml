@@ -343,6 +343,45 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/deposit-addresses:
+    get:
+      tags: [Chain]
+      operationId: getDepositAddress
+      summary: 查询玩家充值地址
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chain_code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: token_code
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 充值地址 }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Chain]
+      operationId: createDepositAddress
+      summary: 创建玩家 PQPA 充值地址
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chain_code, token_code]
+              properties:
+                chain_code: { type: string, example: TRON }
+                token_code: { type: string, example: USDT }
+      responses:
+        '201': { description: 已创建或返回既有充值地址 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '502': { description: PQPA 服务不可用 }
   /v1/withdrawals:
     post:
       tags: [Chain]

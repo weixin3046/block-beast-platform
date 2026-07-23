@@ -137,6 +137,15 @@ func (client *Client) CreateAddress(ctx context.Context, input CreateAddressRequ
 	return output, nil
 }
 
+// CreateDepositAddress adapts PQPA's payload to the application-layer port.
+func (client *Client) CreateDepositAddress(ctx context.Context, userID, chainCode, tokenCode string) (providerID, address string, err error) {
+	result, err := client.CreateAddress(ctx, CreateAddressRequest{UserID: userID, ChainCode: chainCode, TokenCode: tokenCode})
+	if err != nil {
+		return "", "", err
+	}
+	return result.ID, result.Address, nil
+}
+
 func (client *Client) CreateWithdrawal(ctx context.Context, input CreateWithdrawalRequest) (Withdrawal, error) {
 	var output Withdrawal
 	if err := client.DoJSON(ctx, http.MethodPost, "/v1/withdrawals", input, &output); err != nil {
