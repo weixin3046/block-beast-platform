@@ -647,6 +647,52 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/agents/me/commissions:
+    get:
+      tags: [Agent]
+      summary: 查询本人的返佣明细
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 佣金明细列表 }
+  /v1/agents/me/team-summary:
+    get:
+      tags: [Agent]
+      summary: 查询直属团队业绩（按币种分组）
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 直属团队人数、有效投注和已付佣金 }
+  /v1/admin/commissions:
+    get:
+      tags: [Admin]
+      summary: 查询全部返佣订单
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 返佣订单列表 }
+  /v1/admin/commissions/{commissionID}/reverse:
+    post:
+      tags: [Admin]
+      summary: 撤销已发放返佣并冲正余额
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: commissionID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: 已撤销 }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/admin/agents/{agentID}/commissions:
+    post:
+      tags: [Admin]
+      summary: 人工补发代理佣金
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: agentID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201': { description: 已补发 }
 components:
   securitySchemes:
     bearerAuth:

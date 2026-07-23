@@ -25,12 +25,13 @@ func applyCommission(ctx context.Context, tx pgx.Tx, betID, playerID, currency s
 	if err != nil {
 		return err
 	}
-	amount := stake * int64(rate) / 10000
+	// Split the calculation to avoid overflowing int64 before division.
+	amount := calculateCommission(stake, rate)
 	if amount <= 0 {
 		return nil
 	}
 	var commissionID string
-	err = tx.QueryRow(ctx, `INSERT INTO commission_entries(id,source_bet_id,beneficiary_user_id,amount_minor,status) VALUES($1,$2,$3,$4,'paid') ON CONFLICT(source_bet_id,beneficiary_user_id) DO NOTHING RETURNING id`, uuid.NewString(), betID, agentID, amount).Scan(&commissionID)
+	err = tx.QueryRow(ctx, `INSERT INTO commission_entries(id,source_bet_id,beneficiary_user_id,amount_minor,currency,status) VALUES($1,$2,$3,$4,$5,'paid') ON CONFLICT(source_bet_id,beneficiary_user_id) DO NOTHING RETURNING id`, uuid.NewString(), betID, agentID, amount, currency).Scan(&commissionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -52,4 +53,8 @@ func applyCommission(ctx context.Context, tx pgx.Tx, betID, playerID, currency s
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO ledger_entries(id,wallet_id,business_type,business_id,entry_type,amount_minor,balance_after_minor) VALUES($1,$2,'commission',$3,'commission_credit',$4,$5)`, uuid.NewString(), walletID, commissionID, amount, balance)
 	return err
+}
+
+func calculateCommission(stake int64, rateBasisPoints int) int64 {
+	return stake/10000*int64(rateBasisPoints) + stake%10000*int64(rateBasisPoints)/10000
 }

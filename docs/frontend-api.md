@@ -100,6 +100,17 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 `request_id` 是幂等键，重复请求返回首次结果（`credited=false`），不会重复入账。
 
+## 代理返佣
+
+- `GET /v1/agents/me/commissions`：查询本人佣金明细。
+- `GET /v1/agents/me/team-summary`：按币种查询直属团队有效投注和已付佣金。
+- `GET /v1/admin/commissions?status=paid`：后台查询返佣订单。
+- `POST /v1/admin/commissions/{commissionID}/reverse`：撤销返佣并冲正代理余额。
+- `POST /v1/admin/agents/{agentID}/commissions`：人工补发积分或 USDT 佣金。
+
+自动返佣仅计算一级直属代理，按已结算且未退款的有效投注额计算。积分投注返到积分钱包，USDT 投注返到 USDT 钱包。
+人工补发请求必须提供唯一 `request_id`，重复请求不会重复入账。
+
 ## 当前限制
 
 当前 API 还没有跨域（CORS）策略和令牌刷新机制：访问令牌有效期 15 分钟，过期后需重新登录。前端在本地开发时应通过同源代理访问 API；生产环境接入前必须配置明确的允许来源。
