@@ -34,6 +34,9 @@ macOS / Linux：
 
 本地 PostgreSQL 容器映射到 `localhost:5433`，避免与 macOS/Linux
 上已安装的 PostgreSQL 默认端口 `5432` 冲突。
+脚本会自动把 `.env` 中供容器使用的 `postgres`、`nats`、`redis` 主机名
+替换为宿主机地址。如需自定义，可设置 `DEV_POSTGRES_DSN`、
+`DEV_NATS_URL` 和 `DEV_REDIS_ADDRESS`。
 
 Windows PowerShell：
 

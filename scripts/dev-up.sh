@@ -113,7 +113,11 @@ if [ -f .env ]; then
 fi
 
 export APP_ENV="${APP_ENV:-development}"
-export POSTGRES_DSN="${POSTGRES_DSN:-postgres://blockbeast:blockbeast@localhost:5433/blockbeast?sslmode=disable}"
+# .env 中保存的是 Docker 容器之间使用的主机名（postgres/nats/redis）。
+# 本脚本在宿主机直接运行 Go 二进制，必须改用宿主机映射地址。
+# 如需覆盖，请使用 DEV_* 变量，避免改变 docker compose 使用的配置。
+export POSTGRES_DSN="${DEV_POSTGRES_DSN:-postgres://blockbeast:blockbeast@localhost:5433/blockbeast?sslmode=disable}"
+export REDIS_ADDRESS="${DEV_REDIS_ADDRESS:-localhost:6379}"
 export AUTH_TOKEN_SECRET="${AUTH_TOKEN_SECRET:-dev-only-signing-secret-change-me-in-production-0123456789abcdef}"
 export API_ADDRESS="${API_ADDRESS:-:8080}"
 export REALTIME_ADDRESS="${REALTIME_ADDRESS:-:8081}"
@@ -121,7 +125,7 @@ export ACCESS_TOKEN_TTL="${ACCESS_TOKEN_TTL:-15m}"
 export REFRESH_TOKEN_TTL="${REFRESH_TOKEN_TTL:-720h}"
 export CHAIN_WEBHOOK_ALLOWED_SKEW="${CHAIN_WEBHOOK_ALLOWED_SKEW:-5m}"
 export WORKER_POLL_INTERVAL="${WORKER_POLL_INTERVAL:-5s}"
-export NATS_URL="${NATS_URL:-nats://localhost:4222}"
+export NATS_URL="${DEV_NATS_URL:-nats://localhost:4222}"
 
 echo "[1/5] 检查基础设施..."
 if [ "${SKIP_INFRA}" = false ]; then
