@@ -11,6 +11,25 @@ import (
 
 type AgentService interface {
 	Bind(ctx context.Context, userID, parentID string) error
+	GetRelation(ctx context.Context, userID string) (agentapp.Relation, error)
+}
+
+func (server *Server) agentRelation(writer http.ResponseWriter, request *http.Request) {
+	if server.agents == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "agent service is unavailable"})
+		return
+	}
+	claims, ok := ClaimsFromContext(request.Context())
+	if !ok || claims.Subject == "" {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	relation, err := server.agents.GetRelation(request.Context(), claims.Subject)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read agent relation"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, relation)
 }
 
 func WithAgents(service AgentService) Option { return func(server *Server) { server.agents = service } }

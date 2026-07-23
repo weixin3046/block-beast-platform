@@ -13,6 +13,11 @@ var ErrRelationExists = errors.New("agent relation already exists")
 
 type Service struct{ pool *pgxpool.Pool }
 
+type Relation struct {
+	UserID       string `json:"user_id"`
+	ParentUserID string `json:"parent_user_id"`
+}
+
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 // Bind creates an immutable direct referral relation and a materialized ltree path.
@@ -56,4 +61,13 @@ func (service *Service) Bind(ctx context.Context, userID, parentID string) error
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (service *Service) GetRelation(ctx context.Context, userID string) (Relation, error) {
+	var relation Relation
+	err := service.pool.QueryRow(ctx, `SELECT user_id::text, COALESCE(parent_user_id::text, '') FROM agent_relations WHERE user_id=$1`, userID).Scan(&relation.UserID, &relation.ParentUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Relation{UserID: userID}, nil
+	}
+	return relation, err
 }
