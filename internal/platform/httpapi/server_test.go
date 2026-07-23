@@ -44,6 +44,26 @@ func TestPlaceBetCreatesBet(t *testing.T) {
 	}
 }
 
+func TestCORSAllowsConfiguredOriginAndRejectsUnknownPreflight(t *testing.T) {
+	server := New(config.Config{APIAllowedOrigins: []string{"https://player.example"}}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+
+	request := httptest.NewRequest(http.MethodOptions, "/v1/bets", nil)
+	request.Header.Set("Origin", "https://player.example")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || response.Header().Get("Access-Control-Allow-Origin") != "https://player.example" {
+		t.Fatalf("allowed preflight = %d, origin %q", response.Code, response.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	request = httptest.NewRequest(http.MethodOptions, "/v1/bets", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("unknown origin status = %d, want 403", response.Code)
+	}
+}
+
 func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)

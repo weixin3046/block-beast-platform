@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Environment            string
 	APIAddress             string
+	APIAllowedOrigins      []string
 	RealtimeAddress        string
 	RealtimeAllowedOrigins []string
 	WorkerPollInterval     time.Duration
@@ -35,6 +36,7 @@ func Load() Config {
 	return Config{
 		Environment:            valueOrDefault("APP_ENV", "development"),
 		APIAddress:             valueOrDefault("API_ADDRESS", ":8080"),
+		APIAllowedOrigins:      splitOrDefault("API_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
 		RealtimeAddress:        valueOrDefault("REALTIME_ADDRESS", ":8081"),
 		RealtimeAllowedOrigins: splitOrDefault("REALTIME_ALLOWED_ORIGINS", []string{"localhost:*", "127.0.0.1:*"}),
 		WorkerPollInterval:     durationOrDefault("WORKER_POLL_INTERVAL", 5*time.Second),

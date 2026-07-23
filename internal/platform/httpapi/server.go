@@ -162,7 +162,35 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/wallets/{accountID}/all", server.protect(server.allBalances))
 	mux.HandleFunc("GET /v1/points/{accountID}/ledger", server.protect(server.pointsLedger))
 	mux.HandleFunc("GET /v1/stamina/{accountID}/ledger", server.protect(server.staminaLedger))
-	return server.withRequestLog(mux)
+	return server.withCORS(server.withRequestLog(mux))
+}
+
+func (server *Server) withCORS(next http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(server.config.APIAllowedOrigins))
+	for _, origin := range server.config.APIAllowedOrigins {
+		allowed[origin] = struct{}{}
+	}
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		origin := request.Header.Get("Origin")
+		if _, ok := allowed[origin]; ok {
+			writer.Header().Set("Access-Control-Allow-Origin", origin)
+			writer.Header().Add("Vary", "Origin")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
+			writer.Header().Set("Access-Control-Max-Age", "600")
+		}
+		if request.Method == http.MethodOptions {
+			if origin != "" {
+				if _, ok := allowed[origin]; !ok {
+					writeJSON(writer, http.StatusForbidden, map[string]string{"error": "origin is not allowed"})
+					return
+				}
+			}
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(writer, request)
+	})
 }
 
 // protect 在未配置鉴权时放行（保持本地开发兼容），否则要求有效令牌。
