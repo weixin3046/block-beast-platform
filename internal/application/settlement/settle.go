@@ -78,13 +78,13 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	}
 
 	type acceptedBet struct {
-		betID, walletID string
-		selection       json.RawMessage
-		stake           int64
+		betID, walletID, userID, currency string
+		selection                         json.RawMessage
+		stake                             int64
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id, wallet_id, selection, stake_minor
-		FROM bets
+		SELECT bets.id, bets.wallet_id, bets.user_id, wallets.currency, bets.selection, bets.stake_minor
+		FROM bets JOIN wallets ON wallets.id=bets.wallet_id
 		WHERE round_id = $1 AND status = 'accepted'
 		ORDER BY wallet_id, id
 		FOR UPDATE`, roundID)
@@ -94,7 +94,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	bets := make([]acceptedBet, 0)
 	for rows.Next() {
 		var bet acceptedBet
-		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.selection, &bet.stake); err != nil {
+		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.userID, &bet.currency, &bet.selection, &bet.stake); err != nil {
 			rows.Close()
 			return SettlementResult{}, err
 		}
@@ -108,6 +108,9 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 
 	result := SettlementResult{RoundID: roundID, Outcome: append([]string(nil), outcome...), SettledAt: time.Now().UTC()}
 	for _, bet := range bets {
+		if err := applyCommission(ctx, tx, bet.betID, bet.userID, bet.currency, bet.stake, result.SettledAt); err != nil {
+			return SettlementResult{}, err
+		}
 		won := rules.SelectionWins(bet.selection, outcome)
 		if !won {
 			if _, err := tx.Exec(ctx, `UPDATE bets SET status = 'lost', settled_at = $2 WHERE id = $1`, bet.betID, result.SettledAt); err != nil {
