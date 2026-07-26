@@ -9,9 +9,10 @@ import (
 // CompositeResultSource 按 rules.Source 路由分发到对应的子结果源。
 // source 为空或未知时回退到 HashResultSource，保持本地开发与存量数据兼容。
 type CompositeResultSource struct {
-	tronHash TronHashResultSource
-	okxKline OkxKlineResultSource
-	fallback HashResultSource
+	tronHash  TronHashResultSource
+	okxKline  OkxKlineResultSource
+	fallback  HashResultSource
+	okxStream *OkxKlineStream
 }
 
 // NewCompositeResultSource 创建复合结果源，注入外部数据源配置。
@@ -20,6 +21,22 @@ func NewCompositeResultSource(tronRPCURL, okxRESTURL string) CompositeResultSour
 		tronHash: NewTronHashResultSource(tronRPCURL),
 		okxKline: NewOkxKlineResultSource(okxRESTURL),
 		fallback: NewHashResultSource(),
+	}
+}
+
+func NewCompositeResultSourceWithWebSocket(tronRPCURL, okxRESTURL, okxWebSocketURL string) *CompositeResultSource {
+	stream := NewOkxKlineStream(okxWebSocketURL)
+	return &CompositeResultSource{
+		tronHash:  NewTronHashResultSource(tronRPCURL),
+		okxKline:  NewOkxKlineResultSourceWithStream(okxRESTURL, stream),
+		fallback:  NewHashResultSource(),
+		okxStream: stream,
+	}
+}
+
+func (composite *CompositeResultSource) Close() {
+	if composite != nil && composite.okxStream != nil {
+		composite.okxStream.Close()
 	}
 }
 

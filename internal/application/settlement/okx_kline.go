@@ -13,17 +13,24 @@ import (
 )
 
 // OkxKlineResultSource 从 OKX 现货 1 分钟 K 线收盘价提取尾数作为开奖结果。
+// WebSocket 缓存是主数据通道，REST 用于启动及断线期间的历史补偿。
 // 目标 K 线分钟 = floor(round.BetClosesAt / 60s)，取该分钟已收盘的 K 线。
 type OkxKlineResultSource struct {
 	baseURL string
 	client  *http.Client
+	stream  klineStream
 }
 
-// NewOkxKlineResultSource 创建 OKX K 线结果源。baseURL 为 OKX REST API 基础地址。
+// NewOkxKlineResultSource 创建仅含 REST 补偿能力的 OKX K 线结果源。
 func NewOkxKlineResultSource(baseURL string) OkxKlineResultSource {
+	return NewOkxKlineResultSourceWithStream(baseURL, nil)
+}
+
+func NewOkxKlineResultSourceWithStream(baseURL string, stream klineStream) OkxKlineResultSource {
 	return OkxKlineResultSource{
 		baseURL: baseURL,
 		client:  &http.Client{Timeout: 10 * time.Second},
+		stream:  stream,
 	}
 }
 
@@ -55,11 +62,20 @@ func (source OkxKlineResultSource) Outcome(ctx context.Context, round game.Round
 
 	// 目标 K 线分钟 = 封盘时间向下取整到分钟。
 	targetMinute := round.BetClosesAt.UTC().Truncate(time.Minute)
+	if source.stream != nil {
+		source.stream.Subscribe(extras.Symbol)
+		if closePrice, ok := source.stream.ClosePrice(extras.Symbol, targetMinute); ok {
+			return source.outcomeFromClose(closePrice, rules)
+		}
+	}
 	closePrice, err := source.fetchKlineClose(ctx, extras.Symbol, targetMinute)
 	if err != nil {
 		return nil, err
 	}
+	return source.outcomeFromClose(closePrice, rules)
+}
 
+func (source OkxKlineResultSource) outcomeFromClose(closePrice string, rules game.Rules) ([]string, error) {
 	digit, err := lastDigit(closePrice)
 	if err != nil {
 		return nil, fmt.Errorf("extract digit from close price %q: %w", closePrice, err)

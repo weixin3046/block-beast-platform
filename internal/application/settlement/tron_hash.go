@@ -96,6 +96,9 @@ func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round
 // fetchBlockHash 调用兼容的 JSON-RPC eth_getBlockByNumber 获取区块哈希。
 // 区块未产出（result 为 null）时返回 ErrBlockNotFound，调用方应等待下轮重试。
 func (source TronHashResultSource) fetchBlockHash(ctx context.Context, height int64) (string, error) {
+	if source.baseURL == "" {
+		return "", errors.New("tron_hash: QUICKNODE_TRON_URL is required")
+	}
 	heightHex := "0x" + strconv.FormatInt(height, 16)
 	requestBody, err := json.Marshal(jsonRPCRequest{
 		JSONRPC: "2.0",

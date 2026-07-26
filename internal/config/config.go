@@ -24,6 +24,7 @@ type Config struct {
 	ChainWebhookSkew       time.Duration
 	TronRPCURL             string
 	OkxRESTURL             string
+	OkxWebSocketURL        string
 	PQPAAPIURL             string
 	PQPAAPIKey             string
 	PQPAAPISecret          string
@@ -50,8 +51,9 @@ func Load() Config {
 		AccessTokenTTL:         durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:        durationOrDefault("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		ChainWebhookSkew:       durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
-		TronRPCURL:             os.Getenv("TRON_RPC_URL"),
+		TronRPCURL:             firstNonEmpty(os.Getenv("QUICKNODE_TRON_URL"), os.Getenv("TRON_RPC_URL")),
 		OkxRESTURL:             valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
+		OkxWebSocketURL:        valueOrDefault("OKX_WEBSOCKET_URL", "wss://ws.okx.com:8443/ws/v5/business"),
 		PQPAAPIURL:             os.Getenv("PQPA_API_URL"),
 		PQPAAPIKey:             os.Getenv("PQPA_API_KEY"),
 		PQPAAPISecret:          os.Getenv("PQPA_API_SECRET"),
@@ -60,6 +62,15 @@ func Load() Config {
 		WithdrawalMaxMinor:     int64OrDefault("WITHDRAWAL_MAX_MINOR", 10_000_000_000),
 		WithdrawalDailyMinor:   int64OrDefault("WITHDRAWAL_DAILY_LIMIT_MINOR", 50_000_000_000),
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func int64OrDefault(key string, fallback int64) int64 {

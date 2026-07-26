@@ -13,6 +13,37 @@ import (
 	"github.com/block-beast/platform/internal/domain/game"
 )
 
+type cachedKline struct {
+	symbol string
+	minute time.Time
+	price  string
+}
+
+func (cache *cachedKline) Subscribe(symbol string) {
+	cache.symbol = symbol
+}
+
+func (cache *cachedKline) ClosePrice(symbol string, minute time.Time) (string, bool) {
+	return cache.price, symbol == cache.symbol && minute.Equal(cache.minute)
+}
+
+func (*cachedKline) Close() {}
+
+func TestOkxKlineUsesWebSocketCacheBeforeREST(t *testing.T) {
+	target := time.Now().UTC().Truncate(time.Minute)
+	cache := &cachedKline{minute: target, price: "65032.17"}
+	source := NewOkxKlineResultSourceWithStream("://invalid-rest-url", cache)
+	outcome, err := source.Outcome(context.Background(), game.Round{BetClosesAt: target}, game.Rules{
+		Outcomes: []string{"odd", "even"}, Extras: json.RawMessage(`{"symbol":"BTC-USDT"}`),
+	})
+	if err != nil {
+		t.Fatalf("outcome: %v", err)
+	}
+	if cache.symbol != "BTC-USDT" || len(outcome) != 1 || outcome[0] != "odd" {
+		t.Fatalf("symbol=%q outcome=%v", cache.symbol, outcome)
+	}
+}
+
 func TestOkxKlineOutcome(t *testing.T) {
 	// 目标分钟：2026-07-22 23:30:00 UTC
 	targetMinute := time.Date(2026, 7, 22, 23, 30, 0, 0, time.UTC)

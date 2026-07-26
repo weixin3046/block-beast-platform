@@ -17,7 +17,7 @@
 | 账号、游客、密码及第三方登录 | Identity | 会话必须可撤销，密码必须使用 Argon2id，严禁使用 MD5。 |
 | 玩家与 GM API | API / Operations | 对特权指令实施 RBAC，并保留不可变审计日志。 |
 | 余额、扣除投注、派奖、退款、充值及提现 | Wallet | 账本记录与余额更新必须处于同一个 PostgreSQL 事务中。 |
-| 轮次、停止投注、TRON/K 线结果及结算 | Game / Worker | 通过轮次版本和唯一结算键保证结算幂等。 |
+| 轮次、停止投注、TRON/K 线结果及结算 | Game / Worker | OKX `candle1m` WebSocket 为 K 线主通道、REST 为断线补偿；TRON 区块通过 QuickNode JSON-RPC 查询。通过轮次版本和唯一结算键保证结算幂等。 |
 | 代理层级与返水 | Agent / Worker | 佣金来源必须是已结算投注，且只能被唯一记录一次。 |
 | 聊天、客服、红包及推送 | Realtime | 先持久化消息记录，再通过 Redis/NATS 扇出。 |
 | TRON 监听、K 线订阅和 PQPA 回调 | Chain / Worker | 必须验证回调签名、服务商事件 ID 和交易哈希，并保证幂等。 |
