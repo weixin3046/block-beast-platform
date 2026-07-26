@@ -21,11 +21,13 @@ import (
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/application/task"       // 任务/签到应用服务
-	"github.com/block-beast/platform/internal/config"                 // 配置加载
-	"github.com/block-beast/platform/internal/domain/game"            // 游戏轮次仓储
-	"github.com/block-beast/platform/internal/domain/identity"        // 身份认证仓储
-	"github.com/block-beast/platform/internal/domain/wallet"          // 钱包仓储
-	"github.com/block-beast/platform/internal/platform/httpapi"       // API路由/业务处理器
+	"github.com/block-beast/platform/internal/application/uploads"
+	"github.com/block-beast/platform/internal/config"           // 配置加载
+	"github.com/block-beast/platform/internal/domain/game"      // 游戏轮次仓储
+	"github.com/block-beast/platform/internal/domain/identity"  // 身份认证仓储
+	"github.com/block-beast/platform/internal/domain/wallet"    // 钱包仓储
+	"github.com/block-beast/platform/internal/platform/httpapi" // API路由/业务处理器
+	"github.com/block-beast/platform/internal/platform/objectstorage"
 	"github.com/block-beast/platform/internal/platform/pqpa"
 	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL连接池
 )
@@ -87,6 +89,18 @@ func main() {
 	}
 	options = append(options, httpapi.WithWithdrawals(chainService))
 	options = append(options, httpapi.WithChat(chat.NewService(pool)))
+	if cfg.ObjectStorageEndpoint != "" || cfg.ObjectStorageBucket != "" || cfg.ObjectStorageAccessKey != "" || cfg.ObjectStorageSecretKey != "" {
+		storageClient, err := objectstorage.NewClient(objectstorage.Config{
+			Endpoint: cfg.ObjectStorageEndpoint, Region: cfg.ObjectStorageRegion,
+			Bucket: cfg.ObjectStorageBucket, AccessKey: cfg.ObjectStorageAccessKey,
+			SecretKey: cfg.ObjectStorageSecretKey,
+		}, nil)
+		if err != nil {
+			logger.Error("invalid object storage configuration", "error", err)
+			return
+		}
+		options = append(options, httpapi.WithUploads(uploads.NewService(pool, storageClient, cfg.UploadMaxBytes, cfg.UploadURLTTL)))
+	}
 	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))

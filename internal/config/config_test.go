@@ -59,3 +59,16 @@ func TestLoginProtectionConfiguration(t *testing.T) {
 		t.Fatalf("invalid login protection fallback = %d/%s/%s", config.LoginMaxFailures, config.LoginFailureWindow, config.LoginLockoutDuration)
 	}
 }
+
+func TestUploadConfiguration(t *testing.T) {
+	t.Setenv("OBJECT_STORAGE_ENDPOINT", "https://storage.example")
+	t.Setenv("OBJECT_STORAGE_REGION", "ap-east-1")
+	t.Setenv("OBJECT_STORAGE_BUCKET", "uploads")
+	t.Setenv("UPLOAD_MAX_BYTES", "2048")
+	t.Setenv("UPLOAD_URL_TTL", "5m")
+	config := Load()
+	if config.ObjectStorageEndpoint != "https://storage.example" || config.ObjectStorageRegion != "ap-east-1" ||
+		config.ObjectStorageBucket != "uploads" || config.UploadMaxBytes != 2048 || config.UploadURLTTL != 5*time.Minute {
+		t.Fatalf("upload configuration = %+v", config)
+	}
+}

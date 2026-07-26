@@ -16,6 +16,7 @@ import (
 	"github.com/block-beast/platform/internal/application/outbox"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement"
+	"github.com/block-beast/platform/internal/application/uploads"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
@@ -67,6 +68,7 @@ func main() {
 	processor := outbox.NewProcessor(events.NewPostgresOutbox(pool), publisher)
 	roundRepository := game.NewPostgresRepository(pool)
 	settlementService := settlement.NewService(pool)
+	uploadMaintenance := uploads.NewService(pool, nil, cfg.UploadMaxBytes, cfg.UploadURLTTL)
 	resultSource := settlement.NewCompositeResultSourceWithWebSocket(cfg.TronRPCURL, cfg.OkxRESTURL, cfg.OkxWebSocketURL)
 	defer resultSource.Close()
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
@@ -76,6 +78,7 @@ func main() {
 	settleDueRounds(ctx, logger, settlementService, resultSource)
 	processPending(logger, processor)
 	reconcileWithdrawals(ctx, logger, withdrawalSender)
+	expirePendingUploads(ctx, logger, uploadMaintenance)
 	lastStats := natsjs.ConsumerStats{}
 	var assetSync *pqpaassets.Service
 	var assetTicker *time.Ticker
@@ -97,10 +100,22 @@ func main() {
 			settleDueRounds(ctx, logger, settlementService, resultSource)
 			processPending(logger, processor)
 			reconcileWithdrawals(ctx, logger, withdrawalSender)
+			expirePendingUploads(ctx, logger, uploadMaintenance)
 			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
 		}
+	}
+}
+
+func expirePendingUploads(ctx context.Context, logger *slog.Logger, service *uploads.Service) {
+	expired, err := service.ExpirePending(ctx, 100)
+	if err != nil {
+		logger.Error("pending upload expiration failed", "error", err)
+		return
+	}
+	if expired > 0 {
+		logger.Info("pending uploads expired", "count", expired)
 	}
 }
 

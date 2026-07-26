@@ -35,6 +35,13 @@ type Config struct {
 	WithdrawalMinMinor     int64
 	WithdrawalMaxMinor     int64
 	WithdrawalDailyMinor   int64
+	ObjectStorageEndpoint  string
+	ObjectStorageRegion    string
+	ObjectStorageBucket    string
+	ObjectStorageAccessKey string
+	ObjectStorageSecretKey string
+	UploadMaxBytes         int64
+	UploadURLTTL           time.Duration
 }
 
 func Load() Config {
@@ -67,6 +74,13 @@ func Load() Config {
 		WithdrawalMinMinor:     int64OrDefault("WITHDRAWAL_MIN_MINOR", 1_000_000),
 		WithdrawalMaxMinor:     int64OrDefault("WITHDRAWAL_MAX_MINOR", 10_000_000_000),
 		WithdrawalDailyMinor:   int64OrDefault("WITHDRAWAL_DAILY_LIMIT_MINOR", 50_000_000_000),
+		ObjectStorageEndpoint:  os.Getenv("OBJECT_STORAGE_ENDPOINT"),
+		ObjectStorageRegion:    valueOrDefault("OBJECT_STORAGE_REGION", "us-east-1"),
+		ObjectStorageBucket:    os.Getenv("OBJECT_STORAGE_BUCKET"),
+		ObjectStorageAccessKey: os.Getenv("OBJECT_STORAGE_ACCESS_KEY"),
+		ObjectStorageSecretKey: os.Getenv("OBJECT_STORAGE_SECRET_KEY"),
+		UploadMaxBytes:         positiveInt64OrDefault("UPLOAD_MAX_BYTES", 10<<20),
+		UploadURLTTL:           durationOrDefault("UPLOAD_URL_TTL", 10*time.Minute),
 	}
 }
 
@@ -101,6 +115,14 @@ func int64OrDefault(key string, fallback int64) int64 {
 		return fallback
 	}
 	return parsed
+}
+
+func positiveInt64OrDefault(key string, fallback int64) int64 {
+	value := int64OrDefault(key, fallback)
+	if value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func boolOrDefault(key string, fallback bool) bool {

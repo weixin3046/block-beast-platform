@@ -183,4 +183,14 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 
 消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服房间只有所属玩家和后台角色可读写，公共消息通过 WebSocket 的 `chat` topic 广播。
 
+## 文件上传
+
+1. 调用 `POST /v1/uploads/authorize`，提交 `content_type` 和 `size_bytes`。
+2. 使用响应中的 `method=PUT`、`url` 和完整 `headers` 直接上传到对象存储；不得修改签名要求的 `Content-Type`。
+3. 调用 `POST /v1/uploads/{uploadID}/confirm`。后端通过已签名 HEAD 请求核对实际大小和类型，匹配后状态变为 `confirmed`。
+4. `GET /v1/uploads/{uploadID}` 仅允许所有者查询状态。
+
+允许 JPEG、PNG、WebP 和 PDF，默认最大 10 MiB、签名有效期 10 分钟。前端不能把 `pending` 对象当成可用文件；授权过期或对象元数据不匹配时确认接口返回 409。
+Worker 会把超时未确认记录批量标记为 `expired`。对象存储桶还应配置生命周期规则，自动清理未被业务引用的过期对象。
+
 游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用 QuickNode JSON-RPC。前端不得自行计算或替代开奖结果。

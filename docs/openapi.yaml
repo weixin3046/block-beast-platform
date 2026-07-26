@@ -35,6 +35,8 @@ tags:
     description: 每日任务（签到）。
   - name: Chat
     description: 公共聊天与客服会话。
+  - name: Uploads
+    description: S3 兼容对象存储直传与确认。
 paths:
   /healthz:
     get:
@@ -1074,6 +1076,69 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /v1/uploads/authorize:
+    post:
+      tags: [Uploads]
+      summary: 创建短时对象上传授权
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [content_type, size_bytes]
+              properties:
+                content_type:
+                  type: string
+                  enum: [image/jpeg, image/png, image/webp, application/pdf]
+                size_bytes: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '201':
+          description: 上传授权。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadAuthorization' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /v1/uploads/{uploadID}:
+    parameters:
+      - name: uploadID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Uploads]
+      summary: 查询本人上传状态
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 上传元数据。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upload' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/uploads/{uploadID}/confirm:
+    post:
+      tags: [Uploads]
+      summary: 确认对象已上传并核对元数据
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: uploadID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 已确认的上传。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upload' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502':
+          description: 对象存储暂时不可用。
 components:
   securitySchemes:
     bearerAuth:
@@ -1171,6 +1236,29 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    Upload:
+      type: object
+      required: [id, owner_user_id, storage_key, content_type, size_bytes, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        owner_user_id: { type: string, format: uuid }
+        storage_key: { type: string }
+        content_type: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        status: { type: string, enum: [pending, confirmed, expired] }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    UploadAuthorization:
+      type: object
+      required: [upload, method, url, headers, expires_at]
+      properties:
+        upload: { $ref: '#/components/schemas/Upload' }
+        method: { type: string, const: PUT }
+        url: { type: string, format: uri }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        expires_at: { type: string, format: date-time }
     ChatRoom:
       type: object
       required: [id, type, created_at]
