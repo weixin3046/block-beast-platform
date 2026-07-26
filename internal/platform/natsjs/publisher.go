@@ -9,6 +9,8 @@ import (
 
 const streamName = "BLOCK_BEAST_EVENTS"
 
+var eventStreamSubjects = []string{"game.>", "wallet.>", "chain.>", "chat.>"}
+
 type Publisher struct {
 	connection *nats.Conn
 	jetStream  nats.JetStreamContext
@@ -24,17 +26,43 @@ func Connect(url string) (*Publisher, error) {
 		connection.Close()
 		return nil, err
 	}
-	if _, err := jetStream.StreamInfo(streamName); errors.Is(err, nats.ErrStreamNotFound) {
+	stream, err := jetStream.StreamInfo(streamName)
+	if errors.Is(err, nats.ErrStreamNotFound) {
 		_, err = jetStream.AddStream(&nats.StreamConfig{
 			Name:     streamName,
-			Subjects: []string{"game.>", "wallet.>", "chain.>"},
+			Subjects: eventStreamSubjects,
 		})
+	} else if err == nil {
+		subjects, changed := mergeSubjects(stream.Config.Subjects, eventStreamSubjects)
+		if changed {
+			config := stream.Config
+			config.Subjects = subjects
+			_, err = jetStream.UpdateStream(&config)
+		}
 	}
 	if err != nil {
 		connection.Close()
 		return nil, err
 	}
 	return &Publisher{connection: connection, jetStream: jetStream}, nil
+}
+
+func mergeSubjects(current, required []string) ([]string, bool) {
+	output := append([]string(nil), current...)
+	known := make(map[string]struct{}, len(output))
+	for _, subject := range output {
+		known[subject] = struct{}{}
+	}
+	changed := false
+	for _, subject := range required {
+		if _, exists := known[subject]; exists {
+			continue
+		}
+		output = append(output, subject)
+		known[subject] = struct{}{}
+		changed = true
+	}
+	return output, changed
 }
 
 func (publisher *Publisher) Publish(event events.Event) error {

@@ -5,17 +5,22 @@ import (
 	"time"
 )
 
-func TestPasswordPolicyIsForcedInProduction(t *testing.T) {
+func TestPasswordPolicyIsControlledByExplicitSetting(t *testing.T) {
 	t.Setenv("APP_ENV", "development")
 	t.Setenv("AUTH_STRICT_PASSWORD_POLICY", "false")
 	if Load().AuthStrictPassword {
-		t.Fatal("development password policy should be disabled")
+		t.Fatal("password policy should be disabled when explicitly set to false")
 	}
 
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("AUTH_STRICT_PASSWORD_POLICY", "false")
+	if Load().AuthStrictPassword {
+		t.Fatal("environment must not override the explicit password policy setting")
+	}
+
+	t.Setenv("AUTH_STRICT_PASSWORD_POLICY", "true")
 	if !Load().AuthStrictPassword {
-		t.Fatal("production must force strict password policy")
+		t.Fatal("password policy should be enabled when explicitly set to true")
 	}
 }
 

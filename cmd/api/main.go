@@ -35,6 +35,15 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "-healthcheck" {
+		client := &http.Client{Timeout: 3 * time.Second}
+		response, err := client.Get(os.Args[2])
+		if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			os.Exit(1)
+		}
+		_ = response.Body.Close()
+		return
+	}
 	cfg := config.Load()                                    // 加载配置文件
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)) // 创建JSON日志记录器
 	if err := cfg.ValidateAPI(); err != nil {

@@ -47,6 +47,20 @@ Copy-Item .env.example .env
 
 首次创建 PostgreSQL 数据卷时会按文件名顺序执行 `migrations/` 下的全部迁移。已有数据卷不会自动重新执行初始化脚本；macOS/Linux 使用 `scripts/dev-up.sh` 启动时会自动识别并补跑缺失迁移，也可单独运行 `scripts/dev-migrate.sh`。生产环境升级仍需在发布流程中按顺序执行新增迁移，不能通过删除数据卷完成升级。
 
+## 生产部署
+
+服务器使用独立的 `compose.production.yaml` 和 `.env.production`：
+
+```bash
+cp .env.production.example .env.production
+# 填写生产数据库、NATS、JWT、PQPA、QuickNode 及域名配置
+./scripts/deploy-production.sh
+```
+
+该脚本会先执行增量迁移，再更新 API、Worker 和 Realtime。完整的网络隔离、
+HTTPS/WebSocket 代理、验证和运维说明见
+[生产环境 Docker 部署](docs/deployment.md)。
+
 API 健康检查：`http://localhost:8080/healthz`。
 
 Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket 地址为 `ws://localhost:8081/v1/ws`。

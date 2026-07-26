@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+bin
+coverage.out
+*.log
+compose.override.yaml

@@ -57,7 +57,7 @@ func Load() Config {
 		PostgresDSN:            os.Getenv("POSTGRES_DSN"),
 		NATSURL:                os.Getenv("NATS_URL"),
 		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),
-		AuthStrictPassword:     environment == "production" || boolOrDefault("AUTH_STRICT_PASSWORD_POLICY", false),
+		AuthStrictPassword:     boolOrDefault("AUTH_STRICT_PASSWORD_POLICY", false),
 		LoginMaxFailures:       intOrDefault("LOGIN_MAX_FAILURES", 5),
 		LoginFailureWindow:     durationOrDefault("LOGIN_FAILURE_WINDOW", 15*time.Minute),
 		LoginLockoutDuration:   durationOrDefault("LOGIN_LOCKOUT_DURATION", 15*time.Minute),
