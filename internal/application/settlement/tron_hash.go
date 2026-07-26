@@ -21,7 +21,7 @@ type TronHashResultSource struct {
 	client  *http.Client
 }
 
-// NewTronHashResultSource 创建 TRON 哈希结果源。baseURL 为 QuickNode JSON-RPC 端点（已内嵌 token）。
+// NewTronHashResultSource 创建 TRON 哈希结果源。baseURL 必须通过环境变量注入。
 func NewTronHashResultSource(baseURL string) TronHashResultSource {
 	return TronHashResultSource{
 		baseURL: baseURL,
@@ -93,7 +93,7 @@ func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round
 	return mapOutcome(digit, shape), nil
 }
 
-// fetchBlockHash 调用 QuickNode JSON-RPC eth_getBlockByNumber 获取区块哈希。
+// fetchBlockHash 调用兼容的 JSON-RPC eth_getBlockByNumber 获取区块哈希。
 // 区块未产出（result 为 null）时返回 ErrBlockNotFound，调用方应等待下轮重试。
 func (source TronHashResultSource) fetchBlockHash(ctx context.Context, height int64) (string, error) {
 	heightHex := "0x" + strconv.FormatInt(height, 16)

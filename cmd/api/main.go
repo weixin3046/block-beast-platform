@@ -53,7 +53,16 @@ func main() {
 			WithSessions(identityRepository, cfg.RefreshTokenTTL)
 		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService), httpapi.WithSessions(authService))
 	}
-	chainService := chain.NewService(pool)
+	withdrawalPolicy := chain.WithdrawalPolicy{
+		MinimumMinor:    cfg.WithdrawalMinMinor,
+		MaximumMinor:    cfg.WithdrawalMaxMinor,
+		DailyLimitMinor: cfg.WithdrawalDailyMinor,
+	}
+	if err := withdrawalPolicy.Validate(); err != nil {
+		logger.Error("invalid withdrawal policy", "error", err)
+		return
+	}
+	chainService := chain.NewService(pool).WithWithdrawalPolicy(withdrawalPolicy)
 	if cfg.PQPAAPIURL != "" && cfg.PQPAAPIKey != "" && cfg.PQPAAPISecret != "" {
 		pqpaClient := pqpa.NewClient(cfg.PQPAAPIURL, cfg.PQPAAPIKey, cfg.PQPAAPISecret, nil)
 		chainService.WithDepositAddressProvider(pqpaClient)

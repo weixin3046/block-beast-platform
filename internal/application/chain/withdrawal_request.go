@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/wallet"
@@ -14,24 +16,17 @@ import (
 // RequestWithdrawal 幂等创建提现申请：同一事务中将申请金额从可用余额
 // 移入冻结余额、创建提现记录、写账本和 outbox 事件。重复请求返回既有申请。
 func (service *Service) RequestWithdrawal(ctx context.Context, input WithdrawalInput) (Withdrawal, error) {
+	input.ChainCode = strings.ToUpper(strings.TrimSpace(input.ChainCode))
+	input.Currency = strings.ToUpper(strings.TrimSpace(input.Currency))
+	input.DestinationAddress = strings.TrimSpace(input.DestinationAddress)
+	input.DestinationMemo = strings.TrimSpace(input.DestinationMemo)
 	if input.UserID == "" || input.ClientRequestID == "" || input.DestinationAddress == "" || input.ChainCode == "" || input.Currency == "" {
 		return Withdrawal{}, ErrMissingFields
 	}
 	if input.AmountMinor <= 0 {
 		return Withdrawal{}, ErrInvalidAmount
 	}
-	var chainTokenID int64
-	var tokenDecimals int
-	err := service.pool.QueryRow(ctx, `
-		SELECT provider_chain_token_id, decimals
-		FROM provider_supported_assets
-		WHERE provider='pqpa' AND chain_code=$1 AND token_code=$2
-			AND enabled=true AND support_withdraw=true AND provider_chain_token_id IS NOT NULL`,
-		input.ChainCode, input.Currency).Scan(&chainTokenID, &tokenDecimals)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Withdrawal{}, ErrUnsupportedAsset
-	}
-	if err != nil {
+	if err := validateWithdrawalDestination(input.ChainCode, input.DestinationAddress, input.DestinationMemo); err != nil {
 		return Withdrawal{}, err
 	}
 
@@ -46,6 +41,24 @@ func (service *Service) RequestWithdrawal(ctx context.Context, input WithdrawalI
 		return existing, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
+		return Withdrawal{}, err
+	}
+
+	var chainTokenID int64
+	var tokenDecimals int
+	err = tx.QueryRow(ctx, `
+		SELECT provider_chain_token_id, decimals
+		FROM provider_supported_assets
+		WHERE provider='pqpa' AND chain_code=$1 AND token_code=$2
+			AND enabled=true AND support_withdraw=true AND provider_chain_token_id IS NOT NULL`,
+		input.ChainCode, input.Currency).Scan(&chainTokenID, &tokenDecimals)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Withdrawal{}, ErrUnsupportedAsset
+	}
+	if err != nil {
+		return Withdrawal{}, err
+	}
+	if err := service.withdrawalPolicy.validateAmount(input.AmountMinor); err != nil {
 		return Withdrawal{}, err
 	}
 
@@ -64,6 +77,21 @@ func (service *Service) RequestWithdrawal(ctx context.Context, input WithdrawalI
 	}
 	if availableMinor < input.AmountMinor {
 		return Withdrawal{}, wallet.ErrInsufficientFunds
+	}
+	if service.withdrawalPolicy.DailyLimitMinor > 0 {
+		startOfDay := time.Now().UTC().Truncate(24 * time.Hour)
+		var withdrawnToday int64
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(sum(amount_minor), 0)
+			FROM withdrawals
+			WHERE user_id=$1 AND token_code=$2 AND created_at >= $3
+				AND status IN ('requested', 'approved', 'broadcasted', 'confirmed')`,
+			input.UserID, input.Currency, startOfDay).Scan(&withdrawnToday); err != nil {
+			return Withdrawal{}, err
+		}
+		if withdrawnToday > service.withdrawalPolicy.DailyLimitMinor-input.AmountMinor {
+			return Withdrawal{}, ErrWithdrawalDailyLimit
+		}
 	}
 	availableMinor -= input.AmountMinor
 	frozenMinor += input.AmountMinor

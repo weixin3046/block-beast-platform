@@ -177,3 +177,35 @@ func TestWithdrawalEndpointsRequireAuthAndOwnership(t *testing.T) {
 		t.Fatalf("insufficient funds status = %d, want 409", response.Code)
 	}
 }
+
+func TestWithdrawalEndpointMapsRiskErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "invalid address", err: chainapp.ErrInvalidWithdrawalAddress, want: http.StatusBadRequest},
+		{name: "below minimum", err: chainapp.ErrWithdrawalBelowMinimum, want: http.StatusBadRequest},
+		{name: "above maximum", err: chainapp.ErrWithdrawalAboveMaximum, want: http.StatusBadRequest},
+		{name: "daily limit", err: chainapp.ErrWithdrawalDailyLimit, want: http.StatusConflict},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := New(
+				config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)),
+				nil, readinessChecker{}, nil, nil, nil, nil,
+				WithAuth(NewAuthenticator(testSecret)),
+				WithWithdrawals(stubWithdrawalService{requestErr: testCase.err}),
+			)
+			request := httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(
+				`{"client_request_id":"c1","destination_address":"0x1111111111111111111111111111111111111111","chain_code":"POLYGON","currency":"USDT","amount_minor":100}`,
+			))
+			request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "user-1", []string{identity.RolePlayer}))
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != testCase.want {
+				t.Fatalf("status = %d, want %d", response.Code, testCase.want)
+			}
+		})
+	}
+}

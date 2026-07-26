@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/wallet"
@@ -32,6 +33,7 @@ type fixture struct {
 	walletID  string
 	addressID string
 	address   string
+	chainCode string
 }
 
 func seedChainUser(t *testing.T, pool *pgxpool.Pool, ctx context.Context, tokenCode string) fixture {
@@ -41,6 +43,7 @@ func seedChainUser(t *testing.T, pool *pgxpool.Pool, ctx context.Context, tokenC
 		walletID:  uuid.NewString(),
 		addressID: uuid.NewString(),
 		address:   "T" + uuid.NewString()[:8],
+		chainCode: "TEST-" + uuid.NewString()[:8],
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO users (id, display_name) VALUES ($1, 'chain test player')`, f.userID); err != nil {
 		t.Fatalf("create user: %v", err)
@@ -51,12 +54,21 @@ func seedChainUser(t *testing.T, pool *pgxpool.Pool, ctx context.Context, tokenC
 	if _, err := pool.Exec(ctx, `INSERT INTO chain_addresses (id, user_id, chain_code, token_code, address) VALUES ($1, $2, 'TRON', $3, $4)`, f.addressID, f.userID, tokenCode, f.address); err != nil {
 		t.Fatalf("create chain address: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO provider_supported_assets (
+			id, provider, provider_chain_token_id, chain_code, token_code, token_name,
+			decimals, enabled, support_deposit, support_withdraw
+		) VALUES ($1, 'pqpa', $2, $3, $4, $4, 6, true, true, true)`,
+		uuid.NewString(), time.Now().UnixNano(), f.chainCode, tokenCode); err != nil {
+		t.Fatalf("create provider asset: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM outbox_events WHERE aggregate_type IN ('deposit', 'withdrawal') AND aggregate_id IN (SELECT id::text FROM deposits WHERE chain_address_id = $1 UNION SELECT id::text FROM withdrawals WHERE user_id = $2)`, f.addressID, f.userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM ledger_entries WHERE wallet_id IN (SELECT id FROM wallets WHERE user_id = $1)`, f.userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM deposits WHERE chain_address_id = $1`, f.addressID)
 		_, _ = pool.Exec(ctx, `DELETE FROM withdrawals WHERE user_id = $1`, f.userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM chain_addresses WHERE id = $1`, f.addressID)
+		_, _ = pool.Exec(ctx, `DELETE FROM provider_supported_assets WHERE provider='pqpa' AND chain_code=$1 AND token_code=$2`, f.chainCode, tokenCode)
 		_, _ = pool.Exec(ctx, `DELETE FROM wallets WHERE user_id = $1`, f.userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, f.userID)
 	})
@@ -177,6 +189,7 @@ func TestRequestWithdrawalFreezesFundsIdempotently(t *testing.T) {
 		UserID:             f.userID,
 		ClientRequestID:    "wd-" + uuid.NewString(),
 		DestinationAddress: "TDestination",
+		ChainCode:          f.chainCode,
 		Currency:           "USDT",
 		AmountMinor:        2000,
 	}
@@ -221,7 +234,7 @@ func TestRequestWithdrawalFreezesFundsIdempotently(t *testing.T) {
 	}
 
 	// 余额不足必须拒绝。
-	_, err = service.RequestWithdrawal(ctx, WithdrawalInput{UserID: f.userID, ClientRequestID: "wd-" + uuid.NewString(), DestinationAddress: "T", Currency: "USDT", AmountMinor: 99999})
+	_, err = service.RequestWithdrawal(ctx, WithdrawalInput{UserID: f.userID, ClientRequestID: "wd-" + uuid.NewString(), DestinationAddress: "anotherDestination", ChainCode: f.chainCode, Currency: "USDT", AmountMinor: 99999})
 	if !errors.Is(err, wallet.ErrInsufficientFunds) {
 		t.Fatalf("insufficient funds error = %v, want ErrInsufficientFunds", err)
 	}
@@ -236,5 +249,31 @@ func TestRequestWithdrawalFreezesFundsIdempotently(t *testing.T) {
 	}
 	if _, err := service.FindWithdrawal(ctx, uuid.NewString()); !errors.Is(err, ErrWithdrawalNotFound) {
 		t.Fatalf("missing withdrawal error = %v, want ErrWithdrawalNotFound", err)
+	}
+}
+
+func TestRequestWithdrawalEnforcesDailyLimit(t *testing.T) {
+	pool, ctx := testPool(t)
+	f := seedChainUser(t, pool, ctx, "USDT")
+	service := NewService(pool).WithWithdrawalPolicy(WithdrawalPolicy{
+		MinimumMinor: 100, MaximumMinor: 5_000, DailyLimitMinor: 3_500,
+	})
+	request := func(id string, amount int64) error {
+		_, err := service.RequestWithdrawal(ctx, WithdrawalInput{
+			UserID: f.userID, ClientRequestID: id,
+			DestinationAddress: "dailyLimitDestination", ChainCode: f.chainCode,
+			Currency: "USDT", AmountMinor: amount,
+		})
+		return err
+	}
+	if err := request("wd-"+uuid.NewString(), 2_000); err != nil {
+		t.Fatalf("first withdrawal: %v", err)
+	}
+	if err := request("wd-"+uuid.NewString(), 1_501); !errors.Is(err, ErrWithdrawalDailyLimit) {
+		t.Fatalf("daily limit error = %v", err)
+	}
+	available, frozen := balanceOf(t, pool, ctx, f.userID, "USDT")
+	if available != 3_000 || frozen != 2_000 {
+		t.Fatalf("balance after rejected withdrawal = %d/%d", available, frozen)
 	}
 }

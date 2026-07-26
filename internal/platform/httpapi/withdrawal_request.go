@@ -50,8 +50,16 @@ func (server *Server) requestWithdrawal(writer http.ResponseWriter, request *htt
 		AmountMinor:        input.AmountMinor,
 	})
 	switch {
-	case errors.Is(err, chainapp.ErrMissingFields), errors.Is(err, chainapp.ErrInvalidAmount), errors.Is(err, chainapp.ErrUnsupportedAsset):
+	case errors.Is(err, chainapp.ErrMissingFields),
+		errors.Is(err, chainapp.ErrInvalidAmount),
+		errors.Is(err, chainapp.ErrUnsupportedAsset),
+		errors.Is(err, chainapp.ErrInvalidWithdrawalAddress),
+		errors.Is(err, chainapp.ErrWithdrawalBelowMinimum),
+		errors.Is(err, chainapp.ErrWithdrawalAboveMaximum):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	case errors.Is(err, chainapp.ErrWithdrawalDailyLimit):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	case errors.Is(err, wallet.ErrWalletNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})

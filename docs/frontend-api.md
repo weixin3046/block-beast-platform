@@ -114,7 +114,7 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 ## USDT 提现
 
-提现网络同样来自 `GET /v1/assets`，只允许选择 `support_withdraw=true` 的资产。调用 `POST /v1/withdrawals` 时必须提交 `chain_code`、`currency`、目标地址、可选的 `destination_memo`、最小单位整数金额和客户端幂等键。后台审批通过后由 Worker 调用 PQPA 出金；最终状态由 PQPA Webhook 更新，回调丢失时由 Worker 主动对账补偿。
+提现网络同样来自 `GET /v1/assets`，只允许选择 `support_withdraw=true` 的资产。调用 `POST /v1/withdrawals` 时必须提交 `chain_code`、`currency`、目标地址、可选的 `destination_memo`、最小单位整数金额和客户端幂等键。服务端执行地址格式、单笔最小/最大金额和 UTC 每日累计限额检查；超出每日限额返回 409。后台审批通过后由 Worker 调用 PQPA 出金；最终状态由 PQPA Webhook 更新，回调丢失时由 Worker 主动对账补偿。
 
 ## 管理后台接口
 
@@ -152,7 +152,7 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 ## 当前限制
 
-API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名单。访问令牌有效期 15 分钟，当前尚未实现刷新令牌，过期后需重新登录。
+API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名单。访问令牌默认有效期 15 分钟；客户端应使用可轮换刷新令牌续期，退出时撤销当前刷新令牌。
 
 ## 实时连接
 

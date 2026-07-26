@@ -687,7 +687,7 @@ paths:
       tags: [Chain]
       operationId: requestWithdrawal
       summary: 创建提现申请
-      description: 从可用余额扣减并冻结申请金额，创建 requested 状态的提现申请。同一 client_request_id 重复请求返回既有申请，不重复冻结。身份取自访问令牌。申请会写入审计日志。
+      description: 从可用余额扣减并冻结申请金额，创建 requested 状态的提现申请。服务端校验目标地址、单笔最小/最大金额及 UTC 自然日累计限额；失败或拒绝的申请不占每日额度。同一 client_request_id 重复请求优先返回既有申请，不会因限额调整而重复冻结或被误拒绝。身份取自访问令牌，申请写入审计日志。
       security:
         - bearerAuth: []
       requestBody:
@@ -1103,9 +1103,12 @@ components:
           description: 客户端生成的幂等键；同一用户下必须唯一。
         destination_address:
           type: string
-          minLength: 1
+          minLength: 8
+          maxLength: 256
+          description: TRON 与 EVM 网络执行链格式校验；其他网络执行长度及空白/控制字符校验。
         destination_memo:
           type: string
+          maxLength: 256
           description: 目标链要求 Memo/Tag 时填写。
         chain_code:
           type: string

@@ -49,7 +49,7 @@ Copy-Item .env.example .env
 
 API 健康检查：`http://localhost:8080/healthz`。
 
-Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供健康检查，尚未实现根页面或 WebSocket 路由，因此访问 `http://localhost:8081/` 会返回 404。
+Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket 地址为 `ws://localhost:8081/v1/ws`。
 
 ## 当前接口
 
@@ -79,7 +79,7 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供�
 | `GET /v1/bets/{bet_id}` | 查询投注记录与状态。仅本人或 operator/admin。 |
 | `GET /v1/wallets/{account_id}?currency={code}` | 查询钱包可用与冻结余额。仅本人或 operator/admin。 |
 | `POST /v1/webhooks/chain/deposits` | 链上充值回调（服务商）：HMAC 签名验签，按事件 ID 与交易哈希幂等入账。 |
-| `POST /v1/withdrawals` | 创建提现申请：冻结申请金额，幂等键防重复。仅本人。 |
+| `POST /v1/withdrawals` | 创建提现申请：校验地址及单笔/每日限额，冻结金额，幂等键防重复。仅本人。 |
 | `GET /v1/withdrawals/{withdrawal_id}` | 查询提现申请。仅本人或 operator/admin。 |
 
 除健康检查、平台信息和登录外，业务接口均需 `Authorization: Bearer <access_token>`。登录成功与失败、轮次取消等敏感操作会写入 `audit_logs` 审计表。未设置 `AUTH_TOKEN_SECRET` 时鉴权自动关闭（仅限本地开发，启动日志会给出警告）。
@@ -96,8 +96,6 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供�
 	"stake_minor": 2500
 }
 ```
-
-除健康检查和平台信息外，业务接口尚未接入身份认证，仅适用于本地开发。
 
 ## 本地代码格式化
 
@@ -138,7 +136,7 @@ docker compose down --volumes
 }
 ```
 
-已实现 JetStream 消费端可靠性：Worker 以耐用消费者订阅 `game.>`、`wallet.>`、`chain.>` 主题，处理失败时按退避策略（1s/2s/5s/10s/30s）重投，最多投递 5 次后把原始消息连同失败原因、投递次数等上下文发布到 `BLOCK_BEAST_DEAD_LETTERS` 死信流（主题为 `deadletter.<原主题>`）并终止重投。消费侧内置监控计数器（接收/成功/重试/死信），变化时输出结构化日志；NATS 自带的监控接口在 `http://localhost:8222/jsz` 可查看流与消费者状态。当前处理器为占位日志实现，返佣、通知等业务消费者将在此基础上接入。
+已实现 JetStream 消费端可靠性：Worker 以耐用消费者订阅 `game.>`、`wallet.>`、`chain.>` 主题，处理失败时按退避策略（1s/2s/5s/10s/30s）重投，最多投递 5 次后把原始消息连同失败原因、投递次数等上下文发布到 `BLOCK_BEAST_DEAD_LETTERS` 死信流（主题为 `deadletter.<原主题>`）并终止重投。消费侧内置监控计数器（接收/成功/重试/死信），变化时输出结构化日志；NATS 自带的监控接口在 `http://localhost:8222/jsz` 可查看流与消费者状态。提现审批事件已接入 PQPA 出金，其余事件当前主要由 Realtime 转发或记录日志。
 
 后续实现顺序：
 

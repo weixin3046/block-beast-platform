@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,6 +28,9 @@ type Config struct {
 	PQPAAPIKey             string
 	PQPAAPISecret          string
 	PQPAAssetSyncInterval  time.Duration
+	WithdrawalMinMinor     int64
+	WithdrawalMaxMinor     int64
+	WithdrawalDailyMinor   int64
 }
 
 func Load() Config {
@@ -46,13 +50,28 @@ func Load() Config {
 		AccessTokenTTL:         durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:        durationOrDefault("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		ChainWebhookSkew:       durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
-		TronRPCURL:             valueOrDefault("TRON_RPC_URL", "https://divine-greatest-valley.tron-mainnet.quiknode.pro/30d6aa253beb02c5229422c0a758e150311bd5cc/jsonrpc"),
+		TronRPCURL:             os.Getenv("TRON_RPC_URL"),
 		OkxRESTURL:             valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
 		PQPAAPIURL:             os.Getenv("PQPA_API_URL"),
 		PQPAAPIKey:             os.Getenv("PQPA_API_KEY"),
 		PQPAAPISecret:          os.Getenv("PQPA_API_SECRET"),
 		PQPAAssetSyncInterval:  durationOrDefault("PQPA_ASSET_SYNC_INTERVAL", time.Hour),
+		WithdrawalMinMinor:     int64OrDefault("WITHDRAWAL_MIN_MINOR", 1_000_000),
+		WithdrawalMaxMinor:     int64OrDefault("WITHDRAWAL_MAX_MINOR", 10_000_000_000),
+		WithdrawalDailyMinor:   int64OrDefault("WITHDRAWAL_DAILY_LIMIT_MINOR", 50_000_000_000),
 	}
+}
+
+func int64OrDefault(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func boolOrDefault(key string, fallback bool) bool {

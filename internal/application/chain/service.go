@@ -14,11 +14,16 @@ var ErrWithdrawalNotFound = errors.New("withdrawal not found")
 var ErrDepositAddressNotFound = errors.New("deposit address not found")
 var ErrWithdrawalState = errors.New("withdrawal cannot transition from its current status")
 var ErrUnsupportedAsset = errors.New("asset is not enabled for withdrawal")
+var ErrInvalidWithdrawalAddress = errors.New("invalid withdrawal address or memo")
+var ErrWithdrawalBelowMinimum = errors.New("withdrawal amount is below the minimum")
+var ErrWithdrawalAboveMaximum = errors.New("withdrawal amount exceeds the per-request limit")
+var ErrWithdrawalDailyLimit = errors.New("withdrawal amount exceeds the daily limit")
 
 type Service struct {
 	pool               *pgxpool.Pool
 	addressProvider    DepositAddressProvider
 	withdrawalProvider WithdrawalProvider
+	withdrawalPolicy   WithdrawalPolicy
 }
 
 type DepositAddressProvider interface {
@@ -57,5 +62,10 @@ func (service *Service) WithDepositAddressProvider(provider DepositAddressProvid
 
 func (service *Service) WithWithdrawalProvider(provider WithdrawalProvider) *Service {
 	service.withdrawalProvider = provider
+	return service
+}
+
+func (service *Service) WithWithdrawalPolicy(policy WithdrawalPolicy) *Service {
+	service.withdrawalPolicy = policy
 	return service
 }
