@@ -16,6 +16,9 @@ type OperationsService interface {
 	CreateAnnouncement(ctx context.Context, input operations.AnnouncementInput) (operations.Announcement, error)
 	UpdateAnnouncement(ctx context.Context, announcementID string, input operations.AnnouncementInput) (operations.Announcement, error)
 	ListAuditLogs(ctx context.Context, action, actorUserID string, limit int) ([]operations.AuditLog, error)
+	PublicConfig(ctx context.Context, key string) (operations.PlatformConfig, error)
+	ListConfigs(ctx context.Context, visibility string, limit int) ([]operations.PlatformConfig, error)
+	PutConfig(ctx context.Context, key, actorUserID string, input operations.ConfigInput) (operations.PlatformConfig, error)
 }
 
 func WithOperations(service OperationsService) Option {

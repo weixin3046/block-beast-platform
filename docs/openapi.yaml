@@ -1223,6 +1223,72 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Role' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/configs/{key}:
+    get:
+      tags: [Platform]
+      summary: 读取公开平台配置
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 公开配置。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformConfig' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/admin/configs:
+    get:
+      tags: [Admin]
+      summary: 查询平台配置
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: visibility
+          in: query
+          schema: { type: string, enum: [public, internal] }
+      responses:
+        '200':
+          description: 配置列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PlatformConfig' }
+  /v1/admin/configs/{key}:
+    put:
+      tags: [Admin]
+      summary: 使用乐观锁创建或更新平台配置
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z][a-z0-9_.-]{1,127}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [value, visibility, expected_version]
+              properties:
+                value: {}
+                visibility: { type: string, enum: [public, internal] }
+                expected_version: { type: integer, format: int64, minimum: 0 }
+      responses:
+        '200':
+          description: 已保存配置。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /v1/admin/users/{userID}/roles:
     put:
       tags: [Admin]
@@ -1396,6 +1462,16 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    PlatformConfig:
+      type: object
+      required: [key, value, visibility, version, updated_at]
+      properties:
+        key: { type: string }
+        value: {}
+        visibility: { type: string, enum: [public, internal] }
+        version: { type: integer, format: int64, minimum: 1 }
+        updated_by: { type: string, format: uuid }
+        updated_at: { type: string, format: date-time }
     Role:
       type: object
       required: [code, description]

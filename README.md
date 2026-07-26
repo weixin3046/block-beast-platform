@@ -78,6 +78,8 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `PUT /v1/admin/announcements/{announcement_id}` | 后台更新公告内容、启用状态和展示时间。仅 operator/admin。 |
 | `GET /v1/admin/roles` | 查询标准后台角色。仅 admin。 |
 | `PUT /v1/admin/users/{user_id}/roles` | 分配角色并撤销目标账号全部刷新会话。仅 admin。 |
+| `GET /v1/configs/{key}` | 匿名读取标记为 public 的平台 JSON 配置。 |
+| `GET /v1/admin/configs`、`PUT /v1/admin/configs/{key}` | 后台通过版本号安全管理平台配置。仅 admin。 |
 | `GET /v1/admin/audit-logs` | 按操作或管理员筛选不可变审计日志。仅 admin。 |
 | `GET/POST /v1/admin/game-types` | 查询或创建游戏玩法与结算规则。仅 operator/admin。 |
 | `PUT /v1/admin/game-types/{game_type_id}` | 修改玩法规则或启停玩法。仅 operator/admin。 |

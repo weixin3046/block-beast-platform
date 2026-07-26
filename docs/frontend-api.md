@@ -37,6 +37,22 @@
 会话立即撤销。接口禁止管理员移除自己的 `admin`，也禁止移除系统最后一个
 `admin`；这两种情况返回 409。
 
+平台动态配置使用 `GET /v1/configs/{key}` 读取，只有 `visibility=public` 的配置
+可匿名访问。管理后台使用 `GET /v1/admin/configs?visibility=public` 查询配置，
+并使用 `PUT /v1/admin/configs/{key}` 创建或更新：
+
+```json
+{
+  "value": {"enabled": true, "text": "活动进行中"},
+  "visibility": "public",
+  "expected_version": 0
+}
+```
+
+创建时 `expected_version=0`；更新时必须传当前版本。其他管理员已经更新时返回
+409，后台应重新读取后让操作者确认，不得静默覆盖。配置只保存非敏感业务 JSON，
+API 密钥、密码和令牌必须继续使用环境变量或密钥管理系统。
+
 游戏运营可通过 `GET/POST /v1/admin/game-types` 创建玩法规则，通过
 `PUT /v1/admin/game-types/{id}` 修改或启停玩法；`POST /v1/admin/rounds`
 创建固定封盘时间的新轮次，轮次序号由系统按玩法自动递增。
