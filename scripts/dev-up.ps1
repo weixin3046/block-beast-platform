@@ -4,7 +4,7 @@
     BlockBeast 本地开发一键启动脚本（基础设施 + API + Worker）。
 
 .DESCRIPTION
-    1. 启动基础设施容器：postgres / nats / redis
+    1. 启动基础设施容器：postgres / nats
     2. 等待 postgres 健康检查通过
     3. 在独立新窗口中启动 API (:8080) 和 Worker
 
@@ -56,9 +56,9 @@ if ($Role -ne 'all') {
 # ---------- 编排模式 ----------
 Set-Location $root
 
-Write-Host '[1/3] 启动基础设施容器 (postgres / nats / redis)...' -ForegroundColor Cyan
+Write-Host '[1/3] 启动基础设施容器 (postgres / nats)...' -ForegroundColor Cyan
 if (-not $SkipInfra) {
-    docker compose up -d postgres nats redis
+    docker compose up -d postgres nats
     if ($LASTEXITCODE -ne 0) { throw 'docker compose 启动失败，请确认 Docker Desktop 已运行' }
 
     Write-Host '      等待 postgres 就绪...' -ForegroundColor Cyan
@@ -107,6 +107,5 @@ Write-Host '全部启动完成：' -ForegroundColor Green
 Write-Host '  API      -> http://localhost:8080'
 Write-Host '  Postgres -> localhost:5433 (容器内 5432)'
 Write-Host '  NATS     -> localhost:4222 (监控 http://localhost:8222)'
-Write-Host '  Redis    -> localhost:6379'
 Write-Host ''
-Write-Host '停止方式：关闭 API / Worker 窗口，然后执行 docker compose stop postgres nats redis' -ForegroundColor DarkGray
+Write-Host '停止方式：关闭 API / Worker 窗口，然后执行 docker compose stop postgres nats' -ForegroundColor DarkGray

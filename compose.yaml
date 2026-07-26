@@ -16,11 +16,6 @@ services:
       timeout: 3s
       retries: 10
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
   nats:
     image: nats:2.10-alpine
     command: ["-js", "-m", "8222"]

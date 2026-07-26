@@ -17,7 +17,7 @@ usage() {
 用法：./scripts/dev-up.sh [选项]
 
 选项：
-  --skip-infra  跳过 postgres、nats、redis 容器启动
+  --skip-infra  跳过 postgres、nats 容器启动
   --swagger     同时启动 Swagger UI（http://localhost:8082）
   -h, --help    显示帮助
 
@@ -113,11 +113,10 @@ if [ -f .env ]; then
 fi
 
 export APP_ENV="${APP_ENV:-development}"
-# .env 中保存的是 Docker 容器之间使用的主机名（postgres/nats/redis）。
+# .env 中保存的是 Docker 容器之间使用的主机名（postgres/nats）。
 # 本脚本在宿主机直接运行 Go 二进制，必须改用宿主机映射地址。
 # 如需覆盖，请使用 DEV_* 变量，避免改变 docker compose 使用的配置。
 export POSTGRES_DSN="${DEV_POSTGRES_DSN:-postgres://blockbeast:blockbeast@localhost:5433/blockbeast?sslmode=disable}"
-export REDIS_ADDRESS="${DEV_REDIS_ADDRESS:-localhost:6379}"
 export AUTH_TOKEN_SECRET="${AUTH_TOKEN_SECRET:-dev-only-signing-secret-change-me-in-production-0123456789abcdef}"
 export API_ADDRESS="${API_ADDRESS:-:8080}"
 export REALTIME_ADDRESS="${REALTIME_ADDRESS:-:8081}"
@@ -129,7 +128,7 @@ export NATS_URL="${DEV_NATS_URL:-nats://localhost:4222}"
 
 echo "[1/5] 检查基础设施..."
 if [ "${SKIP_INFRA}" = false ]; then
-  docker compose up -d postgres nats redis
+  docker compose up -d postgres nats
   echo "      等待 PostgreSQL 就绪..."
   READY=false
   ATTEMPT=0
@@ -191,11 +190,10 @@ echo "  API       -> http://localhost:8080"
 echo "  Realtime  -> ws://localhost:8081/v1/ws"
 echo "  PostgreSQL-> localhost:5433（容器内 5432）"
 echo "  NATS      -> localhost:4222（监控 http://localhost:8222）"
-echo "  Redis     -> localhost:6379"
 if [ "${SWAGGER}" = true ]; then
   echo "  Swagger   -> http://localhost:8082"
 fi
 echo
-echo "按 Ctrl+C 停止 Go 服务；基础设施可用 docker compose stop postgres nats redis 停止。"
+echo "按 Ctrl+C 停止 Go 服务；基础设施可用 docker compose stop postgres nats 停止。"
 
 wait

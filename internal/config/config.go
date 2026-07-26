@@ -15,7 +15,6 @@ type Config struct {
 	RealtimeAllowedOrigins []string
 	WorkerPollInterval     time.Duration
 	PostgresDSN            string
-	RedisAddress           string
 	NATSURL                string
 	AuthTokenSecret        string
 	AuthStrictPassword     bool
@@ -56,7 +55,6 @@ func Load() Config {
 		RealtimeAllowedOrigins: splitOrDefault("REALTIME_ALLOWED_ORIGINS", []string{"localhost:*", "127.0.0.1:*"}),
 		WorkerPollInterval:     durationOrDefault("WORKER_POLL_INTERVAL", 5*time.Second),
 		PostgresDSN:            os.Getenv("POSTGRES_DSN"),
-		RedisAddress:           os.Getenv("REDIS_ADDRESS"),
 		NATSURL:                os.Getenv("NATS_URL"),
 		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),
 		AuthStrictPassword:     environment == "production" || boolOrDefault("AUTH_STRICT_PASSWORD_POLICY", false),
