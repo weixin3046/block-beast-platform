@@ -187,6 +187,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/users", server.protectRoles(server.adminUsers, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/status", server.protectRoles(server.setUserStatus, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/roles", server.protectRoles(server.adminRoles, identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/users/{userID}/roles", server.protectRoles(server.setUserRoles, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/announcements", server.protectRoles(server.adminAnnouncements, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/announcements", server.protectRoles(server.createAnnouncement, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/announcements/{announcementID}", server.protectRoles(server.updateAnnouncement, identity.RoleAdmin, identity.RoleOperator))

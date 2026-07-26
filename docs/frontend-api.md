@@ -31,6 +31,12 @@
 
 管理后台可用 `GET/POST /v1/admin/announcements` 和 `PUT /v1/admin/announcements/{id}` 管理公告。`operator` 与 `admin` 均可管理公告；不可变审计日志 `GET /v1/admin/audit-logs?action={action}&actor_user_id={id}` 仅 `admin` 可查看。
 
+角色管理仅对 `admin` 开放：`GET /v1/admin/roles` 查询 `player`、`operator`、
+`admin` 标准角色，`PUT /v1/admin/users/{userID}/roles` 使用
+`{"roles":["operator"]}` 替换目标账号的完整角色集合。成功后目标账号所有刷新
+会话立即撤销。接口禁止管理员移除自己的 `admin`，也禁止移除系统最后一个
+`admin`；这两种情况返回 409。
+
 游戏运营可通过 `GET/POST /v1/admin/game-types` 创建玩法规则，通过
 `PUT /v1/admin/game-types/{id}` 修改或启停玩法；`POST /v1/admin/rounds`
 创建固定封盘时间的新轮次，轮次序号由系统按玩法自动递增。
