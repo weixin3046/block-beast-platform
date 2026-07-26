@@ -156,6 +156,22 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 
 ## 实时连接
 
-浏览器通过子协议连接：`new WebSocket("ws://localhost:8081/v1/ws", ["bearer." + accessToken])`。`game.*` 事件广播给所有已认证连接；`wallet.*` 和 `chain.*` 事件仅发送给事件 `user_id` 对应的玩家。生产环境必须使用 `wss://`，并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。
+浏览器通过子协议连接：`new WebSocket("ws://localhost:8081/v1/ws", ["bearer." + accessToken])`。生产环境必须使用 `wss://`，并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。连接建立后服务端发送版本化握手：
+
+```json
+{"v":1,"type":"hello","topics":["game"],"occurred_at":"2026-07-26T12:00:00Z"}
+```
+
+连接默认订阅全部 `game.*` 事件。客户端可以取消全局游戏事件并仅订阅指定轮次：
+
+```json
+{"v":1,"type":"unsubscribe","topics":["game"],"request_id":"u-1"}
+{"v":1,"type":"subscribe","topics":["round:f39ac19d-20a0-42d7-a876-87aa3618635e"],"request_id":"s-1"}
+```
+
+服务端以 `type=subscribed` 返回当前完整订阅列表。客户端也可以发送
+`{"v":1,"type":"ping","request_id":"p-1"}`，服务端返回对应 `pong`。版本、消息类型或 topic 无效时返回 `type=error`。
+
+事件统一为 `{"v":1,"type":"event","subject":"game.round.settled","payload":{...},"occurred_at":"..."}`。`game.*` 按 `game` 或 `round:{round_id}` 订阅投递；`wallet.*` 和 `chain.*` 无需客户端订阅，只发送给事件 `user_id` 对应的玩家。客户端消费过慢导致 128 条发送队列写满时，网关会主动断开连接，客户端应退避重连并重新建立订阅。
 
 游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用 QuickNode JSON-RPC。前端不得自行计算或替代开奖结果。

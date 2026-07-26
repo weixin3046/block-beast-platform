@@ -13,11 +13,6 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-type client struct {
-	connection *websocket.Conn
-	writeMu    sync.Mutex
-}
-
 type Hub struct {
 	secret  []byte
 	origins []string
@@ -53,7 +48,7 @@ func (hub *Hub) Close() {
 	defer hub.mu.Unlock()
 	for _, clients := range hub.clients {
 		for item := range clients {
-			_ = item.connection.Close(websocket.StatusGoingAway, "server shutdown")
+			item.close(websocket.StatusGoingAway, "server shutdown")
 		}
 	}
 }
@@ -73,21 +68,26 @@ func (hub *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		return
 	}
-	item := &client{connection: connection}
+	item := newClient(connection)
 	hub.add(claims.Subject, item)
 	defer func() {
 		hub.remove(claims.Subject, item)
-		_ = connection.Close(websocket.StatusNormalClosure, "closed")
+		item.close(websocket.StatusNormalClosure, "closed")
 	}()
+	connectionCtx, cancel := context.WithCancel(request.Context())
+	defer cancel()
+	go item.writeLoop(connectionCtx)
+	item.enqueue(encodeMessage(serverMessage{Type: "hello", Topics: item.topicList()}))
 	for {
-		if err := connection.Ping(request.Context()); err != nil {
+		messageType, payload, err := connection.Read(connectionCtx)
+		if err != nil {
 			return
 		}
-		select {
-		case <-request.Context().Done():
-			return
-		case <-time.After(25 * time.Second):
+		if messageType != websocket.MessageText {
+			item.enqueue(encodeMessage(serverMessage{Type: "error", Error: "text messages are required"}))
+			continue
 		}
+		hub.handleCommand(item, payload)
 	}
 }
 
@@ -105,21 +105,33 @@ func accessToken(request *http.Request) (token, protocol string) {
 }
 
 func (hub *Hub) publish(message *nats.Msg) {
-	envelope, err := json.Marshal(struct {
-		Subject string          `json:"subject"`
-		Payload json.RawMessage `json:"payload"`
-	}{message.Subject, append([]byte(nil), message.Data...)})
-	if err != nil {
-		return
-	}
+	envelope := encodeMessage(serverMessage{Type: "event", Subject: message.Subject, Payload: append([]byte(nil), message.Data...)})
 	userID, broadcast := eventTarget(message.Subject, message.Data)
 	if broadcast {
-		hub.broadcast(envelope)
+		hub.publishTopics(eventTopics(message.Subject, message.Data), envelope)
 		return
 	}
 	if userID != "" {
 		hub.send(userID, envelope)
 	}
+}
+
+func (hub *Hub) handleCommand(item *client, payload []byte) {
+	command, err := decodeCommand(payload)
+	if err != nil {
+		item.enqueue(encodeMessage(serverMessage{Type: "error", Error: err.Error()}))
+		return
+	}
+	switch command.Type {
+	case "subscribe":
+		item.subscribe(command.Topics)
+	case "unsubscribe":
+		item.unsubscribe(command.Topics)
+	case "ping":
+		item.enqueue(encodeMessage(serverMessage{Type: "pong", RequestID: command.RequestID}))
+		return
+	}
+	item.enqueue(encodeMessage(serverMessage{Type: "subscribed", RequestID: command.RequestID, Topics: item.topicList()}))
 }
 
 func eventTarget(subject string, data []byte) (userID string, broadcast bool) {
@@ -153,12 +165,17 @@ func (hub *Hub) remove(userID string, item *client) {
 	}
 }
 
-func (hub *Hub) broadcast(payload []byte) {
+func (hub *Hub) publishTopics(topics []string, payload []byte) {
 	hub.mu.RLock()
 	defer hub.mu.RUnlock()
 	for _, clients := range hub.clients {
 		for item := range clients {
-			item.write(payload)
+			for _, topic := range topics {
+				if item.subscribed(topic) {
+					item.enqueue(payload)
+					break
+				}
+			}
 		}
 	}
 }
@@ -167,14 +184,6 @@ func (hub *Hub) send(userID string, payload []byte) {
 	hub.mu.RLock()
 	defer hub.mu.RUnlock()
 	for item := range hub.clients[userID] {
-		item.write(payload)
+		item.enqueue(payload)
 	}
-}
-
-func (item *client) write(payload []byte) {
-	item.writeMu.Lock()
-	defer item.writeMu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = item.connection.Write(ctx, websocket.MessageText, payload)
 }

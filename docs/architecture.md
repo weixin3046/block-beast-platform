@@ -37,7 +37,7 @@
 - 外部 API：采用 REST/JSON 和 OpenAPI，使用 JWT 访问令牌与幂等键。
 - 内部同步调用：模块尚未独立部署时优先使用 Go 接口；独立部署后使用 ConnectRPC/gRPC。
 - 内部异步调用：使用 NATS JetStream 主题，例如 `game.bet.placed`、`game.round.settled`、`wallet.ledger.committed`、`chain.deposit.credited`。
-- 实时协议：使用经认证的 WebSocket 消息，并明确版本化事件名称。
+- 实时协议：使用经认证的 WebSocket v1 消息；支持全局游戏与指定轮次订阅，钱包和链上事件按用户定向发送，并以有界发送队列隔离慢连接。
 
 ## 拆分触发条件
 
