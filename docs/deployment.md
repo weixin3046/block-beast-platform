@@ -74,24 +74,40 @@ git checkout v1.0.0
 转发至 `127.0.0.1:8081`，并为 WebSocket 转发 `Upgrade` 与
 `Connection` 请求头。PQPA Webhook 使用公开的 HTTPS API 域名。
 
-示例 Nginx 片段：
+完整配置见 `deploy/nginx/block-beast.conf.example`，公共代理参数见
+`deploy/nginx/block-beast-proxy.conf`。替换其中的 API 域名、Realtime 域名及
+证书路径。首次签发两个域名的证书时，可先确保 80 端口未被占用，然后执行：
 
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-
-location /v1/ws {
-    proxy_pass http://127.0.0.1:8081;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-}
+```bash
+sudo certbot certonly --standalone -d api.example.com
+sudo certbot certonly --standalone -d ws.example.com
 ```
+
+随后安装配置：
+
+```bash
+sudo install -d /etc/nginx/snippets
+sudo install -m 0644 deploy/nginx/block-beast-proxy.conf \
+  /etc/nginx/snippets/block-beast-proxy.conf
+sudo install -m 0644 deploy/nginx/block-beast.conf.example \
+  /etc/nginx/conf.d/block-beast.conf
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Certbot 自动续期后应重新加载 Nginx。可以创建部署钩子：
+
+```bash
+sudo sh -c 'printf "%s\n" "#!/bin/sh" "systemctl reload nginx" \
+  > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx'
+sudo chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+sudo certbot renew --dry-run
+```
+
+配置默认将登录接口限制为每个 IP 每分钟 10 次，并允许短时突发 5 次。玩家大量
+共享同一公网出口时，应根据实际流量调整该值。若 Nginx 前方还有 CDN 或负载
+均衡，必须只信任其固定出口地址并配置 `set_real_ip_from` 与
+`real_ip_header`，否则限流与审计日志无法获得真实客户端 IP。
 
 ## 5. 验证与运维
 
