@@ -161,6 +161,45 @@ func TestLoginEndpointsUseSeparateAudiences(t *testing.T) {
 	}
 }
 
+type stubSessionService struct {
+	playerCalls int
+	adminCalls  int
+}
+
+func (stub *stubSessionService) Refresh(context.Context, string) (auth.LoginResult, error) {
+	stub.playerCalls++
+	return auth.LoginResult{AccessToken: "player-token"}, nil
+}
+
+func (stub *stubSessionService) RefreshAdmin(context.Context, string) (auth.LoginResult, error) {
+	stub.adminCalls++
+	return auth.LoginResult{AccessToken: "admin-token"}, nil
+}
+
+func (*stubSessionService) Logout(context.Context, string) error {
+	return nil
+}
+
+func TestRefreshEndpointsUseSeparateAudiences(t *testing.T) {
+	sessions := &stubSessionService{}
+	server := New(
+		config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		nil, readinessChecker{}, nil, nil, nil, nil,
+		WithSessions(sessions),
+	)
+	for _, endpoint := range []string{"/v1/auth/refresh", "/v1/admin/auth/refresh"} {
+		request := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{"refresh_token":"token"}`))
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", endpoint, response.Code)
+		}
+	}
+	if sessions.playerCalls != 1 || sessions.adminCalls != 1 {
+		t.Fatalf("refresh calls = player:%d admin:%d", sessions.playerCalls, sessions.adminCalls)
+	}
+}
+
 func (stub stubRegisterService) Register(_ context.Context, _ string, _ string, _ string) (auth.LoginResult, error) {
 	return stub.result, stub.err
 }

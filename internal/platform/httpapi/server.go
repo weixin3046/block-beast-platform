@@ -57,6 +57,7 @@ type RegisterService interface {
 
 type SessionService interface {
 	Refresh(ctx context.Context, refreshToken string) (auth.LoginResult, error)
+	RefreshAdmin(ctx context.Context, refreshToken string) (auth.LoginResult, error)
 	Logout(ctx context.Context, refreshToken string) error
 }
 
@@ -140,6 +141,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/auth/login", server.adminLogin)
 	mux.HandleFunc("POST /v1/auth/register", server.register)
 	mux.HandleFunc("POST /v1/auth/refresh", server.refresh)
+	mux.HandleFunc("POST /v1/admin/auth/refresh", server.adminRefresh)
 	mux.HandleFunc("POST /v1/auth/logout", server.logout)
 	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("GET /v1/agents/me", server.protect(server.agentRelation))
@@ -334,6 +336,14 @@ func (server *Server) loginForAudience(writer http.ResponseWriter, request *http
 }
 
 func (server *Server) refresh(writer http.ResponseWriter, request *http.Request) {
+	server.refreshForAudience(writer, request, false)
+}
+
+func (server *Server) adminRefresh(writer http.ResponseWriter, request *http.Request) {
+	server.refreshForAudience(writer, request, true)
+}
+
+func (server *Server) refreshForAudience(writer http.ResponseWriter, request *http.Request, admin bool) {
 	if server.sessions == nil {
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "session refresh is unavailable"})
 		return
@@ -342,7 +352,13 @@ func (server *Server) refresh(writer http.ResponseWriter, request *http.Request)
 	if !ok {
 		return
 	}
-	result, err := server.sessions.Refresh(request.Context(), token)
+	var result auth.LoginResult
+	var err error
+	if admin {
+		result, err = server.sessions.RefreshAdmin(request.Context(), token)
+	} else {
+		result, err = server.sessions.Refresh(request.Context(), token)
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidRefreshToken):
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": err.Error()})

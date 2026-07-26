@@ -162,7 +162,31 @@ paths:
     post:
       tags: [Auth]
       operationId: refreshSession
-      summary: 轮换刷新令牌并签发新访问令牌
+      summary: 轮换玩家端刷新令牌
+      description: 仅接受由玩家端登录或注册签发的刷新令牌，并再次校验账号仍是纯 player。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: 刷新成功；原刷新令牌立即失效。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v1/admin/auth/refresh:
+    post:
+      tags: [Auth, Admin]
+      operationId: adminRefreshSession
+      summary: 轮换管理后台刷新令牌
+      description: 仅接受由管理后台登录签发的刷新令牌，并再次校验账号仍具有 admin/operator；角色已撤销时会使该会话失效。
       requestBody:
         required: true
         content:

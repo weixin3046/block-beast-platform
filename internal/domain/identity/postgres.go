@@ -21,14 +21,14 @@ type PasswordCredentials struct {
 	PasswordHash string
 }
 
-func (repository *PostgresRepository) CreateSession(ctx context.Context, userID string, tokenHash string, expiresAt time.Time) error {
+func (repository *PostgresRepository) CreateSession(ctx context.Context, userID string, tokenHash string, audience SessionAudience, expiresAt time.Time) error {
 	_, err := repository.pool.Exec(ctx, `
-		INSERT INTO sessions (id, user_id, token_hash, expires_at)
-		VALUES ($1, $2, $3, $4)`, uuid.NewString(), userID, tokenHash, expiresAt)
+		INSERT INTO sessions (id, user_id, token_hash, audience, expires_at)
+		VALUES ($1, $2, $3, $4, $5)`, uuid.NewString(), userID, tokenHash, audience, expiresAt)
 	return err
 }
 
-func (repository *PostgresRepository) RotateSession(ctx context.Context, oldTokenHash string, newTokenHash string, expiresAt time.Time) (string, error) {
+func (repository *PostgresRepository) RotateSession(ctx context.Context, oldTokenHash string, newTokenHash string, audience SessionAudience, expiresAt time.Time) (string, error) {
 	var userID string
 	err := repository.pool.QueryRow(ctx, `
 		UPDATE sessions
@@ -36,11 +36,12 @@ func (repository *PostgresRepository) RotateSession(ctx context.Context, oldToke
 		WHERE token_hash = $1
 		  AND revoked_at IS NULL
 		  AND expires_at > now()
+		  AND audience = $4
 		  AND EXISTS (
 			  SELECT 1 FROM users
 			  WHERE users.id = sessions.user_id AND users.status = 'active'
 		  )
-		RETURNING user_id`, oldTokenHash, newTokenHash, expiresAt).Scan(&userID)
+		RETURNING user_id`, oldTokenHash, newTokenHash, expiresAt, audience).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrIdentityNotFound
 	}

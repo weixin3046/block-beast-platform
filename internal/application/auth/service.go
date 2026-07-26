@@ -37,8 +37,8 @@ type UserRegistrar interface {
 }
 
 type SessionStore interface {
-	CreateSession(ctx context.Context, userID string, tokenHash string, expiresAt time.Time) error
-	RotateSession(ctx context.Context, oldTokenHash string, newTokenHash string, expiresAt time.Time) (string, error)
+	CreateSession(ctx context.Context, userID string, tokenHash string, audience SessionAudience, expiresAt time.Time) error
+	RotateSession(ctx context.Context, oldTokenHash string, newTokenHash string, audience SessionAudience, expiresAt time.Time) (string, error)
 	RevokeSession(ctx context.Context, tokenHash string) error
 }
 
@@ -87,15 +87,15 @@ type LoginResult struct {
 // 玩家入口拒绝任何同时具有后台角色的账号，避免同一身份跨端登录。
 // 登录名不存在时同样执行一次哈希校验，避免通过响应时间探测账号是否存在。
 func (service *Service) Login(ctx context.Context, loginName string, password string) (LoginResult, error) {
-	return service.login(ctx, loginName, password, playerLoginAllowed)
+	return service.login(ctx, loginName, password, AudiencePlayer)
 }
 
 // LoginAdmin 只允许 admin/operator 从管理后台登录。
 func (service *Service) LoginAdmin(ctx context.Context, loginName string, password string) (LoginResult, error) {
-	return service.login(ctx, loginName, password, adminLoginAllowed)
+	return service.login(ctx, loginName, password, AudienceAdmin)
 }
 
-func (service *Service) login(ctx context.Context, loginName string, password string, rolesAllowed func([]string) bool) (LoginResult, error) {
+func (service *Service) login(ctx context.Context, loginName string, password string, audience SessionAudience) (LoginResult, error) {
 	if len(service.secret) < 32 || service.ttl <= 0 {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
@@ -117,7 +117,7 @@ func (service *Service) login(ctx context.Context, loginName string, password st
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if !rolesAllowed(roles) {
+	if !audienceAllowsRoles(audience, roles) {
 		// 不暴露账号是否存在、密码是否正确或具体角色。
 		return LoginResult{}, ErrInvalidCredentials
 	}
@@ -133,7 +133,7 @@ func (service *Service) login(ctx context.Context, loginName string, password st
 		UserID:      credentials.UserID,
 		Roles:       roles,
 	}
-	return service.attachRefreshToken(ctx, result)
+	return service.attachRefreshToken(ctx, result, audience)
 }
 
 func playerLoginAllowed(roles []string) bool {
@@ -194,10 +194,18 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 		UserID:      userID,
 		Roles:       roles,
 	}
-	return service.attachRefreshToken(ctx, result)
+	return service.attachRefreshToken(ctx, result, AudiencePlayer)
 }
 
 func (service *Service) Refresh(ctx context.Context, refreshToken string) (LoginResult, error) {
+	return service.refresh(ctx, refreshToken, AudiencePlayer)
+}
+
+func (service *Service) RefreshAdmin(ctx context.Context, refreshToken string) (LoginResult, error) {
+	return service.refresh(ctx, refreshToken, AudienceAdmin)
+}
+
+func (service *Service) refresh(ctx context.Context, refreshToken string, audience SessionAudience) (LoginResult, error) {
 	if service.sessions == nil || service.refreshTTL <= 0 || len(service.secret) < 32 {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
@@ -206,13 +214,18 @@ func (service *Service) Refresh(ctx context.Context, refreshToken string) (Login
 		return LoginResult{}, err
 	}
 	expiresAt := service.now().UTC().Add(service.refreshTTL)
-	userID, err := service.sessions.RotateSession(ctx, hashRefreshToken(refreshToken), hashRefreshToken(newToken), expiresAt)
+	newTokenHash := hashRefreshToken(newToken)
+	userID, err := service.sessions.RotateSession(ctx, hashRefreshToken(refreshToken), newTokenHash, audience, expiresAt)
 	if err != nil {
 		return LoginResult{}, ErrInvalidRefreshToken
 	}
 	roles, err := service.credentials.UserRoles(ctx, userID)
 	if err != nil {
 		return LoginResult{}, err
+	}
+	if !audienceAllowsRoles(audience, roles) {
+		_ = service.sessions.RevokeSession(ctx, newTokenHash)
+		return LoginResult{}, ErrInvalidRefreshToken
 	}
 	accessToken, err := identity.IssueAccessToken(service.secret, userID, roles, service.now().UTC(), service.ttl)
 	if err != nil {
@@ -241,7 +254,7 @@ func (service *Service) Logout(ctx context.Context, refreshToken string) error {
 	return nil
 }
 
-func (service *Service) attachRefreshToken(ctx context.Context, result LoginResult) (LoginResult, error) {
+func (service *Service) attachRefreshToken(ctx context.Context, result LoginResult, audience SessionAudience) (LoginResult, error) {
 	if service.sessions == nil {
 		return result, nil
 	}
@@ -252,7 +265,7 @@ func (service *Service) attachRefreshToken(ctx context.Context, result LoginResu
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if err := service.sessions.CreateSession(ctx, result.UserID, hashRefreshToken(token), service.now().UTC().Add(service.refreshTTL)); err != nil {
+	if err := service.sessions.CreateSession(ctx, result.UserID, hashRefreshToken(token), audience, service.now().UTC().Add(service.refreshTTL)); err != nil {
 		return LoginResult{}, err
 	}
 	result.RefreshToken = token

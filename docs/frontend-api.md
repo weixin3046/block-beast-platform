@@ -20,7 +20,7 @@
 
 ## 调用顺序
 
-1. 玩家端调用 `POST /v1/auth/register` 注册账号（或 `POST /v1/auth/login` 登录）；管理后台必须调用 `POST /v1/admin/auth/login`。玩家入口拒绝 admin/operator，后台入口拒绝纯 player。保存响应中的 `access_token` 和 `refresh_token`；访问令牌用于业务接口，过期后调用 `POST /v1/auth/refresh` 原子轮换两个令牌。退出时调用 `POST /v1/auth/logout` 撤销刷新令牌。
+1. 玩家端调用 `POST /v1/auth/register` 注册账号（或 `POST /v1/auth/login` 登录），并使用 `POST /v1/auth/refresh` 续期；管理后台必须调用 `POST /v1/admin/auth/login`，并使用 `POST /v1/admin/auth/refresh` 续期。两类刷新令牌绑定所属端，不能交叉使用，续期时还会重新检查当前角色。退出时调用 `POST /v1/auth/logout` 撤销刷新令牌。
 2. 调用 `GET /v1/rounds?game_type={code}` 获取仍可下注的轮次。
 3. 调用 `POST /v1/bets` 创建投注，`currency` 传 `USDT` 或 `POINTS`。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
 4. 使用 `GET /v1/bets/{betID}` 轮询投注状态；当前状态有 `accepted`、`won`、`lost` 与 `refunded`。
@@ -50,7 +50,7 @@ const auth = await fetch(`${api}/v1/auth/register`, {
 let { access_token, refresh_token, user_id } = auth;
 
 // access_token 过期后轮换；旧 refresh_token 随即失效
-const refreshed = await fetch(`${api}/v1/auth/refresh`, {
+const refreshed = await fetch(`${api}/v1/auth/refresh`, { // 后台改用 /v1/admin/auth/refresh
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ refresh_token }),

@@ -90,19 +90,21 @@ func TestLoginSeparatesPlayerAndAdminAudiences(t *testing.T) {
 }
 
 type memorySessions struct {
-	userID  string
-	current string
-	revoked bool
+	userID   string
+	current  string
+	revoked  bool
+	audience SessionAudience
 }
 
-func (sessions *memorySessions) CreateSession(_ context.Context, userID string, tokenHash string, _ time.Time) error {
+func (sessions *memorySessions) CreateSession(_ context.Context, userID string, tokenHash string, audience SessionAudience, _ time.Time) error {
 	sessions.userID = userID
 	sessions.current = tokenHash
+	sessions.audience = audience
 	return nil
 }
 
-func (sessions *memorySessions) RotateSession(_ context.Context, oldTokenHash string, newTokenHash string, _ time.Time) (string, error) {
-	if sessions.revoked || oldTokenHash != sessions.current {
+func (sessions *memorySessions) RotateSession(_ context.Context, oldTokenHash string, newTokenHash string, audience SessionAudience, _ time.Time) (string, error) {
+	if sessions.revoked || oldTokenHash != sessions.current || audience != sessions.audience {
 		return "", identity.ErrIdentityNotFound
 	}
 	sessions.current = newTokenHash
@@ -118,7 +120,7 @@ func (sessions *memorySessions) RevokeSession(_ context.Context, tokenHash strin
 }
 
 func TestRefreshRotatesTokenAndLogoutRevokesIt(t *testing.T) {
-	sessions := &memorySessions{userID: "user-1"}
+	sessions := &memorySessions{userID: "user-1", audience: AudiencePlayer}
 	service := NewService(stubCredentials{roles: []string{"player"}}, testSecret, 15*time.Minute).
 		WithSessions(sessions, 30*24*time.Hour)
 	initial, err := randomRefreshToken()
@@ -143,6 +145,50 @@ func TestRefreshRotatesTokenAndLogoutRevokesIt(t *testing.T) {
 	if _, err := service.Refresh(context.Background(), result.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Fatalf("refresh after logout error = %v, want ErrInvalidRefreshToken", err)
 	}
+}
+
+func TestRefreshTokenCannotCrossAudience(t *testing.T) {
+	sessions := &memorySessions{userID: "admin-1", audience: AudienceAdmin}
+	service := NewService(stubCredentials{roles: []string{identity.RoleAdmin}}, testSecret, 15*time.Minute).
+		WithSessions(sessions, 30*24*time.Hour)
+	initial, err := randomRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.current = hashRefreshToken(initial)
+	if _, err := service.Refresh(context.Background(), initial); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("admin token on player endpoint error = %v", err)
+	}
+	result, err := service.RefreshAdmin(context.Background(), initial)
+	if err != nil || result.UserID != "admin-1" || !containsRole(result.Roles, identity.RoleAdmin) {
+		t.Fatalf("admin refresh result = %+v, err=%v", result, err)
+	}
+}
+
+func TestRefreshRevokesSessionAfterRoleChange(t *testing.T) {
+	sessions := &memorySessions{userID: "former-admin", audience: AudienceAdmin}
+	service := NewService(stubCredentials{roles: []string{identity.RolePlayer}}, testSecret, 15*time.Minute).
+		WithSessions(sessions, 30*24*time.Hour)
+	initial, err := randomRefreshToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.current = hashRefreshToken(initial)
+	if _, err := service.RefreshAdmin(context.Background(), initial); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("role-changed refresh error = %v", err)
+	}
+	if !sessions.revoked {
+		t.Fatal("role-changed session must be revoked")
+	}
+}
+
+func containsRole(roles []string, expected string) bool {
+	for _, role := range roles {
+		if role == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRegisterValidatesInput(t *testing.T) {

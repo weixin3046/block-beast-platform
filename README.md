@@ -63,7 +63,8 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `POST /v1/auth/register` | 注册玩家账号（创建用户、player 角色和 USDT 零余额钱包），直接返回访问令牌。 |
 | `POST /v1/auth/login` | 玩家端登录；拒绝 admin/operator 后台账号。 |
 | `POST /v1/admin/auth/login` | 管理后台登录；仅允许 admin/operator。 |
-| `POST /v1/auth/refresh` | 轮换刷新令牌并签发新访问令牌，旧刷新令牌立即失效。 |
+| `POST /v1/auth/refresh` | 轮换玩家端刷新令牌并复核 player 角色。 |
+| `POST /v1/admin/auth/refresh` | 轮换管理后台刷新令牌并复核 admin/operator 角色。 |
 | `POST /v1/auth/logout` | 撤销刷新令牌并退出当前会话。 |
 | `GET /v1/announcements` | 查询当前生效的玩家公告。 |
 | `GET/POST /v1/admin/announcements` | 后台查询或创建公告。仅 operator/admin。 |
