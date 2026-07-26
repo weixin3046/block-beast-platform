@@ -57,7 +57,7 @@ func main() {
 	if cfg.PQPAAPIURL != "" && cfg.PQPAAPIKey != "" && cfg.PQPAAPISecret != "" {
 		withdrawalSender = chainapp.NewService(pool).WithWithdrawalProvider(pqpa.NewClient(cfg.PQPAAPIURL, cfg.PQPAAPIKey, cfg.PQPAAPISecret, nil))
 	}
-	for _, subject := range []string{"game.>", "wallet.>", "chain.>"} {
+	for _, subject := range []string{"game.>", "wallet.>", "chain.>", "chat.>"} {
 		durable := "worker-" + strings.ReplaceAll(strings.TrimSuffix(subject, ".>"), ".", "-")
 		if err := eventConsumer.Subscribe(subject, durable, processEvent(logger, withdrawalSender)); err != nil {
 			logger.Error("worker failed to subscribe", "subject", subject, "error", err)

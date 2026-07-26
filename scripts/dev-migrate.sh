@@ -39,6 +39,7 @@ migration_is_present() {
     0013) psql_command -Atqc "SELECT (SELECT count(DISTINCT code) FROM roles WHERE code IN ('player', 'operator', 'admin')) = 3" ;;
     0014) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sessions' AND column_name='audience')" ;;
     0015) psql_command -Atqc "SELECT to_regclass('public.auth_login_guards') IS NOT NULL" ;;
+    0016) psql_command -Atqc "SELECT to_regclass('public.chat_room_members') IS NOT NULL" ;;
     *) printf 'f\n' ;;
   esac
 }

@@ -44,6 +44,7 @@ type Server struct {
 	userAdmin        UserAdminService
 	operations       OperationsService
 	gameAdmin        GameAdminService
+	chat             ChatService
 }
 
 type LoginService interface {
@@ -143,6 +144,10 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/auth/refresh", server.refresh)
 	mux.HandleFunc("POST /v1/admin/auth/refresh", server.adminRefresh)
 	mux.HandleFunc("POST /v1/auth/logout", server.logout)
+	mux.HandleFunc("POST /v1/chat/customer-service", server.protect(server.openCustomerServiceRoom))
+	mux.HandleFunc("GET /v1/chat/rooms", server.protect(server.chatRooms))
+	mux.HandleFunc("GET /v1/chat/rooms/{roomID}/messages", server.protect(server.chatMessages))
+	mux.HandleFunc("POST /v1/chat/rooms/{roomID}/messages", server.protect(server.sendChatMessage))
 	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("GET /v1/agents/me", server.protect(server.agentRelation))
 	mux.HandleFunc("GET /v1/agents/me/commissions", server.protect(server.commissions))

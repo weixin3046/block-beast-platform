@@ -14,14 +14,17 @@ import (
 )
 
 func TestEventTargetSeparatesPublicAndPrivateEvents(t *testing.T) {
-	if userID, broadcast := eventTarget("game.round.settled", []byte(`{}`)); userID != "" || !broadcast {
-		t.Fatalf("game event target = %q, %v", userID, broadcast)
+	if userIDs, broadcast := eventTargets("game.round.settled", []byte(`{}`)); len(userIDs) != 0 || !broadcast {
+		t.Fatalf("game event target = %q, %v", userIDs, broadcast)
 	}
-	if userID, broadcast := eventTarget("wallet.withdrawal.requested", []byte(`{"user_id":"u1"}`)); userID != "u1" || broadcast {
-		t.Fatalf("wallet event target = %q, %v", userID, broadcast)
+	if userIDs, broadcast := eventTargets("wallet.withdrawal.requested", []byte(`{"user_id":"u1"}`)); len(userIDs) != 1 || userIDs[0] != "u1" || broadcast {
+		t.Fatalf("wallet event target = %q, %v", userIDs, broadcast)
 	}
-	if userID, broadcast := eventTarget("wallet.ledger.committed", []byte(`{}`)); userID != "" || broadcast {
+	if userIDs, broadcast := eventTargets("wallet.ledger.committed", []byte(`{}`)); len(userIDs) != 0 || broadcast {
 		t.Fatalf("unscoped private event must not be delivered")
+	}
+	if userIDs, broadcast := eventTargets("chat.message.created", []byte(`{"user_ids":["u1","u2"]}`)); len(userIDs) != 2 || broadcast {
+		t.Fatalf("chat event target = %q, %v", userIDs, broadcast)
 	}
 }
 

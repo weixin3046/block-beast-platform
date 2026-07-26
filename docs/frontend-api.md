@@ -172,6 +172,15 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 服务端以 `type=subscribed` 返回当前完整订阅列表。客户端也可以发送
 `{"v":1,"type":"ping","request_id":"p-1"}`，服务端返回对应 `pong`。版本、消息类型或 topic 无效时返回 `type=error`。
 
-事件统一为 `{"v":1,"type":"event","subject":"game.round.settled","payload":{...},"occurred_at":"..."}`。`game.*` 按 `game` 或 `round:{round_id}` 订阅投递；`wallet.*` 和 `chain.*` 无需客户端订阅，只发送给事件 `user_id` 对应的玩家。客户端消费过慢导致 128 条发送队列写满时，网关会主动断开连接，客户端应退避重连并重新建立订阅。
+事件统一为 `{"v":1,"type":"event","subject":"game.round.settled","payload":{...},"occurred_at":"..."}`。`game.*` 按 `game` 或 `round:{round_id}` 订阅投递；订阅 `chat` 可接收公共房间消息。客服消息、`wallet.*` 和 `chain.*` 无需客户端订阅，只发送给对应玩家。客户端消费过慢导致 128 条发送队列写满时，网关会主动断开连接，客户端应退避重连并重新建立订阅。
+
+## 聊天与客服
+
+- `POST /v1/chat/customer-service`：幂等获取玩家自己的客服房间。
+- `GET /v1/chat/rooms`：玩家查询公共房间和自己的客服房间；后台角色可查询全部客服房间。
+- `GET /v1/chat/rooms/{roomID}/messages`：查询可访问房间的最近消息。
+- `POST /v1/chat/rooms/{roomID}/messages`：发送消息，必须提供稳定且唯一的 `client_request_id`，网络重试复用原值。
+
+消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服房间只有所属玩家和后台角色可读写，公共消息通过 WebSocket 的 `chat` topic 广播。
 
 游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用 QuickNode JSON-RPC。前端不得自行计算或替代开奖结果。

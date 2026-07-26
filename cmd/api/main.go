@@ -15,7 +15,8 @@ import (
 	"github.com/block-beast/platform/internal/application/auth"    // 登录认证应用服务
 	"github.com/block-beast/platform/internal/application/betting" // 下注应用服务
 	"github.com/block-beast/platform/internal/application/chain"   // 链上充提应用服务
-	"github.com/block-beast/platform/internal/application/credit"  // 积分/体力充值应用服务
+	"github.com/block-beast/platform/internal/application/chat"
+	"github.com/block-beast/platform/internal/application/credit" // 积分/体力充值应用服务
 	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
@@ -85,6 +86,7 @@ func main() {
 		logger.Warn("PQPA API configuration is incomplete; deposit address creation is disabled")
 	}
 	options = append(options, httpapi.WithWithdrawals(chainService))
+	options = append(options, httpapi.WithChat(chat.NewService(pool)))
 	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))

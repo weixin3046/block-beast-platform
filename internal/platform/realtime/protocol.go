@@ -51,7 +51,7 @@ func decodeCommand(payload []byte) (clientCommand, error) {
 }
 
 func validTopic(topic string) bool {
-	if topic == "game" {
+	if topic == "game" || topic == "chat" {
 		return true
 	}
 	if !strings.HasPrefix(topic, "round:") {
@@ -69,6 +69,9 @@ func encodeMessage(message serverMessage) []byte {
 }
 
 func eventTopics(subject string, data []byte) []string {
+	if strings.HasPrefix(subject, "chat.") {
+		return []string{"chat"}
+	}
 	if !strings.HasPrefix(subject, "game.") {
 		return nil
 	}

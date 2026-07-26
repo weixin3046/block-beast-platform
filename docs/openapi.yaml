@@ -33,6 +33,8 @@ tags:
     description: 体力消耗与流水。
   - name: Tasks
     description: 每日任务（签到）。
+  - name: Chat
+    description: 公共聊天与客服会话。
 paths:
   /healthz:
     get:
@@ -999,6 +1001,79 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '201': { description: 已补发 }
+  /v1/chat/customer-service:
+    post:
+      tags: [Chat]
+      summary: 获取或创建当前玩家的客服会话
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 客服房间。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatRoom' }
+  /v1/chat/rooms:
+    get:
+      tags: [Chat]
+      summary: 查询当前账号可访问的聊天房间
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 房间列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChatRoom' }
+  /v1/chat/rooms/{roomID}/messages:
+    parameters:
+      - name: roomID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Chat]
+      summary: 查询房间消息
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 消息列表（按时间倒序）。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChatMessage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Chat]
+      summary: 幂等发送聊天消息
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [client_request_id, body]
+              properties:
+                client_request_id: { type: string, maxLength: 128 }
+                body: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        '201':
+          description: 新消息已创建。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessage' }
+        '200':
+          description: 幂等重试，返回原消息。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     bearerAuth:
@@ -1096,6 +1171,24 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    ChatRoom:
+      type: object
+      required: [id, type, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [global, game, customer_service, direct] }
+        created_at: { type: string, format: date-time }
+    ChatMessage:
+      type: object
+      required: [id, room_id, body, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        room_id: { type: string, format: uuid }
+        sender_user_id: { type: string, format: uuid }
+        body: { type: string }
+        status: { type: string, enum: [visible, hidden, deleted] }
+        client_request_id: { type: string }
+        created_at: { type: string, format: date-time }
     Status:
       type: object
       required: [status]

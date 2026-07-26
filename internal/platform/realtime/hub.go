@@ -31,7 +31,7 @@ func (hub *Hub) ConnectNATS(url string) error {
 		return err
 	}
 	hub.nats = connection
-	for _, subject := range []string{"game.>", "wallet.>", "chain.>"} {
+	for _, subject := range []string{"game.>", "wallet.>", "chain.>", "chat.>"} {
 		if _, err := connection.Subscribe(subject, hub.publish); err != nil {
 			connection.Close()
 			return err
@@ -106,12 +106,12 @@ func accessToken(request *http.Request) (token, protocol string) {
 
 func (hub *Hub) publish(message *nats.Msg) {
 	envelope := encodeMessage(serverMessage{Type: "event", Subject: message.Subject, Payload: append([]byte(nil), message.Data...)})
-	userID, broadcast := eventTarget(message.Subject, message.Data)
+	userIDs, broadcast := eventTargets(message.Subject, message.Data)
 	if broadcast {
 		hub.publishTopics(eventTopics(message.Subject, message.Data), envelope)
 		return
 	}
-	if userID != "" {
+	for _, userID := range userIDs {
 		hub.send(userID, envelope)
 	}
 }
@@ -134,17 +134,25 @@ func (hub *Hub) handleCommand(item *client, payload []byte) {
 	item.enqueue(encodeMessage(serverMessage{Type: "subscribed", RequestID: command.RequestID, Topics: item.topicList()}))
 }
 
-func eventTarget(subject string, data []byte) (userID string, broadcast bool) {
+func eventTargets(subject string, data []byte) (userIDs []string, broadcast bool) {
 	if strings.HasPrefix(subject, "game.") {
-		return "", true
+		return nil, true
 	}
 	var payload struct {
-		UserID string `json:"user_id"`
+		UserID    string   `json:"user_id"`
+		UserIDs   []string `json:"user_ids"`
+		Broadcast bool     `json:"broadcast"`
 	}
 	if json.Unmarshal(data, &payload) != nil {
-		return "", false
+		return nil, false
 	}
-	return payload.UserID, false
+	if strings.HasPrefix(subject, "chat.") {
+		return payload.UserIDs, payload.Broadcast
+	}
+	if payload.UserID != "" {
+		return []string{payload.UserID}, false
+	}
+	return nil, false
 }
 
 func (hub *Hub) add(userID string, item *client) {

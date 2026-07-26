@@ -22,6 +22,7 @@ const (
 	WithdrawalSent      = "chain.withdrawal.sent"
 	WithdrawalRequested = "wallet.withdrawal.requested"
 	WithdrawalApproved  = "chain.withdrawal.approved"
+	ChatMessageCreated  = "chat.message.created"
 )
 
 // Publisher is backed by a transactional outbox before events reach NATS JetStream.

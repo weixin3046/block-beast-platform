@@ -66,6 +66,8 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `POST /v1/auth/refresh` | 轮换玩家端刷新令牌并复核 player 角色。 |
 | `POST /v1/admin/auth/refresh` | 轮换管理后台刷新令牌并复核 admin/operator 角色。 |
 | `POST /v1/auth/logout` | 撤销刷新令牌并退出当前会话。 |
+| `POST /v1/chat/customer-service` | 获取或创建当前玩家的专属客服房间。 |
+| `GET/POST /v1/chat/rooms/{room_id}/messages` | 查询或幂等发送有权限访问的聊天消息。 |
 | `GET /v1/announcements` | 查询当前生效的玩家公告。 |
 | `GET/POST /v1/admin/announcements` | 后台查询或创建公告。仅 operator/admin。 |
 | `PUT /v1/admin/announcements/{announcement_id}` | 后台更新公告内容、启用状态和展示时间。仅 operator/admin。 |
