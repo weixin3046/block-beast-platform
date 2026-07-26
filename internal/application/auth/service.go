@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,8 @@ type Service struct {
 	sessions       SessionStore
 	refreshTTL     time.Duration
 	strictPassword bool
+	loginAttempts  LoginAttemptStore
+	loginPolicy    LoginProtectionPolicy
 }
 
 func (service *Service) WithSessions(sessions SessionStore, ttl time.Duration) *Service {
@@ -65,6 +68,12 @@ func NewService(credentials CredentialsReader, secret string, ttl time.Duration)
 
 func (service *Service) WithStrictPasswordPolicy(enabled bool) *Service {
 	service.strictPassword = enabled
+	return service
+}
+
+func (service *Service) WithLoginProtection(store LoginAttemptStore, policy LoginProtectionPolicy) *Service {
+	service.loginAttempts = store
+	service.loginPolicy = policy
 	return service
 }
 
@@ -99,16 +108,52 @@ func (service *Service) login(ctx context.Context, loginName string, password st
 	if len(service.secret) < 32 || service.ttl <= 0 {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
+	loginName = strings.TrimSpace(loginName)
+	if len(loginName) > 128 {
+		identity.VerifyPassword(dummyHash(), password)
+		return LoginResult{}, ErrInvalidCredentials
+	}
+	if service.loginAttempts != nil {
+		if err := service.loginPolicy.Validate(); err != nil {
+			return LoginResult{}, ErrAuthNotConfigured
+		}
+		blocked, err := service.loginAttempts.LoginBlocked(ctx, loginName, service.now().UTC())
+		if err != nil {
+			return LoginResult{}, err
+		}
+		if blocked {
+			return LoginResult{}, ErrTooManyLoginAttempts
+		}
+	}
 	credentials, err := service.credentials.FindPasswordCredentials(ctx, loginName)
 	if errors.Is(err, identity.ErrIdentityNotFound) {
 		identity.VerifyPassword(dummyHash(), password)
+		blocked, recordErr := service.recordLoginFailure(ctx, loginName)
+		if recordErr != nil {
+			return LoginResult{}, recordErr
+		}
+		if blocked {
+			return LoginResult{}, ErrTooManyLoginAttempts
+		}
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	if err != nil {
 		return LoginResult{}, err
 	}
 	if !identity.VerifyPassword(credentials.PasswordHash, password) {
+		blocked, recordErr := service.recordLoginFailure(ctx, loginName)
+		if recordErr != nil {
+			return LoginResult{}, recordErr
+		}
+		if blocked {
+			return LoginResult{}, ErrTooManyLoginAttempts
+		}
 		return LoginResult{}, ErrInvalidCredentials
+	}
+	if service.loginAttempts != nil {
+		if err := service.loginAttempts.ClearLoginFailures(ctx, loginName); err != nil {
+			return LoginResult{}, err
+		}
 	}
 	if credentials.Status != "active" {
 		return LoginResult{}, ErrAccountDisabled
@@ -134,6 +179,16 @@ func (service *Service) login(ctx context.Context, loginName string, password st
 		Roles:       roles,
 	}
 	return service.attachRefreshToken(ctx, result, audience)
+}
+
+func (service *Service) recordLoginFailure(ctx context.Context, loginName string) (bool, error) {
+	if service.loginAttempts == nil {
+		return false, nil
+	}
+	return service.loginAttempts.RecordLoginFailure(
+		ctx, loginName, service.now().UTC(), service.loginPolicy.MaxFailures,
+		service.loginPolicy.Window, service.loginPolicy.Lockout,
+	)
 }
 
 func playerLoginAllowed(roles []string) bool {

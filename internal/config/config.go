@@ -19,6 +19,9 @@ type Config struct {
 	NATSURL                string
 	AuthTokenSecret        string
 	AuthStrictPassword     bool
+	LoginMaxFailures       int
+	LoginFailureWindow     time.Duration
+	LoginLockoutDuration   time.Duration
 	AccessTokenTTL         time.Duration
 	RefreshTokenTTL        time.Duration
 	ChainWebhookSkew       time.Duration
@@ -48,6 +51,9 @@ func Load() Config {
 		NATSURL:                os.Getenv("NATS_URL"),
 		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),
 		AuthStrictPassword:     environment == "production" || boolOrDefault("AUTH_STRICT_PASSWORD_POLICY", false),
+		LoginMaxFailures:       intOrDefault("LOGIN_MAX_FAILURES", 5),
+		LoginFailureWindow:     durationOrDefault("LOGIN_FAILURE_WINDOW", 15*time.Minute),
+		LoginLockoutDuration:   durationOrDefault("LOGIN_LOCKOUT_DURATION", 15*time.Minute),
 		AccessTokenTTL:         durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:        durationOrDefault("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		ChainWebhookSkew:       durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
@@ -71,6 +77,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func intOrDefault(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func int64OrDefault(key string, fallback int64) int64 {

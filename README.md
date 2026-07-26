@@ -61,8 +61,8 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `GET /readyz` | PostgreSQL 就绪检查。 |
 | `GET /v1/platform` | 查询当前环境与领域列表。 |
 | `POST /v1/auth/register` | 注册玩家账号（创建用户、player 角色和 USDT 零余额钱包），直接返回访问令牌。 |
-| `POST /v1/auth/login` | 玩家端登录；拒绝 admin/operator 后台账号。 |
-| `POST /v1/admin/auth/login` | 管理后台登录；仅允许 admin/operator。 |
+| `POST /v1/auth/login` | 玩家端登录；拒绝 admin/operator 后台账号；连续失败达到阈值后返回 429。 |
+| `POST /v1/admin/auth/login` | 管理后台登录；仅允许 admin/operator；与玩家端共用持久化失败锁定。 |
 | `POST /v1/auth/refresh` | 轮换玩家端刷新令牌并复核 player 角色。 |
 | `POST /v1/admin/auth/refresh` | 轮换管理后台刷新令牌并复核 admin/operator 角色。 |
 | `POST /v1/auth/logout` | 撤销刷新令牌并退出当前会话。 |

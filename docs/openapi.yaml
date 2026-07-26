@@ -129,6 +129,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/Unavailable'
   /v1/admin/auth/login:
@@ -156,6 +158,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/Unavailable'
   /v1/auth/refresh:
@@ -1069,6 +1073,18 @@ components:
             $ref: '#/components/schemas/Error'
     Conflict:
       description: 当前资源状态不允许该操作，或余额不足。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: 同一登录名在统计窗口内失败次数过多，账号已被临时锁定。
+      headers:
+        Retry-After:
+          description: 客户端再次尝试前至少等待的秒数。
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:

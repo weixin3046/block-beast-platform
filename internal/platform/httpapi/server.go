@@ -316,6 +316,11 @@ func (server *Server) loginForAudience(writer http.ResponseWriter, request *http
 		auditAction = "auth.admin_login"
 	}
 	switch {
+	case errors.Is(err, auth.ErrTooManyLoginAttempts):
+		server.recordAudit(request.Context(), audit.Entry{Action: auditAction, TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "login_throttled"}})
+		writer.Header().Set("Retry-After", "60")
+		writeJSON(writer, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+		return
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		server.recordAudit(request.Context(), audit.Entry{Action: auditAction, TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "invalid_credentials"}})
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": err.Error()})

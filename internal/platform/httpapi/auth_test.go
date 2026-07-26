@@ -128,15 +128,22 @@ type stubRegisterService struct {
 type stubLoginService struct {
 	playerCalls int
 	adminCalls  int
+	err         error
 }
 
 func (stub *stubLoginService) Login(context.Context, string, string) (auth.LoginResult, error) {
 	stub.playerCalls++
+	if stub.err != nil {
+		return auth.LoginResult{}, stub.err
+	}
 	return auth.LoginResult{AccessToken: "player-token", UserID: "player-1", Roles: []string{identity.RolePlayer}}, nil
 }
 
 func (stub *stubLoginService) LoginAdmin(context.Context, string, string) (auth.LoginResult, error) {
 	stub.adminCalls++
+	if stub.err != nil {
+		return auth.LoginResult{}, stub.err
+	}
 	return auth.LoginResult{AccessToken: "admin-token", UserID: "admin-1", Roles: []string{identity.RoleAdmin}}, nil
 }
 
@@ -158,6 +165,24 @@ func TestLoginEndpointsUseSeparateAudiences(t *testing.T) {
 	}
 	if logins.playerCalls != 1 || logins.adminCalls != 1 {
 		t.Fatalf("login calls = player:%d admin:%d", logins.playerCalls, logins.adminCalls)
+	}
+}
+
+func TestLoginEndpointReturnsTooManyRequestsWhenLocked(t *testing.T) {
+	server := New(
+		config.Config{},
+		slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		nil, readinessChecker{}, nil, nil, nil, nil,
+		WithLogin(&stubLoginService{err: auth.ErrTooManyLoginAttempts}),
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(`{"login_name":"user","password":"password"}`))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", response.Code)
+	}
+	if response.Header().Get("Retry-After") != "60" {
+		t.Fatalf("Retry-After = %q, want 60", response.Header().Get("Retry-After"))
 	}
 }
 

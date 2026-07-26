@@ -14,7 +14,7 @@
 
 | 现有能力 | 新归属模块 | 主要一致性规则 |
 | --- | --- | --- |
-| 账号、游客、密码及第三方登录 | Identity | 会话必须可撤销，密码必须使用 Argon2id，严禁使用 MD5。 |
+| 账号、游客、密码及第三方登录 | Identity | 会话必须可撤销，密码必须使用 Argon2id；登录失败计数和临时锁定持久化到 PostgreSQL，供多 API 实例共享；严禁使用 MD5。 |
 | 玩家与 GM API | API / Operations | 对特权指令实施 RBAC，并保留不可变审计日志。 |
 | 余额、扣除投注、派奖、退款、充值及提现 | Wallet | 账本记录与余额更新必须处于同一个 PostgreSQL 事务中。 |
 | 轮次、停止投注、TRON/K 线结果及结算 | Game / Worker | OKX `candle1m` WebSocket 为 K 线主通道、REST 为断线补偿；TRON 区块通过 QuickNode JSON-RPC 查询。通过轮次版本和唯一结算键保证结算幂等。 |

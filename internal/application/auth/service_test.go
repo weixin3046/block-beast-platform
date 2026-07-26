@@ -52,6 +52,88 @@ func (credentials loginCredentials) UserRoles(context.Context, string) ([]string
 	return credentials.roles, nil
 }
 
+type memoryLoginAttempts struct {
+	failures    int
+	lockedUntil time.Time
+	clearCount  int
+}
+
+func (store *memoryLoginAttempts) LoginBlocked(_ context.Context, _ string, now time.Time) (bool, error) {
+	return store.lockedUntil.After(now), nil
+}
+
+func (store *memoryLoginAttempts) RecordLoginFailure(
+	_ context.Context,
+	_ string,
+	now time.Time,
+	maxFailures int,
+	_ time.Duration,
+	lockout time.Duration,
+) (bool, error) {
+	store.failures++
+	if store.failures >= maxFailures {
+		store.lockedUntil = now.Add(lockout)
+		return true, nil
+	}
+	return false, nil
+}
+
+func (store *memoryLoginAttempts) ClearLoginFailures(context.Context, string) error {
+	store.failures = 0
+	store.lockedUntil = time.Time{}
+	store.clearCount++
+	return nil
+}
+
+func TestLoginProtectionLocksAndRecovers(t *testing.T) {
+	hash, err := identity.HashPassword("correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	attempts := &memoryLoginAttempts{}
+	service := NewService(loginCredentials{passwordHash: hash, roles: []string{identity.RolePlayer}}, testSecret, time.Minute).
+		WithLoginProtection(attempts, LoginProtectionPolicy{MaxFailures: 3, Window: 15 * time.Minute, Lockout: 15 * time.Minute})
+	service.now = func() time.Time { return now }
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := service.Login(context.Background(), "player-1", "wrong"); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("attempt %d error = %v, want ErrInvalidCredentials", attempt, err)
+		}
+	}
+	if _, err := service.Login(context.Background(), "player-1", "wrong"); !errors.Is(err, ErrTooManyLoginAttempts) {
+		t.Fatalf("third attempt error = %v, want ErrTooManyLoginAttempts", err)
+	}
+	if _, err := service.Login(context.Background(), "player-1", "correct-horse-battery"); !errors.Is(err, ErrTooManyLoginAttempts) {
+		t.Fatalf("locked correct-password error = %v, want ErrTooManyLoginAttempts", err)
+	}
+
+	now = now.Add(16 * time.Minute)
+	if _, err := service.Login(context.Background(), "player-1", "correct-horse-battery"); err != nil {
+		t.Fatalf("login after lockout: %v", err)
+	}
+	if attempts.clearCount != 1 || attempts.failures != 0 {
+		t.Fatalf("clear count/failures = %d/%d", attempts.clearCount, attempts.failures)
+	}
+}
+
+func TestCorrectPasswordOnWrongAudienceDoesNotIncreaseFailures(t *testing.T) {
+	hash, err := identity.HashPassword("correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := &memoryLoginAttempts{failures: 2}
+	service := NewService(loginCredentials{passwordHash: hash, roles: []string{identity.RoleAdmin}}, testSecret, time.Minute).
+		WithLoginProtection(attempts, LoginProtectionPolicy{MaxFailures: 3, Window: 15 * time.Minute, Lockout: 15 * time.Minute})
+
+	if _, err := service.Login(context.Background(), "admin", "correct-horse-battery"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("error = %v, want ErrInvalidCredentials", err)
+	}
+	if attempts.failures != 0 || attempts.clearCount != 1 {
+		t.Fatalf("wrong audience should clear valid-password failures, got %d/%d", attempts.failures, attempts.clearCount)
+	}
+}
+
 func TestLoginSeparatesPlayerAndAdminAudiences(t *testing.T) {
 	hash, err := identity.HashPassword("correct-horse-battery")
 	if err != nil {

@@ -47,10 +47,20 @@ func main() {
 		logger.Warn("AUTH_TOKEN_SECRET is not set; business endpoints are unauthenticated")
 	} else {
 		identityRepository := identity.NewPostgresRepository(pool)
+		loginPolicy := auth.LoginProtectionPolicy{
+			MaxFailures: cfg.LoginMaxFailures,
+			Window:      cfg.LoginFailureWindow,
+			Lockout:     cfg.LoginLockoutDuration,
+		}
+		if err := loginPolicy.Validate(); err != nil {
+			logger.Error("invalid login protection policy", "error", err)
+			return
+		}
 		authService := auth.NewService(identityRepository, cfg.AuthTokenSecret, cfg.AccessTokenTTL).
 			WithStrictPasswordPolicy(cfg.AuthStrictPassword).
 			WithRegistrar(identityRepository).
-			WithSessions(identityRepository, cfg.RefreshTokenTTL)
+			WithSessions(identityRepository, cfg.RefreshTokenTTL).
+			WithLoginProtection(identityRepository, loginPolicy)
 		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService), httpapi.WithSessions(authService))
 	}
 	withdrawalPolicy := chain.WithdrawalPolicy{
