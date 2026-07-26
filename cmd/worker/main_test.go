@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"testing"
 	"time"
+
+	chainapp "github.com/block-beast/platform/internal/application/chain"
+	"github.com/block-beast/platform/internal/domain/events"
 )
 
 func TestProcessDueRoundsClosesBatchOfOneHundred(t *testing.T) {
@@ -31,6 +34,32 @@ func TestProcessDueRoundsHandlesRepositoryFailure(t *testing.T) {
 
 	if repository.limit != 100 {
 		t.Fatalf("close limit = %d, want 100", repository.limit)
+	}
+}
+
+func TestApprovedWithdrawalRequiresConfiguredProvider(t *testing.T) {
+	handler := processEvent(slog.New(slog.NewJSONHandler(io.Discard, nil)), nil)
+	err := handler(context.Background(), events.Event{
+		Type:    events.WithdrawalApproved,
+		Payload: []byte(`{"withdrawal_id":"withdrawal-1"}`),
+	})
+	if !errors.Is(err, errWithdrawalProviderUnavailable) {
+		t.Fatalf("error = %v, want errWithdrawalProviderUnavailable", err)
+	}
+}
+
+func TestApprovedWithdrawalRejectsMissingID(t *testing.T) {
+	handler := processEvent(slog.New(slog.NewJSONHandler(io.Discard, nil)), &chainapp.Service{})
+	err := handler(context.Background(), events.Event{Type: events.WithdrawalApproved, Payload: []byte(`{}`)})
+	if err == nil {
+		t.Fatal("missing withdrawal_id must fail")
+	}
+}
+
+func TestNotificationEventCanBeAcknowledged(t *testing.T) {
+	handler := processEvent(slog.New(slog.NewJSONHandler(io.Discard, nil)), nil)
+	if err := handler(context.Background(), events.Event{Type: events.BetPlaced}); err != nil {
+		t.Fatalf("notification event: %v", err)
 	}
 }
 

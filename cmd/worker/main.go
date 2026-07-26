@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -21,6 +23,8 @@ import (
 	"github.com/block-beast/platform/internal/platform/pqpa"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var errWithdrawalProviderUnavailable = errors.New("withdrawal provider is unavailable")
 
 func main() {
 	cfg := config.Load()
@@ -147,18 +151,25 @@ func processDueRounds(ctx context.Context, logger *slog.Logger, repository dueRo
 	}
 }
 
-// logEvent 是业务处理器落地前的占位处理器：确认事件已到达并记录日志。
+// processEvent 分派需要异步副作用的领域事件。资金类事件必须在副作用
+// 完成后才能确认；通知类事件由 Realtime 直接转发，Worker 可安全确认。
 func processEvent(logger *slog.Logger, withdrawals *chainapp.Service) natsjs.Handler {
 	return func(ctx context.Context, event events.Event) error {
-		if event.Type == events.WithdrawalApproved && withdrawals != nil {
+		if event.Type == events.WithdrawalApproved {
+			if withdrawals == nil {
+				return errWithdrawalProviderUnavailable
+			}
 			var payload struct {
 				WithdrawalID string `json:"withdrawal_id"`
 			}
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return err
+				return fmt.Errorf("decode approved withdrawal event: %w", err)
+			}
+			if payload.WithdrawalID == "" {
+				return errors.New("approved withdrawal event is missing withdrawal_id")
 			}
 			if err := withdrawals.SendApprovedWithdrawal(ctx, payload.WithdrawalID); err != nil {
-				return err
+				return fmt.Errorf("send approved withdrawal %s: %w", payload.WithdrawalID, err)
 			}
 			logger.Info("PQPA withdrawal sent", "withdrawal_id", payload.WithdrawalID)
 			return nil
