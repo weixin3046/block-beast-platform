@@ -29,13 +29,17 @@
 7. 参加活动时调用 `POST /v1/stamina/consume` 扣体力，`activity_id` 由活动方提供；体力不足返回 409。
 8. 大厅调用 `GET /v1/announcements` 获取当前时间窗口内启用的公告；该接口无需登录。
 
+轮次响应同时包含 `bet_closes_at` 和 `result_at`。前者是停止接受投注的时刻，
+后者固定晚 5 秒并用于开奖；倒计时必须以服务端字段为准。封盘后到开奖前不得
+继续提交投注，也不得把本地时间或行情提前当作开奖结果。
+
 管理后台可用 `GET/POST /v1/admin/announcements` 和 `PUT /v1/admin/announcements/{id}` 管理公告。`operator` 与 `admin` 均可管理公告；不可变审计日志 `GET /v1/admin/audit-logs?action={action}&actor_user_id={id}` 仅 `admin` 可查看。
 
 角色管理仅对 `admin` 开放：`GET /v1/admin/roles` 查询 `player`、`operator`、
 `admin` 标准角色，`PUT /v1/admin/users/{userID}/roles` 使用
 `{"roles":["operator"]}` 替换目标账号的完整角色集合。成功后目标账号所有刷新
 会话立即撤销。接口禁止管理员移除自己的 `admin`，也禁止移除系统最后一个
-`admin`；这两种情况返回 409。
+`admin`；用户禁用接口也禁止管理员禁用自己或最后一个有效 `admin`。这些情况返回 409。
 
 平台动态配置使用 `GET /v1/configs/{key}` 读取，只有 `visibility=public` 的配置
 可匿名访问。管理后台使用 `GET /v1/admin/configs?visibility=public` 查询配置，

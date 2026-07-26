@@ -45,6 +45,7 @@ type ManagedRound struct {
 	Sequence     int64           `json:"sequence"`
 	Status       string          `json:"status"`
 	BetClosesAt  time.Time       `json:"bet_closes_at"`
+	ResultAt     time.Time       `json:"result_at"`
 	Outcome      json.RawMessage `json:"outcome,omitempty"`
 	SettledAt    *time.Time      `json:"settled_at,omitempty"`
 }
@@ -109,7 +110,7 @@ func (service *Service) ListRounds(ctx context.Context, gameTypeCode, status str
 	}
 	rows, err := service.pool.Query(ctx, `
 		SELECT rounds.id::text,rounds.game_type_id::text,game_types.code,rounds.sequence,
-			rounds.status,rounds.bet_closes_at,rounds.outcome,rounds.settled_at
+			rounds.status,rounds.bet_closes_at,rounds.result_at,rounds.outcome,rounds.settled_at
 		FROM rounds JOIN game_types ON game_types.id=rounds.game_type_id
 		WHERE ($1='' OR game_types.code=$1) AND ($2='' OR rounds.status=$2)
 		ORDER BY rounds.bet_closes_at DESC LIMIT $3`, gameTypeCode, status, limit)
@@ -120,7 +121,7 @@ func (service *Service) ListRounds(ctx context.Context, gameTypeCode, status str
 	items := make([]ManagedRound, 0)
 	for rows.Next() {
 		var item ManagedRound
-		if err := rows.Scan(&item.ID, &item.GameTypeID, &item.GameTypeCode, &item.Sequence, &item.Status, &item.BetClosesAt, &item.Outcome, &item.SettledAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.GameTypeID, &item.GameTypeCode, &item.Sequence, &item.Status, &item.BetClosesAt, &item.ResultAt, &item.Outcome, &item.SettledAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -151,9 +152,9 @@ func (service *Service) CreateRound(ctx context.Context, gameTypeID string, betC
 	err = tx.QueryRow(ctx, `
 		INSERT INTO rounds (id,game_type_id,sequence,status,bet_closes_at)
 		VALUES ($1,$2,$3,'open',$4)
-		RETURNING id::text,game_type_id::text,sequence,status,bet_closes_at`,
+		RETURNING id::text,game_type_id::text,sequence,status,bet_closes_at,result_at`,
 		uuid.NewString(), gameTypeID, sequence, betClosesAt.UTC()).
-		Scan(&item.ID, &item.GameTypeID, &item.Sequence, &item.Status, &item.BetClosesAt)
+		Scan(&item.ID, &item.GameTypeID, &item.Sequence, &item.Status, &item.BetClosesAt, &item.ResultAt)
 	if err != nil {
 		return ManagedRound{}, err
 	}

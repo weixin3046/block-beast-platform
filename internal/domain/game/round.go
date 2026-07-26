@@ -21,6 +21,7 @@ type Round struct {
 	Sequence    int64       `json:"sequence"`
 	Status      RoundStatus `json:"status"`
 	BetClosesAt time.Time   `json:"bet_closes_at"`
+	ResultAt    time.Time   `json:"result_at"`
 	SettledAt   *time.Time  `json:"settled_at,omitempty"`
 	Outcome     []string    `json:"outcome,omitempty"`
 }

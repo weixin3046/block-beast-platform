@@ -44,6 +44,7 @@ migration_is_present() {
     0018) psql_command -Atqc "SELECT to_regclass('public.leaderboard_daily') IS NOT NULL" ;;
     0019) psql_command -Atqc "SELECT to_regclass('public.red_packets') IS NOT NULL" ;;
     0020) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='platform_configs' AND column_name='version')" ;;
+    0021) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rounds' AND column_name='result_at')" ;;
     *) printf 'f\n' ;;
   esac
 }

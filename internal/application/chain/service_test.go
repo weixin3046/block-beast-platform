@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func seedChainUser(t *testing.T, pool *pgxpool.Pool, ctx context.Context, tokenC
 		walletID:  uuid.NewString(),
 		addressID: uuid.NewString(),
 		address:   "T" + uuid.NewString()[:8],
-		chainCode: "TEST-" + uuid.NewString()[:8],
+		chainCode: strings.ToUpper("TEST-" + uuid.NewString()[:8]),
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO users (id, display_name) VALUES ($1, 'chain test player')`, f.userID); err != nil {
 		t.Fatalf("create user: %v", err)

@@ -70,4 +70,20 @@ func TestSetUserRolesRevokesSessionsAndProtectsSelf(t *testing.T) {
 	if _, err := service.SetUserRoles(ctx, actorID, actorID, []string{identity.RoleOperator}); !errors.Is(err, ErrCannotRemoveOwnAdmin) {
 		t.Fatalf("self removal error = %v", err)
 	}
+	if err := service.SetUserStatus(ctx, actorID, actorID, "disabled"); !errors.Is(err, ErrCannotDisableOwnAdmin) {
+		t.Fatalf("self disable error = %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO sessions(id,user_id,token_hash,audience,expires_at)
+		VALUES ($1,$2,$3,'admin',$4)`,
+		uuid.NewString(), targetID, "session-"+uuid.NewString(), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetUserStatus(ctx, actorID, targetID, "disabled"); err != nil {
+		t.Fatalf("disable target: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id=$1`, targetID).Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatalf("disabled user sessions = %d, err = %v", sessions, err)
+	}
 }

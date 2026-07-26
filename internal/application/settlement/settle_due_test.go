@@ -50,7 +50,7 @@ func TestSettleDueRoundsSettlesClosedRoundsByRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create game type: %v", err)
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO rounds (id, game_type_id, sequence, status, bet_closes_at) VALUES ($1, $2, 1, 'closed', $3)`, roundID, gameTypeID, time.Now().UTC().Add(-time.Second))
+	_, err = pool.Exec(ctx, `INSERT INTO rounds (id, game_type_id, sequence, status, bet_closes_at) VALUES ($1, $2, 1, 'closed', $3)`, roundID, gameTypeID, time.Now().UTC().Add(-10*time.Second))
 	if err != nil {
 		t.Fatalf("create round: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestSettleDueRoundsKeepsFailedRoundForRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create game type: %v", err)
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO rounds (id, game_type_id, sequence, status, bet_closes_at) VALUES ($1, $2, 1, 'closed', $3)`, roundID, gameTypeID, time.Now().UTC().Add(-time.Second))
+	_, err = pool.Exec(ctx, `INSERT INTO rounds (id, game_type_id, sequence, status, bet_closes_at) VALUES ($1, $2, 1, 'closed', $3)`, roundID, gameTypeID, time.Now().UTC().Add(-10*time.Second))
 	if err != nil {
 		t.Fatalf("create round: %v", err)
 	}
@@ -164,5 +164,43 @@ func TestSettleDueRoundsKeepsFailedRoundForRetry(t *testing.T) {
 	}
 	if roundStatus != "closed" {
 		t.Fatalf("round status = %q, want closed for retry", roundStatus)
+	}
+}
+
+func TestSettleDueRoundsWaitsForResultTime(t *testing.T) {
+	dsn := os.Getenv("POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("POSTGRES_TEST_DSN is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	gameTypeID, roundID := uuid.NewString(), uuid.NewString()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO game_types (id,code,name,rules)
+		VALUES ($1,$2,'result gap','{"outcomes":["red"],"payout_multiplier":2}')`,
+		gameTypeID, "gap-"+gameTypeID)
+	if err == nil {
+		_, err = pool.Exec(ctx, `
+			INSERT INTO rounds (id,game_type_id,sequence,status,bet_closes_at)
+			VALUES ($1,$2,1,'closed',$3)`,
+			roundID, gameTypeID, time.Now().UTC().Add(-time.Second))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM rounds WHERE id=$1`, roundID)
+		_, _ = pool.Exec(ctx, `DELETE FROM game_types WHERE id=$1`, gameTypeID)
+	})
+	settled, err := NewService(pool).SettleDueRounds(ctx, fixedResultSource{outcome: []string{"red"}}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settled) != 0 {
+		t.Fatalf("round settled before result_at: %+v", settled)
 	}
 }

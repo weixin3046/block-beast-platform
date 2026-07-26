@@ -135,7 +135,7 @@ docker compose down --volumes
 
 ## 下一步实现顺序
 
-已实现轮次结算与 Worker 接入：Worker 每个调度周期依次封盘到期轮次、结算已封盘（或中断在结算中）的轮次、发布 outbox 事件。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、可选的中奖字段 `match_field`（支持点路径，限定只比较 selection 中该字段的值）和开奖个数 `result_count`。结算时按玩法加载规则：开奖结果必须落在结果池内，中奖投注在同一事务中完成派奖、账本记录、轮次状态更新和 outbox 事件写入；单轮结算失败会回滚并保持原状态，等待下个周期重试。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道，并在首次订阅或断线时通过 REST 补偿；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块哈希。未指定来源的本地玩法仍使用确定性哈希。
+已实现轮次结算与 Worker 接入：每轮在 `bet_closes_at` 封盘，数据库固定生成 `result_at = bet_closes_at + 5 秒`，Worker 只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次并发布 outbox 事件。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、可选的中奖字段 `match_field`（支持点路径，限定只比较 selection 中该字段的值）和开奖个数 `result_count`。结算时按玩法加载规则：开奖结果必须落在结果池内，中奖投注在同一事务中完成派奖、账本记录、轮次状态更新和 outbox 事件写入；单轮结算失败会回滚并保持原状态，等待下个周期重试。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道，并在首次订阅或断线时通过 REST 补偿；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块哈希。未指定来源的本地玩法仍使用确定性哈希。
 
 玩法规则示例：
 

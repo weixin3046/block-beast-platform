@@ -12,7 +12,7 @@ import (
 
 type UserAdminService interface {
 	ListUsers(ctx context.Context, status, query string, limit int) ([]operations.User, error)
-	SetUserStatus(ctx context.Context, userID, status string) error
+	SetUserStatus(ctx context.Context, actorUserID, userID, status string) error
 	ListRoles(ctx context.Context) ([]operations.Role, error)
 	SetUserRoles(ctx context.Context, actorUserID, userID string, roles []string) (operations.RoleAssignment, error)
 }
@@ -77,16 +77,18 @@ func (server *Server) setUserStatus(writer http.ResponseWriter, request *http.Re
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	err := server.userAdmin.SetUserStatus(request.Context(), request.PathValue("userID"), input.Status)
+	claims, _ := ClaimsFromContext(request.Context())
+	err := server.userAdmin.SetUserStatus(request.Context(), claims.Subject, request.PathValue("userID"), input.Status)
 	switch {
 	case errors.Is(err, operations.ErrInvalidUserStatus):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, operations.ErrUserNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, operations.ErrCannotDisableOwnAdmin), errors.Is(err, operations.ErrCannotDisableLastAdmin):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to update user status"})
 	default:
-		claims, _ := ClaimsFromContext(request.Context())
 		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "user.status.update", TargetType: "user", TargetID: request.PathValue("userID"), Payload: map[string]any{"status": input.Status}})
 		writeJSON(writer, http.StatusOK, map[string]string{"status": input.Status})
 	}

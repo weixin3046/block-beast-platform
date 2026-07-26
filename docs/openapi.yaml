@@ -493,6 +493,25 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
   /v1/bets:
+    get:
+      tags: [Bets]
+      summary: 查询本人的投注列表
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [accepted, won, lost, refunded, cancelled] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: 投注列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Bet' }
     post:
       tags: [Bets]
       operationId: placeBet
@@ -719,6 +738,18 @@ paths:
                         support_withdraw: { type: boolean }
         '503': { $ref: '#/components/responses/Unavailable' }
   /v1/withdrawals:
+    get:
+      tags: [Chain]
+      summary: 查询本人的 USDT 提现列表
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 提现申请列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Withdrawal' }
     post:
       tags: [Chain]
       operationId: requestWithdrawal
@@ -1365,6 +1396,187 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /v1/agents/bind:
+    post:
+      tags: [Agent]
+      summary: 绑定不可变的一级直属代理
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parent_user_id]
+              properties:
+                parent_user_id: { type: string, format: uuid }
+      responses:
+        '201': { description: 已绑定 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/agents/me:
+    get:
+      tags: [Agent]
+      summary: 查询本人的直属代理关系
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 代理关系 }
+  /v1/admin/agents/{agentID}/commission-rate:
+    put:
+      tags: [Admin]
+      summary: 设置代理返佣基点比例
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: agentID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rate_basis_points]
+              properties:
+                rate_basis_points: { type: integer, minimum: 0, maximum: 10000 }
+      responses:
+        '200': { description: 已更新 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /v1/deposits:
+    get:
+      tags: [Chain]
+      summary: 查询本人链上充值记录
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 充值记录列表 }
+  /v1/admin/withdrawals:
+    get:
+      tags: [Admin, Chain]
+      summary: 后台查询 USDT 提现申请
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 提现申请列表 }
+  /v1/admin/withdrawals/{withdrawalID}/approve:
+    post:
+      tags: [Admin, Chain]
+      summary: 审批通过 USDT 提现并等待 Worker 出金
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: withdrawalID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 已审批。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Withdrawal' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/admin/withdrawals/{withdrawalID}/reject:
+    post:
+      tags: [Admin, Chain]
+      summary: 拒绝 USDT 提现并解冻余额
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: withdrawalID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: 已拒绝。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Withdrawal' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: 后台查询用户
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, disabled, bet_banned] }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 用户列表 }
+  /v1/admin/users/{userID}/status:
+    put:
+      tags: [Admin]
+      summary: 修改用户状态
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, disabled, bet_banned] }
+      responses:
+        '200': { description: 已更新 }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/point-withdrawals:
+    post:
+      tags: [Wallets]
+      summary: 幂等申请积分下分
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: 已冻结积分并创建申请 }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Wallets]
+      summary: 查询本人的积分下分申请
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 积分下分列表 }
+  /v1/admin/point-withdrawals:
+    get:
+      tags: [Admin, Wallets]
+      summary: 后台查询积分下分申请
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 积分下分列表 }
+  /v1/admin/point-withdrawals/{withdrawalID}/review:
+    post:
+      tags: [Admin, Wallets]
+      summary: 审核积分下分申请
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: withdrawalID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved: { type: boolean }
+      responses:
+        '200': { description: 审核完成 }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     bearerAuth:
@@ -1805,7 +2017,7 @@ components:
             type: string
     Round:
       type: object
-      required: [round_id, game_type, sequence, status, bet_closes_at]
+      required: [round_id, game_type, sequence, status, bet_closes_at, result_at]
       properties:
         round_id:
           type: string
@@ -1822,6 +2034,10 @@ components:
         bet_closes_at:
           type: string
           format: date-time
+        result_at:
+          type: string
+          format: date-time
+          description: 固定比 bet_closes_at 晚 5 秒，Worker 仅在此时刻后开奖。
         settled_at:
           type: string
           format: date-time

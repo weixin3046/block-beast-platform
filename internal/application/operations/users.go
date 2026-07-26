@@ -5,11 +5,14 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrInvalidUserStatus = errors.New("user status must be active, disabled, or bet_banned")
 var ErrUserNotFound = errors.New("user not found")
+var ErrCannotDisableOwnAdmin = errors.New("administrator cannot disable own account")
+var ErrCannotDisableLastAdmin = errors.New("cannot disable the platform's last active admin")
 
 type User struct {
 	ID          string    `json:"id"`
@@ -48,16 +51,60 @@ func (service *Service) ListUsers(ctx context.Context, status, query string, lim
 	return items, rows.Err()
 }
 
-func (service *Service) SetUserStatus(ctx context.Context, userID, status string) error {
+func (service *Service) SetUserStatus(ctx context.Context, actorUserID, userID, status string) error {
 	if status != "active" && status != "disabled" && status != "bet_banned" {
 		return ErrInvalidUserStatus
 	}
-	command, err := service.pool.Exec(ctx, `UPDATE users SET status=$2,updated_at=now() WHERE id=$1`, userID, status)
+	tx, err := service.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if command.RowsAffected() == 0 {
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('admin-role-management', 0))`); err != nil {
+		return err
+	}
+	var currentStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&currentStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrUserNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if status != "active" {
+		var targetIsAdmin bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+				WHERE ur.user_id=$1 AND r.code='admin'
+			)`, userID).Scan(&targetIsAdmin); err != nil {
+			return err
+		}
+		if targetIsAdmin && actorUserID == userID {
+			return ErrCannotDisableOwnAdmin
+		}
+		if targetIsAdmin && currentStatus == "active" {
+			var otherActiveAdmins int
+			if err := tx.QueryRow(ctx, `
+				SELECT count(DISTINCT ur.user_id)
+				FROM user_roles ur
+				JOIN roles r ON r.id=ur.role_id
+				JOIN users u ON u.id=ur.user_id
+				WHERE r.code='admin' AND u.status='active' AND ur.user_id<>$1`, userID).Scan(&otherActiveAdmins); err != nil {
+				return err
+			}
+			if otherActiveAdmins == 0 {
+				return ErrCannotDisableLastAdmin
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET status=$2,updated_at=now() WHERE id=$1`, userID, status); err != nil {
+		return err
+	}
+	if status != "active" {
+		if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }

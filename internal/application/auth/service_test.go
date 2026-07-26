@@ -328,7 +328,6 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM wallets WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM auth_identities WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM roles WHERE code = 'player' AND id NOT IN (SELECT role_id FROM user_roles)`)
 	})
 	if result.AccessToken == "" || result.UserID == "" || len(result.Roles) != 1 || result.Roles[0] != "player" {
 		t.Fatalf("register result = %+v", result)
@@ -396,7 +395,7 @@ func TestLoginIssuesTokenWithRoles(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	userID := uuid.NewString()
-	roleID := uuid.NewString()
+	var roleID string
 	loginName := "player-" + userID
 	password := "correct-horse-battery"
 	hash, err := identity.HashPassword(password)
@@ -411,9 +410,8 @@ func TestLoginIssuesTokenWithRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create identity: %v", err)
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO roles (id, code, description) VALUES ($1, 'player', 'player role')`, roleID)
-	if err != nil {
-		t.Fatalf("create role: %v", err)
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM roles WHERE code = 'player'`).Scan(&roleID); err != nil {
+		t.Fatalf("find player role: %v", err)
 	}
 	_, err = pool.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`, userID, roleID)
 	if err != nil {
@@ -421,7 +419,6 @@ func TestLoginIssuesTokenWithRoles(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM roles WHERE id = $1`, roleID)
 		_, _ = pool.Exec(ctx, `DELETE FROM auth_identities WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	})

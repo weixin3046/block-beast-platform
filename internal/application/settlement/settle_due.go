@@ -23,11 +23,11 @@ func (service *Service) SettleDueRounds(ctx context.Context, source ResultSource
 		return []DueSettlement{}, nil
 	}
 	rows, err := service.pool.Query(ctx, `
-		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at, game_types.rules
+		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at, rounds.result_at, game_types.rules
 		FROM rounds
 		JOIN game_types ON game_types.id = rounds.game_type_id
-		WHERE rounds.status IN ('closed', 'settling')
-		ORDER BY rounds.bet_closes_at, rounds.id
+		WHERE rounds.status IN ('closed', 'settling') AND rounds.result_at <= now()
+		ORDER BY rounds.result_at, rounds.id
 		LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func (service *Service) SettleDueRounds(ctx context.Context, source ResultSource
 	pending := make([]dueRound, 0)
 	for rows.Next() {
 		var item dueRound
-		if err := rows.Scan(&item.round.RoundID, &item.round.GameType, &item.round.Sequence, &item.round.Status, &item.round.BetClosesAt, &item.rules); err != nil {
+		if err := rows.Scan(&item.round.RoundID, &item.round.GameType, &item.round.Sequence, &item.round.Status, &item.round.BetClosesAt, &item.round.ResultAt, &item.rules); err != nil {
 			rows.Close()
 			return nil, err
 		}

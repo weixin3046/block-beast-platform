@@ -22,7 +22,7 @@ func (stubUserAdmin) ListUsers(context.Context, string, string, int) ([]operatio
 	return nil, nil
 }
 
-func (stubUserAdmin) SetUserStatus(context.Context, string, string) error {
+func (stubUserAdmin) SetUserStatus(context.Context, string, string, string) error {
 	return nil
 }
 

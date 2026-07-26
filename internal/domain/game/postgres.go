@@ -24,11 +24,11 @@ func (repository *PostgresRepository) Find(ctx context.Context, roundID string) 
 	var round Round
 	var outcome json.RawMessage
 	err := repository.pool.QueryRow(ctx, `
-		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at, rounds.settled_at, rounds.outcome
+		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at, rounds.result_at, rounds.settled_at, rounds.outcome
 		FROM rounds
 		JOIN game_types ON game_types.id = rounds.game_type_id
 		WHERE rounds.id = $1`, roundID).
-		Scan(&round.RoundID, &round.GameType, &round.Sequence, &round.Status, &round.BetClosesAt, &round.SettledAt, &outcome)
+		Scan(&round.RoundID, &round.GameType, &round.Sequence, &round.Status, &round.BetClosesAt, &round.ResultAt, &round.SettledAt, &outcome)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Round{}, ErrRoundNotFound
 	}
@@ -48,7 +48,7 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 		return []Round{}, nil
 	}
 	rows, err := repository.pool.Query(ctx, `
-		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at
+		SELECT rounds.id, game_types.code, rounds.sequence, rounds.status, rounds.bet_closes_at, rounds.result_at
 		FROM rounds
 		JOIN game_types ON game_types.id = rounds.game_type_id
 		WHERE rounds.status = 'open' AND game_types.code = $1
@@ -62,7 +62,7 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 	rounds := make([]Round, 0)
 	for rows.Next() {
 		var round Round
-		if err := rows.Scan(&round.RoundID, &round.GameType, &round.Sequence, &round.Status, &round.BetClosesAt); err != nil {
+		if err := rows.Scan(&round.RoundID, &round.GameType, &round.Sequence, &round.Status, &round.BetClosesAt, &round.ResultAt); err != nil {
 			return nil, err
 		}
 		rounds = append(rounds, round)

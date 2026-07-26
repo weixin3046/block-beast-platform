@@ -49,6 +49,9 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 	if found.RoundID != dueRoundID || found.GameType != "test-"+gameTypeID || found.Status != RoundOpen {
 		t.Fatalf("found round = %#v", found)
 	}
+	if found.ResultAt.Sub(found.BetClosesAt) != 5*time.Second {
+		t.Fatalf("result time gap = %s, want 5s", found.ResultAt.Sub(found.BetClosesAt))
+	}
 
 	closed, err := repository.CloseDue(ctx, time.Now().UTC(), 10)
 	if err != nil {
