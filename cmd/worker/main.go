@@ -29,6 +29,10 @@ var errWithdrawalProviderUnavailable = errors.New("withdrawal provider is unavai
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := cfg.ValidateWorker(); err != nil {
+		logger.Error("invalid worker configuration", "error", err)
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	pool, err := pgxpool.New(ctx, cfg.PostgresDSN)

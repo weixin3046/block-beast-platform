@@ -32,6 +32,10 @@ import (
 func main() {
 	cfg := config.Load()                                    // 加载配置文件
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)) // 创建JSON日志记录器
+	if err := cfg.ValidateAPI(); err != nil {
+		logger.Error("invalid API configuration", "error", err)
+		return
+	}
 	pool, err := pgxpool.New(context.Background(), cfg.PostgresDSN)
 	if err != nil {
 		logger.Error("api failed to connect to PostgreSQL", "error", err)

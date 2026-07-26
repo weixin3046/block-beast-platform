@@ -17,6 +17,10 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := cfg.ValidateRealtime(); err != nil {
+		logger.Error("invalid realtime configuration", "error", err)
+		return
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.WriteHeader(http.StatusOK)
