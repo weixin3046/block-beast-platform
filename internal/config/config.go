@@ -17,6 +17,7 @@ type Config struct {
 	RedisAddress           string
 	NATSURL                string
 	AuthTokenSecret        string
+	AuthStrictPassword     bool
 	AccessTokenTTL         time.Duration
 	RefreshTokenTTL        time.Duration
 	ChainWebhookSkew       time.Duration
@@ -29,8 +30,9 @@ type Config struct {
 }
 
 func Load() Config {
+	environment := valueOrDefault("APP_ENV", "development")
 	return Config{
-		Environment:            valueOrDefault("APP_ENV", "development"),
+		Environment:            environment,
 		APIAddress:             valueOrDefault("API_ADDRESS", ":8080"),
 		APIAllowedOrigins:      splitOrDefault("API_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
 		RealtimeAddress:        valueOrDefault("REALTIME_ADDRESS", ":8081"),
@@ -40,6 +42,7 @@ func Load() Config {
 		RedisAddress:           os.Getenv("REDIS_ADDRESS"),
 		NATSURL:                os.Getenv("NATS_URL"),
 		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),
+		AuthStrictPassword:     environment == "production" || boolOrDefault("AUTH_STRICT_PASSWORD_POLICY", false),
 		AccessTokenTTL:         durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:        durationOrDefault("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		ChainWebhookSkew:       durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
@@ -50,6 +53,14 @@ func Load() Config {
 		PQPAAPISecret:          os.Getenv("PQPA_API_SECRET"),
 		PQPAAssetSyncInterval:  durationOrDefault("PQPA_ASSET_SYNC_INTERVAL", time.Hour),
 	}
+}
+
+func boolOrDefault(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return strings.EqualFold(value, "true") || value == "1"
 }
 
 func splitOrDefault(key string, fallback []string) []string {

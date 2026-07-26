@@ -43,13 +43,14 @@ type SessionStore interface {
 }
 
 type Service struct {
-	credentials CredentialsReader
-	registrar   UserRegistrar
-	secret      []byte
-	ttl         time.Duration
-	now         func() time.Time
-	sessions    SessionStore
-	refreshTTL  time.Duration
+	credentials    CredentialsReader
+	registrar      UserRegistrar
+	secret         []byte
+	ttl            time.Duration
+	now            func() time.Time
+	sessions       SessionStore
+	refreshTTL     time.Duration
+	strictPassword bool
 }
 
 func (service *Service) WithSessions(sessions SessionStore, ttl time.Duration) *Service {
@@ -59,7 +60,12 @@ func (service *Service) WithSessions(sessions SessionStore, ttl time.Duration) *
 }
 
 func NewService(credentials CredentialsReader, secret string, ttl time.Duration) *Service {
-	return &Service{credentials: credentials, secret: []byte(secret), ttl: ttl, now: time.Now}
+	return &Service{credentials: credentials, secret: []byte(secret), ttl: ttl, now: time.Now, strictPassword: true}
+}
+
+func (service *Service) WithStrictPasswordPolicy(enabled bool) *Service {
+	service.strictPassword = enabled
+	return service
 }
 
 // WithRegistrar 装配注册能力；identity.PostgresRepository 同时满足两个接口。
@@ -78,8 +84,18 @@ type LoginResult struct {
 }
 
 // Login 校验登录名与密码，为激活账号签发携带角色的短期访问令牌。
+// 玩家入口拒绝任何同时具有后台角色的账号，避免同一身份跨端登录。
 // 登录名不存在时同样执行一次哈希校验，避免通过响应时间探测账号是否存在。
 func (service *Service) Login(ctx context.Context, loginName string, password string) (LoginResult, error) {
+	return service.login(ctx, loginName, password, playerLoginAllowed)
+}
+
+// LoginAdmin 只允许 admin/operator 从管理后台登录。
+func (service *Service) LoginAdmin(ctx context.Context, loginName string, password string) (LoginResult, error) {
+	return service.login(ctx, loginName, password, adminLoginAllowed)
+}
+
+func (service *Service) login(ctx context.Context, loginName string, password string, rolesAllowed func([]string) bool) (LoginResult, error) {
 	if len(service.secret) < 32 || service.ttl <= 0 {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
@@ -101,6 +117,10 @@ func (service *Service) Login(ctx context.Context, loginName string, password st
 	if err != nil {
 		return LoginResult{}, err
 	}
+	if !rolesAllowed(roles) {
+		// 不暴露账号是否存在、密码是否正确或具体角色。
+		return LoginResult{}, ErrInvalidCredentials
+	}
 	issuedAt := service.now().UTC()
 	token, err := identity.IssueAccessToken(service.secret, credentials.UserID, roles, issuedAt, service.ttl)
 	if err != nil {
@@ -116,6 +136,28 @@ func (service *Service) Login(ctx context.Context, loginName string, password st
 	return service.attachRefreshToken(ctx, result)
 }
 
+func playerLoginAllowed(roles []string) bool {
+	hasPlayer := false
+	for _, role := range roles {
+		switch role {
+		case identity.RoleAdmin, identity.RoleOperator:
+			return false
+		case identity.RolePlayer:
+			hasPlayer = true
+		}
+	}
+	return hasPlayer
+}
+
+func adminLoginAllowed(roles []string) bool {
+	for _, role := range roles {
+		if role == identity.RoleAdmin || role == identity.RoleOperator {
+			return true
+		}
+	}
+	return false
+}
+
 // Register 创建新玩家账号（用户、密码凭证、player 角色、默认货币零余额钱包）
 // 并直接签发访问令牌，注册完成即可调用业务接口。
 func (service *Service) Register(ctx context.Context, loginName string, displayName string, password string) (LoginResult, error) {
@@ -124,6 +166,9 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 	}
 	if !loginNamePattern.MatchString(loginName) {
 		return LoginResult{}, ErrInvalidLoginName
+	}
+	if service.strictPassword && len(password) < 12 {
+		return LoginResult{}, ErrInvalidPassword
 	}
 	hash, err := identity.HashPassword(password)
 	if err != nil {

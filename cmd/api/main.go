@@ -48,6 +48,7 @@ func main() {
 	} else {
 		identityRepository := identity.NewPostgresRepository(pool)
 		authService := auth.NewService(identityRepository, cfg.AuthTokenSecret, cfg.AccessTokenTTL).
+			WithStrictPasswordPolicy(cfg.AuthStrictPassword).
 			WithRegistrar(identityRepository).
 			WithSessions(identityRepository, cfg.RefreshTokenTTL)
 		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService), httpapi.WithSessions(authService))

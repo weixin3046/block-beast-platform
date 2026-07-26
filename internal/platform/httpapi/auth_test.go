@@ -125,6 +125,42 @@ type stubRegisterService struct {
 	err    error
 }
 
+type stubLoginService struct {
+	playerCalls int
+	adminCalls  int
+}
+
+func (stub *stubLoginService) Login(context.Context, string, string) (auth.LoginResult, error) {
+	stub.playerCalls++
+	return auth.LoginResult{AccessToken: "player-token", UserID: "player-1", Roles: []string{identity.RolePlayer}}, nil
+}
+
+func (stub *stubLoginService) LoginAdmin(context.Context, string, string) (auth.LoginResult, error) {
+	stub.adminCalls++
+	return auth.LoginResult{AccessToken: "admin-token", UserID: "admin-1", Roles: []string{identity.RoleAdmin}}, nil
+}
+
+func TestLoginEndpointsUseSeparateAudiences(t *testing.T) {
+	logins := &stubLoginService{}
+	server := New(
+		config.Config{},
+		slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		nil, readinessChecker{}, nil, nil, nil, nil,
+		WithLogin(logins),
+	)
+	for _, endpoint := range []string{"/v1/auth/login", "/v1/admin/auth/login"} {
+		request := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{"login_name":"user","password":"password"}`))
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", endpoint, response.Code)
+		}
+	}
+	if logins.playerCalls != 1 || logins.adminCalls != 1 {
+		t.Fatalf("login calls = player:%d admin:%d", logins.playerCalls, logins.adminCalls)
+	}
+}
+
 func (stub stubRegisterService) Register(_ context.Context, _ string, _ string, _ string) (auth.LoginResult, error) {
 	return stub.result, stub.err
 }

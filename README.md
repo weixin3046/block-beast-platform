@@ -61,7 +61,8 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`。当前仅提供�
 | `GET /readyz` | PostgreSQL 就绪检查。 |
 | `GET /v1/platform` | 查询当前环境与领域列表。 |
 | `POST /v1/auth/register` | 注册玩家账号（创建用户、player 角色和 USDT 零余额钱包），直接返回访问令牌。 |
-| `POST /v1/auth/login` | 密码登录，签发短期 JWT 和可轮换刷新令牌。 |
+| `POST /v1/auth/login` | 玩家端登录；拒绝 admin/operator 后台账号。 |
+| `POST /v1/admin/auth/login` | 管理后台登录；仅允许 admin/operator。 |
 | `POST /v1/auth/refresh` | 轮换刷新令牌并签发新访问令牌，旧刷新令牌立即失效。 |
 | `POST /v1/auth/logout` | 撤销刷新令牌并退出当前会话。 |
 | `GET /v1/announcements` | 查询当前生效的玩家公告。 |

@@ -36,6 +36,7 @@ migration_is_present() {
     0010) psql_command -Atqc "SELECT to_regclass('public.commission_adjustments') IS NOT NULL" ;;
     0011) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'withdrawals' AND column_name = 'provider_chain_token_id')" ;;
     0012) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'provider_supported_assets' AND column_name = 'support_deposit')" ;;
+    0013) psql_command -Atqc "SELECT (SELECT count(DISTINCT code) FROM roles WHERE code IN ('player', 'operator', 'admin')) = 3" ;;
     *) printf 'f\n' ;;
   esac
 }

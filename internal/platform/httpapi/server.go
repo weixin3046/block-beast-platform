@@ -48,6 +48,7 @@ type Server struct {
 
 type LoginService interface {
 	Login(ctx context.Context, loginName string, password string) (auth.LoginResult, error)
+	LoginAdmin(ctx context.Context, loginName string, password string) (auth.LoginResult, error)
 }
 
 type RegisterService interface {
@@ -136,6 +137,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/assets", server.assets)
 	mux.HandleFunc("GET /v1/announcements", server.announcements)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
+	mux.HandleFunc("POST /v1/admin/auth/login", server.adminLogin)
 	mux.HandleFunc("POST /v1/auth/register", server.register)
 	mux.HandleFunc("POST /v1/auth/refresh", server.refresh)
 	mux.HandleFunc("POST /v1/auth/logout", server.logout)
@@ -278,6 +280,14 @@ func (server *Server) register(writer http.ResponseWriter, request *http.Request
 }
 
 func (server *Server) login(writer http.ResponseWriter, request *http.Request) {
+	server.loginForAudience(writer, request, false)
+}
+
+func (server *Server) adminLogin(writer http.ResponseWriter, request *http.Request) {
+	server.loginForAudience(writer, request, true)
+}
+
+func (server *Server) loginForAudience(writer http.ResponseWriter, request *http.Request, admin bool) {
 	if server.logins == nil {
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "authentication is unavailable"})
 		return
@@ -292,14 +302,24 @@ func (server *Server) login(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "login_name and password are required"})
 		return
 	}
-	result, err := server.logins.Login(request.Context(), input.LoginName, input.Password)
+	var result auth.LoginResult
+	var err error
+	if admin {
+		result, err = server.logins.LoginAdmin(request.Context(), input.LoginName, input.Password)
+	} else {
+		result, err = server.logins.Login(request.Context(), input.LoginName, input.Password)
+	}
+	auditAction := "auth.player_login"
+	if admin {
+		auditAction = "auth.admin_login"
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
-		server.recordAudit(request.Context(), audit.Entry{Action: "auth.login", TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "invalid_credentials"}})
+		server.recordAudit(request.Context(), audit.Entry{Action: auditAction, TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "invalid_credentials"}})
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	case errors.Is(err, auth.ErrAccountDisabled):
-		server.recordAudit(request.Context(), audit.Entry{Action: "auth.login", TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "account_disabled"}})
+		server.recordAudit(request.Context(), audit.Entry{Action: auditAction, TargetType: "user", TargetID: input.LoginName, Payload: map[string]string{"outcome": "failure", "reason": "account_disabled"}})
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
 	case errors.Is(err, auth.ErrAuthNotConfigured):
@@ -309,7 +329,7 @@ func (server *Server) login(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to login"})
 		return
 	}
-	server.recordAudit(request.Context(), audit.Entry{ActorUserID: result.UserID, Action: "auth.login", TargetType: "user", TargetID: result.UserID, Payload: map[string]string{"outcome": "success"}})
+	server.recordAudit(request.Context(), audit.Entry{ActorUserID: result.UserID, Action: auditAction, TargetType: "user", TargetID: result.UserID, Payload: map[string]string{"outcome": "success"}})
 	writeJSON(writer, http.StatusOK, result)
 }
 

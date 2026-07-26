@@ -24,7 +24,7 @@ func TestLoginRejectsUnconfiguredService(t *testing.T) {
 type stubRegistrar struct{}
 
 func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ []string) (string, error) {
-	return "", nil
+	return "user-1", nil
 }
 
 type stubCredentials struct {
@@ -37,6 +37,56 @@ func (stubCredentials) FindPasswordCredentials(context.Context, string) (identit
 
 func (credentials stubCredentials) UserRoles(context.Context, string) ([]string, error) {
 	return credentials.roles, nil
+}
+
+type loginCredentials struct {
+	passwordHash string
+	roles        []string
+}
+
+func (credentials loginCredentials) FindPasswordCredentials(context.Context, string) (identity.PasswordCredentials, error) {
+	return identity.PasswordCredentials{UserID: "user-1", Status: "active", PasswordHash: credentials.passwordHash}, nil
+}
+
+func (credentials loginCredentials) UserRoles(context.Context, string) ([]string, error) {
+	return credentials.roles, nil
+}
+
+func TestLoginSeparatesPlayerAndAdminAudiences(t *testing.T) {
+	hash, err := identity.HashPassword("correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		roles      []string
+		adminLogin bool
+		wantOK     bool
+	}{
+		{name: "player on player endpoint", roles: []string{identity.RolePlayer}, wantOK: true},
+		{name: "player on admin endpoint", roles: []string{identity.RolePlayer}, adminLogin: true},
+		{name: "admin on admin endpoint", roles: []string{identity.RoleAdmin}, adminLogin: true, wantOK: true},
+		{name: "operator on admin endpoint", roles: []string{identity.RoleOperator}, adminLogin: true, wantOK: true},
+		{name: "admin on player endpoint", roles: []string{identity.RoleAdmin}},
+		{name: "admin player on player endpoint", roles: []string{identity.RolePlayer, identity.RoleAdmin}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			service := NewService(loginCredentials{passwordHash: hash, roles: testCase.roles}, testSecret, time.Minute)
+			var err error
+			if testCase.adminLogin {
+				_, err = service.LoginAdmin(context.Background(), "user", "correct-horse-battery")
+			} else {
+				_, err = service.Login(context.Background(), "user", "correct-horse-battery")
+			}
+			if testCase.wantOK && err != nil {
+				t.Fatalf("login error = %v", err)
+			}
+			if !testCase.wantOK && !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("login error = %v, want ErrInvalidCredentials", err)
+			}
+		})
+	}
 }
 
 type memorySessions struct {
@@ -111,6 +161,15 @@ func TestRegisterValidatesInput(t *testing.T) {
 	service := NewService(nil, testSecret, time.Minute)
 	if _, err := service.Register(context.Background(), "valid-name", "", "valid-password-12"); !errors.Is(err, ErrAuthNotConfigured) {
 		t.Fatalf("missing registrar error = %v, want ErrAuthNotConfigured", err)
+	}
+}
+
+func TestDevelopmentCanDisablePasswordLengthPolicy(t *testing.T) {
+	service := NewService(nil, testSecret, time.Minute).
+		WithStrictPasswordPolicy(false).
+		WithRegistrar(stubRegistrar{})
+	if _, err := service.Register(context.Background(), "dev-user", "", "123"); err != nil {
+		t.Fatalf("development registration error = %v", err)
 	}
 }
 

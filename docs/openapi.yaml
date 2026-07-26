@@ -77,7 +77,7 @@ paths:
       tags: [Auth]
       operationId: register
       summary: 注册玩家账号并签发访问令牌
-      description: 在单个事务中创建用户、密码凭证、player 角色和 USDT/POINTS/STAMINA 三种零余额钱包，注册完成即返回访问令牌。注册会写入审计日志。
+      description: 在单个事务中创建用户、密码凭证、player 角色和 USDT/POINTS/STAMINA 三种零余额钱包，注册完成即返回访问令牌。开发环境可通过配置暂时关闭密码长度规则；production 强制至少 12 位。注册会写入审计日志。
       requestBody:
         required: true
         content:
@@ -105,8 +105,8 @@ paths:
     post:
       tags: [Auth]
       operationId: login
-      summary: 密码登录并签发访问令牌
-      description: 校验登录名与密码，为激活账号签发携带角色的短期 JWT。登录成功与失败均会写入审计日志。
+      summary: 玩家端密码登录
+      description: 仅允许具有 player 且不具有 admin/operator 的激活账号。后台账号即使同时保留 player 角色也会被拒绝。
       requestBody:
         required: true
         content:
@@ -116,6 +116,33 @@ paths:
             example:
               login_name: player-001
               password: correct-horse-battery
+      responses:
+        '200':
+          description: 登录成功，返回访问令牌。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/admin/auth/login:
+    post:
+      tags: [Auth, Admin]
+      operationId: adminLogin
+      summary: 管理后台密码登录
+      description: 仅允许具有 admin 或 operator 角色的激活账号；玩家账号返回与凭证错误相同的 401，避免泄露账号角色。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
           description: 登录成功，返回访问令牌。
@@ -1136,8 +1163,8 @@ components:
           description: 展示名，缺省与登录名相同。
         password:
           type: string
-          minLength: 12
           format: password
+          description: development 可暂时不限制长度；production 强制至少 12 位。
     LoginRequest:
       type: object
       additionalProperties: false
