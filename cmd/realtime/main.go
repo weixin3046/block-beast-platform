@@ -34,7 +34,13 @@ func main() {
 	defer hub.Close()
 	mux.Handle("GET /v1/ws", hub)
 
-	server := &http.Server{Addr: cfg.RealtimeAddress, Handler: mux}
+	server := &http.Server{
+		Addr:              cfg.RealtimeAddress,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
+	}
 	go func() {
 		logger.Info("realtime gateway started", "address", cfg.RealtimeAddress)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

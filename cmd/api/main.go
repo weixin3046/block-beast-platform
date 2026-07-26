@@ -96,7 +96,15 @@ func main() {
 	} else {
 		options = append(options, httpapi.WithChainDeposits(cfg.PQPAAPIKey, cfg.PQPAAPISecret, cfg.ChainWebhookSkew, chainService), httpapi.WithChainWithdrawalStatuses(chainService))
 	}
-	server := &http.Server{Addr: cfg.APIAddress, Handler: httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService, cancellationService, options...).Handler()} // 创建HTTP服务器实例
+	server := &http.Server{
+		Addr:              cfg.APIAddress,
+		Handler:           httpapi.New(cfg, logger, bettingService, pool, wallet.NewPostgresRepository(pool), game.NewPostgresRepository(pool), bettingService, cancellationService, options...).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
+	}
 
 	go func() {
 		logger.Info("api started", "address", cfg.APIAddress, "environment", cfg.Environment)
