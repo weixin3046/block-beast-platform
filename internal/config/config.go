@@ -43,6 +43,7 @@ type Config struct {
 	UploadMaxBytes         int64
 	UploadURLTTL           time.Duration
 	LeaderboardRefresh     time.Duration
+	RedPacketTTL           time.Duration
 }
 
 func Load() Config {
@@ -83,6 +84,7 @@ func Load() Config {
 		UploadMaxBytes:         positiveInt64OrDefault("UPLOAD_MAX_BYTES", 10<<20),
 		UploadURLTTL:           durationOrDefault("UPLOAD_URL_TTL", 10*time.Minute),
 		LeaderboardRefresh:     durationOrDefault("LEADERBOARD_REFRESH_INTERVAL", time.Minute),
+		RedPacketTTL:           durationOrDefault("RED_PACKET_TTL", 24*time.Hour),
 	}
 }
 

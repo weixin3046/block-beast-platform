@@ -204,4 +204,12 @@ Worker 会把超时未确认记录批量标记为 `expired`。对象存储桶还
 
 Worker 默认每分钟重建当日快照，因此结算完成到榜单变化可能存在短暂延迟。退款投注不进入榜单。
 
+## 聊天室红包
+
+- `POST /v1/chat/rooms/{roomID}/red-packets`：使用 `USDT` 或 `POINTS` 创建红包。请求包含 `client_request_id`、`currency`、`total_minor`、`packet_count` 和可选 `greeting`。
+- `GET /v1/red-packets/{packetID}`：房间成员查询红包剩余份数和状态。
+- `POST /v1/red-packets/{packetID}/claim`：领取红包；同一用户重复请求返回第一次领取记录，不会重复入账。
+
+创建时总金额立即从发送者可用余额扣除并进入红包托管。金额必须至少等于份数，最多 100 份；发送者不能领取自己的红包。每次领取至少一个最小货币单位，最后一份获得全部剩余金额。默认 24 小时过期，Worker 将未领取余额退回发送者原币种钱包。创建、领取、退款均在同一事务中更新钱包、写不可变账本和 outbox 事件。
+
 游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用 QuickNode JSON-RPC。前端不得自行计算或替代开奖结果。

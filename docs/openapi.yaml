@@ -39,6 +39,8 @@ tags:
     description: S3 兼容对象存储直传与确认。
   - name: Leaderboards
     description: 已结算有效投注的 UTC 每日排行榜。
+  - name: RedPackets
+    description: 聊天室红包创建、领取和查询。
 paths:
   /healthz:
     get:
@@ -1169,6 +1171,86 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/LeaderboardEntry' }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /v1/chat/rooms/{roomID}/red-packets:
+    post:
+      tags: [RedPackets]
+      summary: 幂等创建聊天室红包
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: roomID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [client_request_id, currency, total_minor, packet_count]
+              properties:
+                client_request_id: { type: string, maxLength: 128 }
+                currency: { type: string, enum: [USDT, POINTS] }
+                greeting: { type: string, maxLength: 100 }
+                total_minor: { type: integer, format: int64, minimum: 1 }
+                packet_count: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '201':
+          description: 红包已创建并扣除发送者余额。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RedPacket' }
+        '200':
+          description: 幂等重试，返回原红包。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RedPacket' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/red-packets/{packetID}:
+    get:
+      tags: [RedPackets]
+      summary: 查询有权访问的红包
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: packetID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 红包状态。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RedPacket' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/red-packets/{packetID}/claim:
+    post:
+      tags: [RedPackets]
+      summary: 幂等领取红包
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: packetID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 首次领取并入账。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RedPacketClaim' }
+        '200':
+          description: 重复领取，返回原领取记录。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RedPacketClaim' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     bearerAuth:
@@ -1266,6 +1348,33 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    RedPacket:
+      type: object
+      required: [id, room_id, sender_user_id, client_request_id, currency, greeting, total_minor, remaining_minor, packet_count, claimed_count, status, expires_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        room_id: { type: string, format: uuid }
+        sender_user_id: { type: string, format: uuid }
+        client_request_id: { type: string }
+        currency: { type: string, enum: [USDT, POINTS] }
+        greeting: { type: string }
+        total_minor: { type: integer, format: int64 }
+        remaining_minor: { type: integer, format: int64 }
+        packet_count: { type: integer }
+        claimed_count: { type: integer }
+        status: { type: string, enum: [active, exhausted, refunded] }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    RedPacketClaim:
+      type: object
+      required: [id, red_packet_id, user_id, currency, amount_minor, claimed_at]
+      properties:
+        id: { type: string, format: uuid }
+        red_packet_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        currency: { type: string, enum: [USDT, POINTS] }
+        amount_minor: { type: integer, format: int64, minimum: 1 }
+        claimed_at: { type: string, format: date-time }
     LeaderboardEntry:
       type: object
       required: [rank, user_id, display_name, currency, effective_stake_minor, payout_minor, net_profit_minor, bet_count, win_count]

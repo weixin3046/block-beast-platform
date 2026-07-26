@@ -20,6 +20,7 @@ import (
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
+	"github.com/block-beast/platform/internal/application/redpacket"
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/application/task"       // 任务/签到应用服务
 	"github.com/block-beast/platform/internal/application/uploads"
@@ -91,6 +92,7 @@ func main() {
 	options = append(options, httpapi.WithWithdrawals(chainService))
 	options = append(options, httpapi.WithChat(chat.NewService(pool)))
 	options = append(options, httpapi.WithLeaderboards(leaderboard.NewService(pool)))
+	options = append(options, httpapi.WithRedPackets(redpacket.NewService(pool, cfg.RedPacketTTL)))
 	if cfg.ObjectStorageEndpoint != "" || cfg.ObjectStorageBucket != "" || cfg.ObjectStorageAccessKey != "" || cfg.ObjectStorageSecretKey != "" {
 		storageClient, err := objectstorage.NewClient(objectstorage.Config{
 			Endpoint: cfg.ObjectStorageEndpoint, Region: cfg.ObjectStorageRegion,

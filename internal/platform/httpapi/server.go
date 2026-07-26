@@ -47,6 +47,7 @@ type Server struct {
 	chat             ChatService
 	uploads          UploadService
 	leaderboards     LeaderboardService
+	redPackets       RedPacketService
 }
 
 type LoginService interface {
@@ -154,6 +155,9 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/uploads/{uploadID}/confirm", server.protect(server.confirmUpload))
 	mux.HandleFunc("GET /v1/uploads/{uploadID}", server.protect(server.upload))
 	mux.HandleFunc("GET /v1/leaderboards/daily", server.protect(server.dailyLeaderboard))
+	mux.HandleFunc("POST /v1/chat/rooms/{roomID}/red-packets", server.protect(server.createRedPacket))
+	mux.HandleFunc("GET /v1/red-packets/{packetID}", server.protect(server.redPacket))
+	mux.HandleFunc("POST /v1/red-packets/{packetID}/claim", server.protect(server.claimRedPacket))
 	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("GET /v1/agents/me", server.protect(server.agentRelation))
 	mux.HandleFunc("GET /v1/agents/me/commissions", server.protect(server.commissions))

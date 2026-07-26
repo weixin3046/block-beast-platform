@@ -16,6 +16,7 @@ import (
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/outbox"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
+	"github.com/block-beast/platform/internal/application/redpacket"
 	"github.com/block-beast/platform/internal/application/settlement"
 	"github.com/block-beast/platform/internal/application/uploads"
 	"github.com/block-beast/platform/internal/config"
@@ -70,6 +71,7 @@ func main() {
 	roundRepository := game.NewPostgresRepository(pool)
 	settlementService := settlement.NewService(pool)
 	uploadMaintenance := uploads.NewService(pool, nil, cfg.UploadMaxBytes, cfg.UploadURLTTL)
+	redPacketService := redpacket.NewService(pool, cfg.RedPacketTTL)
 	leaderboardService := leaderboard.NewService(pool)
 	leaderboardTicker := time.NewTicker(cfg.LeaderboardRefresh)
 	defer leaderboardTicker.Stop()
@@ -84,6 +86,7 @@ func main() {
 	reconcileWithdrawals(ctx, logger, withdrawalSender)
 	expirePendingUploads(ctx, logger, uploadMaintenance)
 	refreshDailyLeaderboard(ctx, logger, leaderboardService)
+	refundExpiredRedPackets(ctx, logger, redPacketService)
 	lastStats := natsjs.ConsumerStats{}
 	var assetSync *pqpaassets.Service
 	var assetTicker *time.Ticker
@@ -106,12 +109,24 @@ func main() {
 			processPending(logger, processor)
 			reconcileWithdrawals(ctx, logger, withdrawalSender)
 			expirePendingUploads(ctx, logger, uploadMaintenance)
+			refundExpiredRedPackets(ctx, logger, redPacketService)
 			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
 		case <-leaderboardTicker.C:
 			refreshDailyLeaderboard(ctx, logger, leaderboardService)
 		}
+	}
+}
+
+func refundExpiredRedPackets(ctx context.Context, logger *slog.Logger, service *redpacket.Service) {
+	refunded, err := service.RefundExpired(ctx, 100)
+	if err != nil {
+		logger.Error("expired red packet refund failed", "error", err)
+		return
+	}
+	if refunded > 0 {
+		logger.Info("expired red packets refunded", "count", refunded)
 	}
 }
 

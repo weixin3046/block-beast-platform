@@ -42,6 +42,7 @@ migration_is_present() {
     0016) psql_command -Atqc "SELECT to_regclass('public.chat_room_members') IS NOT NULL" ;;
     0017) psql_command -Atqc "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='uploads' AND column_name='status')" ;;
     0018) psql_command -Atqc "SELECT to_regclass('public.leaderboard_daily') IS NOT NULL" ;;
+    0019) psql_command -Atqc "SELECT to_regclass('public.red_packets') IS NOT NULL" ;;
     *) printf 'f\n' ;;
   esac
 }

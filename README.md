@@ -71,6 +71,8 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `POST /v1/uploads/authorize` | 获取 S3 兼容对象存储短时 PUT 签名。 |
 | `POST /v1/uploads/{upload_id}/confirm` | 通过 HEAD 校验大小和类型后确认上传。 |
 | `GET /v1/leaderboards/daily` | 查询 UTC 日榜，支持有效投注、净收益和胜场排序。 |
+| `POST /v1/chat/rooms/{room_id}/red-packets` | 使用 USDT 或积分余额幂等创建聊天室红包。 |
+| `POST /v1/red-packets/{packet_id}/claim` | 幂等领取红包，过期未领金额由 Worker 自动退款。 |
 | `GET /v1/announcements` | 查询当前生效的玩家公告。 |
 | `GET/POST /v1/admin/announcements` | 后台查询或创建公告。仅 operator/admin。 |
 | `PUT /v1/admin/announcements/{announcement_id}` | 后台更新公告内容、启用状态和展示时间。仅 operator/admin。 |

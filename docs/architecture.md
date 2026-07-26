@@ -19,7 +19,7 @@
 | 余额、扣除投注、派奖、退款、充值及提现 | Wallet | 账本记录与余额更新必须处于同一个 PostgreSQL 事务中。 |
 | 轮次、停止投注、TRON/K 线结果及结算 | Game / Worker | OKX `candle1m` WebSocket 为 K 线主通道、REST 为断线补偿；TRON 区块通过 QuickNode JSON-RPC 查询。通过轮次版本和唯一结算键保证结算幂等。 |
 | 代理层级与返水 | Agent / Worker | 佣金来源必须是已结算投注，且只能被唯一记录一次。 |
-| 聊天、客服、红包及推送 | Realtime | 先持久化消息记录，再通过 Redis/NATS 扇出。 |
+| 聊天、客服、红包及推送 | Realtime | 消息先持久化再通过 NATS 扇出；红包扣款、领取和过期退款必须与钱包账本及 outbox 位于同一事务。 |
 | TRON 监听、K 线订阅和 PQPA 回调 | Chain / Worker | 必须验证回调签名、服务商事件 ID 和交易哈希，并保证幂等。 |
 | 上传与对象存储 | Operations | S3 兼容存储凭证仅保留在服务端；客户端使用短时 SigV4 PUT URL，服务端通过 HEAD 核对类型和大小后才确认元数据。 |
 | 定时任务与脚本 | Worker | 使用可靠的任务状态、重试、退避和死信处理机制。 |
