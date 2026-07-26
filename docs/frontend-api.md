@@ -193,4 +193,15 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 允许 JPEG、PNG、WebP 和 PDF，默认最大 10 MiB、签名有效期 10 分钟。前端不能把 `pending` 对象当成可用文件；授权过期或对象元数据不匹配时确认接口返回 409。
 Worker 会把超时未确认记录批量标记为 `expired`。对象存储桶还应配置生命周期规则，自动清理未被业务引用的过期对象。
 
+## 每日排行榜
+
+`GET /v1/leaderboards/daily?date=2026-07-26&currency=USDT&metric=profit&limit=50`
+返回 UTC 自然日排行榜。`currency` 必须是 `USDT` 或 `POINTS`；`metric` 支持：
+
+- `turnover`：已结算且未退款投注的有效投注额，默认值。
+- `profit`：派奖减去有效投注额，与钱包当前余额无关。
+- `wins`：中奖投注数量。
+
+Worker 默认每分钟重建当日快照，因此结算完成到榜单变化可能存在短暂延迟。退款投注不进入榜单。
+
 游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用 QuickNode JSON-RPC。前端不得自行计算或替代开奖结果。

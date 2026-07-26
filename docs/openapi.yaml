@@ -37,6 +37,8 @@ tags:
     description: 公共聊天与客服会话。
   - name: Uploads
     description: S3 兼容对象存储直传与确认。
+  - name: Leaderboards
+    description: 已结算有效投注的 UTC 每日排行榜。
 paths:
   /healthz:
     get:
@@ -1139,6 +1141,34 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '502':
           description: 对象存储暂时不可用。
+  /v1/leaderboards/daily:
+    get:
+      tags: [Leaderboards]
+      summary: 查询 UTC 每日排行榜
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+        - name: currency
+          in: query
+          required: true
+          schema: { type: string, enum: [USDT, POINTS] }
+        - name: metric
+          in: query
+          schema: { type: string, enum: [turnover, profit, wins], default: turnover }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: 排行榜。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LeaderboardEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 components:
   securitySchemes:
     bearerAuth:
@@ -1236,6 +1266,19 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    LeaderboardEntry:
+      type: object
+      required: [rank, user_id, display_name, currency, effective_stake_minor, payout_minor, net_profit_minor, bet_count, win_count]
+      properties:
+        rank: { type: integer, format: int64, minimum: 1 }
+        user_id: { type: string, format: uuid }
+        display_name: { type: string }
+        currency: { type: string, enum: [USDT, POINTS] }
+        effective_stake_minor: { type: integer, format: int64 }
+        payout_minor: { type: integer, format: int64 }
+        net_profit_minor: { type: integer, format: int64 }
+        bet_count: { type: integer, format: int64 }
+        win_count: { type: integer, format: int64 }
     Upload:
       type: object
       required: [id, owner_user_id, storage_key, content_type, size_bytes, status, created_at]

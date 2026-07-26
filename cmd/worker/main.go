@@ -13,6 +13,7 @@ import (
 	"time"
 
 	chainapp "github.com/block-beast/platform/internal/application/chain"
+	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/outbox"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/settlement"
@@ -69,6 +70,9 @@ func main() {
 	roundRepository := game.NewPostgresRepository(pool)
 	settlementService := settlement.NewService(pool)
 	uploadMaintenance := uploads.NewService(pool, nil, cfg.UploadMaxBytes, cfg.UploadURLTTL)
+	leaderboardService := leaderboard.NewService(pool)
+	leaderboardTicker := time.NewTicker(cfg.LeaderboardRefresh)
+	defer leaderboardTicker.Stop()
 	resultSource := settlement.NewCompositeResultSourceWithWebSocket(cfg.TronRPCURL, cfg.OkxRESTURL, cfg.OkxWebSocketURL)
 	defer resultSource.Close()
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
@@ -79,6 +83,7 @@ func main() {
 	processPending(logger, processor)
 	reconcileWithdrawals(ctx, logger, withdrawalSender)
 	expirePendingUploads(ctx, logger, uploadMaintenance)
+	refreshDailyLeaderboard(ctx, logger, leaderboardService)
 	lastStats := natsjs.ConsumerStats{}
 	var assetSync *pqpaassets.Service
 	var assetTicker *time.Ticker
@@ -104,8 +109,19 @@ func main() {
 			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
+		case <-leaderboardTicker.C:
+			refreshDailyLeaderboard(ctx, logger, leaderboardService)
 		}
 	}
+}
+
+func refreshDailyLeaderboard(ctx context.Context, logger *slog.Logger, service *leaderboard.Service) {
+	entries, err := service.RefreshDaily(ctx, time.Now().UTC())
+	if err != nil {
+		logger.Error("daily leaderboard refresh failed", "error", err)
+		return
+	}
+	logger.Info("daily leaderboard refreshed", "entries", entries)
 }
 
 func expirePendingUploads(ctx context.Context, logger *slog.Logger, service *uploads.Service) {

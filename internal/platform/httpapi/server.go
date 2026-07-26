@@ -46,6 +46,7 @@ type Server struct {
 	gameAdmin        GameAdminService
 	chat             ChatService
 	uploads          UploadService
+	leaderboards     LeaderboardService
 }
 
 type LoginService interface {
@@ -152,6 +153,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/uploads/authorize", server.protect(server.authorizeUpload))
 	mux.HandleFunc("POST /v1/uploads/{uploadID}/confirm", server.protect(server.confirmUpload))
 	mux.HandleFunc("GET /v1/uploads/{uploadID}", server.protect(server.upload))
+	mux.HandleFunc("GET /v1/leaderboards/daily", server.protect(server.dailyLeaderboard))
 	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("GET /v1/agents/me", server.protect(server.agentRelation))
 	mux.HandleFunc("GET /v1/agents/me/commissions", server.protect(server.commissions))

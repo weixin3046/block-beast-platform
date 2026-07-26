@@ -42,6 +42,7 @@ type Config struct {
 	ObjectStorageSecretKey string
 	UploadMaxBytes         int64
 	UploadURLTTL           time.Duration
+	LeaderboardRefresh     time.Duration
 }
 
 func Load() Config {
@@ -81,6 +82,7 @@ func Load() Config {
 		ObjectStorageSecretKey: os.Getenv("OBJECT_STORAGE_SECRET_KEY"),
 		UploadMaxBytes:         positiveInt64OrDefault("UPLOAD_MAX_BYTES", 10<<20),
 		UploadURLTTL:           durationOrDefault("UPLOAD_URL_TTL", 10*time.Minute),
+		LeaderboardRefresh:     durationOrDefault("LEADERBOARD_REFRESH_INTERVAL", time.Minute),
 	}
 }
 

@@ -70,6 +70,7 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `GET/POST /v1/chat/rooms/{room_id}/messages` | 查询或幂等发送有权限访问的聊天消息。 |
 | `POST /v1/uploads/authorize` | 获取 S3 兼容对象存储短时 PUT 签名。 |
 | `POST /v1/uploads/{upload_id}/confirm` | 通过 HEAD 校验大小和类型后确认上传。 |
+| `GET /v1/leaderboards/daily` | 查询 UTC 日榜，支持有效投注、净收益和胜场排序。 |
 | `GET /v1/announcements` | 查询当前生效的玩家公告。 |
 | `GET/POST /v1/admin/announcements` | 后台查询或创建公告。仅 operator/admin。 |
 | `PUT /v1/admin/announcements/{announcement_id}` | 后台更新公告内容、启用状态和展示时间。仅 operator/admin。 |
