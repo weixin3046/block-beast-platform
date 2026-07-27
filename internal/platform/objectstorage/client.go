@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -27,6 +28,15 @@ type ObjectInfo struct {
 	SizeBytes   int64
 	ContentType string
 }
+
+type ReadSeekCloser interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+}
+
+var ErrSizeMismatch = errors.New("uploaded object size does not match authorization")
+var ErrContentTypeMismatch = errors.New("uploaded object content does not match declared type")
 
 type Client struct {
 	config Config

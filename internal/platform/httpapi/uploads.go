@@ -4,15 +4,82 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/block-beast/platform/internal/application/uploads"
+	"github.com/block-beast/platform/internal/platform/objectstorage"
 )
 
 type UploadService interface {
 	Authorize(ctx context.Context, ownerUserID, contentType string, sizeBytes int64) (uploads.Authorization, error)
 	Confirm(ctx context.Context, uploadID, ownerUserID string) (uploads.Upload, error)
 	Find(ctx context.Context, uploadID, ownerUserID string) (uploads.Upload, error)
+	PutContent(ctx context.Context, uploadID, ownerUserID, contentType string, source io.Reader) (uploads.Upload, error)
+	OpenContent(ctx context.Context, uploadID, ownerUserID string) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error)
+}
+
+func (server *Server) putUploadContent(writer http.ResponseWriter, request *http.Request) {
+	if server.uploads == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "uploads are unavailable"})
+		return
+	}
+	claims, ok := ClaimsFromContext(request.Context())
+	if !ok {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	maxBytes := server.config.UploadMaxBytes
+	if maxBytes <= 0 {
+		maxBytes = 10 << 20
+	}
+	body := http.MaxBytesReader(writer, request.Body, maxBytes+1)
+	result, err := server.uploads.PutContent(
+		request.Context(), request.PathValue("uploadID"), claims.Subject,
+		request.Header.Get("Content-Type"), body,
+	)
+	switch {
+	case errors.Is(err, uploads.ErrUploadNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, uploads.ErrUploadExpired), errors.Is(err, uploads.ErrObjectMismatch):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, uploads.ErrContentOperationUnsupported):
+		writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to store upload"})
+	default:
+		writeJSON(writer, http.StatusOK, result)
+	}
+}
+
+func (server *Server) downloadUploadContent(writer http.ResponseWriter, request *http.Request) {
+	if server.uploads == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "uploads are unavailable"})
+		return
+	}
+	claims, ok := ClaimsFromContext(request.Context())
+	if !ok {
+		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	content, info, err := server.uploads.OpenContent(request.Context(), request.PathValue("uploadID"), claims.Subject)
+	switch {
+	case errors.Is(err, uploads.ErrUploadNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, uploads.ErrUploadNotReady):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, uploads.ErrContentOperationUnsupported):
+		writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read upload"})
+	default:
+		defer content.Close()
+		writer.Header().Set("Content-Type", info.ContentType)
+		writer.Header().Set("Cache-Control", "private, no-store")
+		writer.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeContent(writer, request, request.PathValue("uploadID"), time.Time{}, content)
+	}
 }
 
 func WithUploads(service UploadService) Option {

@@ -23,15 +23,29 @@ services:
       - "4222:4222"
       - "8222:8222"
 
+  uploads-init:
+    image: alpine:3.22
+    command: ["sh", "-c", "mkdir -p /data/uploads && chown 65532:65532 /data/uploads && chmod 0700 /data/uploads"]
+    volumes:
+      - uploads-data:/data/uploads
+    restart: "no"
+
   api:
     build: .
     command: ["/app/api"]
     env_file: .env
+    environment:
+      UPLOAD_STORAGE_DRIVER: local
+      LOCAL_UPLOAD_ROOT: /data/uploads
     depends_on:
       postgres:
         condition: service_healthy
+      uploads-init:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
+    volumes:
+      - uploads-data:/data/uploads
 
   worker:
     build: .
@@ -50,3 +64,4 @@ services:
 
 volumes:
   postgres-data:
+  uploads-data:

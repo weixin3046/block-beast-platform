@@ -1,12 +1,16 @@
 package uploads
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/block-beast/platform/internal/platform/localstorage"
 	"github.com/block-beast/platform/internal/platform/objectstorage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,27 +44,40 @@ func TestUploadLifecycleAndOwnership(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM uploads WHERE owner_user_id IN ($1,$2)`, userID, otherUserID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id IN ($1,$2)`, userID, otherUserID)
 	})
-	store := stubStore{info: objectstorage.ObjectInfo{SizeBytes: 123, ContentType: "image/png"}}
+	store, err := localstorage.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	service := NewService(pool, store, 1024, 10*time.Minute)
-	authorization, err := service.Authorize(ctx, userID, "image/png", 123)
+	content := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, []byte("local upload")...)
+	authorization, err := service.Authorize(ctx, userID, "image/png", int64(len(content)))
 	if err != nil {
 		t.Fatalf("authorize: %v", err)
 	}
-	if authorization.Upload.Status != "pending" || authorization.Method != "PUT" {
+	if authorization.Upload.Status != "pending" || authorization.Method != "PUT" || !authorization.RequiresAuth {
 		t.Fatalf("authorization = %+v", authorization)
 	}
 	if _, err := service.Find(ctx, authorization.Upload.ID, otherUserID); !errors.Is(err, ErrUploadNotFound) {
 		t.Fatalf("other owner find error = %v", err)
 	}
-	confirmed, err := service.Confirm(ctx, authorization.Upload.ID, userID)
+	confirmed, err := service.PutContent(ctx, authorization.Upload.ID, userID, "image/png", strings.NewReader(string(content)))
 	if err != nil || confirmed.Status != "confirmed" {
-		t.Fatalf("confirm = %+v, err = %v", confirmed, err)
+		t.Fatalf("put content = %+v, err = %v", confirmed, err)
+	}
+	reader, info, err := service.OpenContent(ctx, authorization.Upload.ID, userID)
+	if err != nil {
+		t.Fatalf("open content: %v", err)
+	}
+	stored, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil || !bytes.Equal(stored, content) || info.ContentType != "image/png" {
+		t.Fatalf("stored content = %q, info = %+v, err = %v", stored, info, err)
 	}
 	again, err := service.Confirm(ctx, authorization.Upload.ID, userID)
 	if err != nil || again.Status != "confirmed" {
 		t.Fatalf("idempotent confirm = %+v, err = %v", again, err)
 	}
-	expiring, err := service.Authorize(ctx, userID, "image/png", 123)
+	expiring, err := service.Authorize(ctx, userID, "image/png", int64(len(content)))
 	if err != nil {
 		t.Fatalf("authorize expiring upload: %v", err)
 	}

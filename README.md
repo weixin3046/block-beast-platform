@@ -82,8 +82,9 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `POST /v1/auth/logout` | 撤销刷新令牌并退出当前会话。 |
 | `POST /v1/chat/customer-service` | 获取或创建当前玩家的专属客服房间。 |
 | `GET/POST /v1/chat/rooms/{room_id}/messages` | 查询或幂等发送有权限访问的聊天消息。 |
-| `POST /v1/uploads/authorize` | 获取 S3 兼容对象存储短时 PUT 签名。 |
-| `POST /v1/uploads/{upload_id}/confirm` | 通过 HEAD 校验大小和类型后确认上传。 |
+| `POST /v1/uploads/authorize` | 获取本地存储或 S3 上传授权。 |
+| `PUT/GET /v1/uploads/{upload_id}/content` | 鉴权上传或下载本人的本地文件。 |
+| `POST /v1/uploads/{upload_id}/confirm` | 幂等确认上传并校验大小和类型。 |
 | `GET /v1/leaderboards/daily` | 查询 UTC 日榜，支持有效投注、净收益和胜场排序。 |
 | `POST /v1/chat/rooms/{room_id}/red-packets` | 使用 USDT 或积分余额幂等创建聊天室红包。 |
 | `POST /v1/red-packets/{packet_id}/claim` | 幂等领取红包，过期未领金额由 Worker 自动退款。 |

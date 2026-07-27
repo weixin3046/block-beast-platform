@@ -6,6 +6,7 @@
 .idea/
 .vscode/
 bin/
+data/
 coverage.out
 compose.override.yaml
 *.log

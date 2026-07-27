@@ -212,12 +212,18 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 ## 文件上传
 
 1. 调用 `POST /v1/uploads/authorize`，提交 `content_type` 和 `size_bytes`。
-2. 使用响应中的 `method=PUT`、`url` 和完整 `headers` 直接上传到对象存储；不得修改签名要求的 `Content-Type`。
-3. 调用 `POST /v1/uploads/{uploadID}/confirm`。后端通过已签名 HEAD 请求核对实际大小和类型，匹配后状态变为 `confirmed`。
-4. `GET /v1/uploads/{uploadID}` 仅允许所有者查询状态。
+2. 使用响应中的 `method=PUT`、`url` 和完整 `headers` 上传。当前本地存储返回
+   `requires_auth=true` 和站内相对 URL，必须额外携带当前 Bearer Token；
+   不得修改授权要求的 `Content-Type`。
+3. 本地存储在 `PUT` 成功后自动确认；仍可调用
+   `POST /v1/uploads/{uploadID}/confirm`，该操作幂等。未来切换 S3 时由此接口
+   通过 HEAD 核对对象大小和类型。
+4. `GET /v1/uploads/{uploadID}` 仅允许所有者查询状态；
+   `GET /v1/uploads/{uploadID}/content` 仅允许所有者下载已确认的本地文件。
 
 允许 JPEG、PNG、WebP 和 PDF，默认最大 10 MiB、签名有效期 10 分钟。前端不能把 `pending` 对象当成可用文件；授权过期或对象元数据不匹配时确认接口返回 409。
-Worker 会把超时未确认记录批量标记为 `expired`。对象存储桶还应配置生命周期规则，自动清理未被业务引用的过期对象。
+Worker 会把超时未确认记录批量标记为 `expired`。本地文件位于 Docker
+`uploads-data` 持久卷，必须随数据库一起备份；切换对象存储后还应配置生命周期规则。
 
 ## 每日排行榜
 

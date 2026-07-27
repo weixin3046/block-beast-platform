@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ var ErrInvalidUpload = errors.New("invalid upload content type or size")
 var ErrUploadNotFound = errors.New("upload not found")
 var ErrUploadExpired = errors.New("upload authorization expired")
 var ErrObjectMismatch = errors.New("uploaded object does not match declared metadata")
+var ErrUploadNotReady = errors.New("upload is not confirmed")
+var ErrContentOperationUnsupported = errors.New("content operation is unsupported by the configured storage")
 
 var allowedContentTypes = map[string]struct{}{
 	"image/jpeg": {}, "image/png": {}, "image/webp": {}, "application/pdf": {},
@@ -25,6 +28,15 @@ var allowedContentTypes = map[string]struct{}{
 type Store interface {
 	PresignPut(key, contentType string, ttl time.Duration) (string, error)
 	Head(ctx context.Context, key string) (objectstorage.ObjectInfo, error)
+}
+
+type contentStore interface {
+	Put(ctx context.Context, key, contentType string, expectedSize int64, source io.Reader) error
+	Open(ctx context.Context, key string) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error)
+}
+
+type authenticatedStore interface {
+	RequiresAuthentication() bool
 }
 
 type Upload struct {
@@ -39,11 +51,12 @@ type Upload struct {
 }
 
 type Authorization struct {
-	Upload    Upload            `json:"upload"`
-	Method    string            `json:"method"`
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers"`
-	ExpiresAt time.Time         `json:"expires_at"`
+	Upload       Upload            `json:"upload"`
+	Method       string            `json:"method"`
+	URL          string            `json:"url"`
+	Headers      map[string]string `json:"headers"`
+	ExpiresAt    time.Time         `json:"expires_at"`
+	RequiresAuth bool              `json:"requires_auth,omitempty"`
 }
 
 type Service struct {
@@ -81,10 +94,57 @@ func (service *Service) Authorize(ctx context.Context, ownerUserID, contentType 
 	if err != nil {
 		return Authorization{}, err
 	}
-	return Authorization{
+	authorization := Authorization{
 		Upload: upload, Method: "PUT", URL: signedURL,
 		Headers: map[string]string{"Content-Type": contentType}, ExpiresAt: expiresAt,
-	}, nil
+	}
+	if store, ok := service.store.(authenticatedStore); ok {
+		authorization.RequiresAuth = store.RequiresAuthentication()
+	}
+	return authorization, nil
+}
+
+func (service *Service) PutContent(ctx context.Context, uploadID, ownerUserID, contentType string, source io.Reader) (Upload, error) {
+	upload, err := service.find(ctx, uploadID, ownerUserID)
+	if err != nil {
+		return Upload{}, err
+	}
+	if upload.Status == "confirmed" {
+		return upload, nil
+	}
+	if upload.ExpiresAt == nil || !upload.ExpiresAt.After(service.now().UTC()) {
+		_, _ = service.pool.Exec(ctx, `UPDATE uploads SET status='expired' WHERE id=$1 AND status='pending'`, uploadID)
+		return Upload{}, ErrUploadExpired
+	}
+	if !strings.EqualFold(strings.TrimSpace(contentType), upload.ContentType) {
+		return Upload{}, ErrObjectMismatch
+	}
+	store, ok := service.store.(contentStore)
+	if !ok {
+		return Upload{}, ErrContentOperationUnsupported
+	}
+	if err := store.Put(ctx, upload.StorageKey, upload.ContentType, upload.SizeBytes, source); err != nil {
+		if errors.Is(err, objectstorage.ErrSizeMismatch) || errors.Is(err, objectstorage.ErrContentTypeMismatch) {
+			return Upload{}, ErrObjectMismatch
+		}
+		return Upload{}, fmt.Errorf("store upload content: %w", err)
+	}
+	return service.Confirm(ctx, uploadID, ownerUserID)
+}
+
+func (service *Service) OpenContent(ctx context.Context, uploadID, ownerUserID string) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error) {
+	upload, err := service.find(ctx, uploadID, ownerUserID)
+	if err != nil {
+		return nil, objectstorage.ObjectInfo{}, err
+	}
+	if upload.Status != "confirmed" {
+		return nil, objectstorage.ObjectInfo{}, ErrUploadNotReady
+	}
+	store, ok := service.store.(contentStore)
+	if !ok {
+		return nil, objectstorage.ObjectInfo{}, ErrContentOperationUnsupported
+	}
+	return store.Open(ctx, upload.StorageKey)
 }
 
 func (service *Service) Confirm(ctx context.Context, uploadID, ownerUserID string) (Upload, error) {

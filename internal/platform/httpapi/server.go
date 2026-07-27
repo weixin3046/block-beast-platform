@@ -155,6 +155,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/uploads/authorize", server.protect(server.authorizeUpload))
 	mux.HandleFunc("POST /v1/uploads/{uploadID}/confirm", server.protect(server.confirmUpload))
 	mux.HandleFunc("GET /v1/uploads/{uploadID}", server.protect(server.upload))
+	mux.HandleFunc("PUT /v1/uploads/{uploadID}/content", server.protect(server.putUploadContent))
+	mux.HandleFunc("GET /v1/uploads/{uploadID}/content", server.protect(server.downloadUploadContent))
 	mux.HandleFunc("GET /v1/leaderboards/daily", server.protect(server.dailyLeaderboard))
 	mux.HandleFunc("POST /v1/chat/rooms/{roomID}/red-packets", server.protect(server.createRedPacket))
 	mux.HandleFunc("GET /v1/red-packets/{packetID}", server.protect(server.redPacket))

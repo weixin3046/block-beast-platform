@@ -27,5 +27,6 @@ export APP_ENV_FILE="${ENV_FILE}"
 "${COMPOSE[@]}" build api worker realtime
 "${COMPOSE[@]}" up -d --wait postgres nats
 "${COMPOSE[@]}" run --rm migrate
+"${COMPOSE[@]}" run --rm uploads-init
 "${COMPOSE[@]}" up -d --no-deps api worker realtime
 "${COMPOSE[@]}" ps

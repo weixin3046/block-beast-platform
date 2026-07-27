@@ -7,6 +7,7 @@
 - API 与 Realtime 只绑定宿主机 `127.0.0.1`，由宿主机上的 Nginx、Caddy
   或云负载均衡提供 HTTPS/WSS。
 - PostgreSQL 与 NATS JetStream 使用独立持久化卷。
+- 本地上传文件保存在独立 `uploads-data` 持久卷。
 - 应用容器以非 root、只读文件系统运行，并限制日志文件大小。
 - 每次发布先执行带版本记录的增量数据库迁移，再更新应用容器。
 
@@ -127,6 +128,24 @@ docker compose --env-file .env.production -f compose.production.yaml logs --tail
 docker compose --env-file .env.production -f compose.production.yaml down
 ```
 
-不要在生产环境使用 `down --volumes`。上线前必须建立 PostgreSQL 定时备份，
+不要在生产环境使用 `down --volumes`。上线前必须建立 PostgreSQL 和
+`uploads-data` 的定时异地备份，
 并实际验证恢复流程；同时监控容器健康、磁盘空间、Worker 错误、NATS
 JetStream 积压以及 PQPA/OKX/QuickNode 调用失败。
+
+本地上传卷可以在不停机只读归档，但要获得与数据库引用完全一致的恢复点，
+建议短暂停止 API 后与数据库备份成组执行。例如：
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml stop api
+docker run --rm \
+  -v block-beast-production_uploads-data:/source:ro \
+  -v /srv/block-beast-backups:/backup \
+  alpine:3.22 \
+  tar -C /source -czf /backup/uploads-$(date +%Y%m%d-%H%M%S).tar.gz .
+docker compose --env-file .env.production -f compose.production.yaml start api
+```
+
+备份文件必须复制到另一台服务器或云存储，不能只保存在原服务器。单机本地卷
+不支持跨主机 API 横向扩容；未来需要多台 API 时，应切换到 S3/COS/MinIO
+共享对象存储。

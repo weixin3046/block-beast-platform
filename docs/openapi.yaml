@@ -1174,6 +1174,54 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '502':
           description: 对象存储暂时不可用。
+  /v1/uploads/{uploadID}/content:
+    parameters:
+      - name: uploadID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [Uploads]
+      summary: 将文件内容上传到本地存储
+      description: 仅本地存储授权使用；必须携带当前 Bearer Token，Content-Type 和字节数必须与授权一致。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema: { type: string, format: binary }
+          image/png:
+            schema: { type: string, format: binary }
+          image/webp:
+            schema: { type: string, format: binary }
+          application/pdf:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: 文件已原子落盘并确认。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upload' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Uploads]
+      summary: 下载本人已确认的本地文件
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 文件内容，支持 Range 请求。
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /v1/leaderboards/daily:
     get:
       tags: [Leaderboards]
@@ -1756,11 +1804,14 @@ components:
       properties:
         upload: { $ref: '#/components/schemas/Upload' }
         method: { type: string, const: PUT }
-        url: { type: string, format: uri }
+        url: { type: string, format: uri-reference }
         headers:
           type: object
           additionalProperties: { type: string }
         expires_at: { type: string, format: date-time }
+        requires_auth:
+          type: boolean
+          description: 为 true 时上传 URL 是站内接口，必须附带当前 Bearer Token。
     ChatRoom:
       type: object
       required: [id, type, created_at]

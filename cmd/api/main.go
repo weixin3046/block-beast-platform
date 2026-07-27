@@ -29,6 +29,7 @@ import (
 	"github.com/block-beast/platform/internal/domain/identity"  // 身份认证仓储
 	"github.com/block-beast/platform/internal/domain/wallet"    // 钱包仓储
 	"github.com/block-beast/platform/internal/platform/httpapi" // API路由/业务处理器
+	"github.com/block-beast/platform/internal/platform/localstorage"
 	"github.com/block-beast/platform/internal/platform/objectstorage"
 	"github.com/block-beast/platform/internal/platform/pqpa"
 	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL连接池
@@ -102,7 +103,15 @@ func main() {
 	options = append(options, httpapi.WithChat(chat.NewService(pool)))
 	options = append(options, httpapi.WithLeaderboards(leaderboard.NewService(pool)))
 	options = append(options, httpapi.WithRedPackets(redpacket.NewService(pool, cfg.RedPacketTTL)))
-	if cfg.ObjectStorageEndpoint != "" || cfg.ObjectStorageBucket != "" || cfg.ObjectStorageAccessKey != "" || cfg.ObjectStorageSecretKey != "" {
+	switch cfg.UploadStorageDriver {
+	case "local":
+		storageClient, err := localstorage.New(cfg.LocalUploadRoot)
+		if err != nil {
+			logger.Error("invalid local upload storage configuration", "error", err)
+			return
+		}
+		options = append(options, httpapi.WithUploads(uploads.NewService(pool, storageClient, cfg.UploadMaxBytes, cfg.UploadURLTTL)))
+	case "s3":
 		storageClient, err := objectstorage.NewClient(objectstorage.Config{
 			Endpoint: cfg.ObjectStorageEndpoint, Region: cfg.ObjectStorageRegion,
 			Bucket: cfg.ObjectStorageBucket, AccessKey: cfg.ObjectStorageAccessKey,
@@ -113,6 +122,11 @@ func main() {
 			return
 		}
 		options = append(options, httpapi.WithUploads(uploads.NewService(pool, storageClient, cfg.UploadMaxBytes, cfg.UploadURLTTL)))
+	case "disabled":
+		logger.Warn("file uploads are disabled")
+	default:
+		logger.Error("invalid upload storage driver", "driver", cfg.UploadStorageDriver)
+		return
 	}
 	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))

@@ -89,6 +89,17 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  uploads-init:
+    image: alpine:3.22
+    command: ["sh", "-c", "mkdir -p /data/uploads && chown 65532:65532 /data/uploads && chmod 0700 /data/uploads"]
+    volumes:
+      - uploads-data:/data/uploads
+    restart: "no"
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
   api:
     <<: *application
     command: ["/app/api"]
@@ -97,8 +108,12 @@ services:
         condition: service_completed_successfully
       nats:
         condition: service_healthy
+      uploads-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - uploads-data:/data/uploads
     healthcheck:
       test: ["CMD", "/app/api", "-healthcheck", "http://127.0.0.1:8080/readyz"]
       interval: 30s
@@ -135,3 +150,4 @@ networks:
 volumes:
   postgres-data:
   nats-data:
+  uploads-data:
