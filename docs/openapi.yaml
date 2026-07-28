@@ -2155,7 +2155,7 @@ components:
         payout_multiplier:
           type: integer
           minimum: 1
-          description: 含本金的整数派奖倍数。
+          description: 房间档位的百分倍率标识；房内各玩法赔率由 game_types.rules 独立配置。
         close_before_seconds:
           type: integer
           minimum: 1

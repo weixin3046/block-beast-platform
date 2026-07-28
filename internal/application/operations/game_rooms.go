@@ -99,13 +99,8 @@ func (service *Service) UpdateGameRoom(ctx context.Context, id string, input Gam
 	if err := validateGameRoom(input); err != nil {
 		return GameRoom{}, err
 	}
-	tx, err := service.pool.Begin(ctx)
-	if err != nil {
-		return GameRoom{}, err
-	}
-	defer tx.Rollback(ctx)
 	var room GameRoom
-	err = tx.QueryRow(ctx, `
+	err := service.pool.QueryRow(ctx, `
 		UPDATE game_rooms SET code=$2,name=$3,game_kind=$4,enabled=$5,payout_multiplier=$6,
 			close_before_seconds=$7,sort_order=$8,updated_at=now()
 		WHERE id=$1
@@ -120,18 +115,6 @@ func (service *Service) UpdateGameRoom(ctx context.Context, id string, input Gam
 		return GameRoom{}, ErrGameRoomConflict
 	}
 	if err != nil {
-		return GameRoom{}, err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE game_types
-		SET rules=jsonb_set(
-			jsonb_set(rules,'{payout_multiplier}',to_jsonb($2::bigint)),
-			'{payout_divisor}','100'::jsonb
-		),updated_at=now()
-		WHERE room_id=$1`, id, input.PayoutMultiplier); err != nil {
-		return GameRoom{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return GameRoom{}, err
 	}
 	room.GameTypes = make([]GameType, 0)
