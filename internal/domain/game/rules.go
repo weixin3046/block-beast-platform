@@ -16,6 +16,9 @@ type Rules struct {
 	Outcomes []string `json:"outcomes"`
 	// PayoutMultiplier 是中奖投注的派奖倍数（含本金），必须为正整数。
 	PayoutMultiplier int64 `json:"payout_multiplier"`
+	// PayoutDivisor 将整数倍率换算为实际倍率。房间玩法使用 100，因此 194 表示 1.94 倍；
+	// 旧玩法省略时保持除数 1 的兼容行为。
+	PayoutDivisor int64 `json:"payout_divisor,omitempty"`
 	// MatchField 限定只比较 selection 中指定字段的值（支持点路径，如 "pick.color"）。
 	// 为空时保持旧行为：selection 中任一字符串值命中结果即中奖。
 	MatchField string `json:"match_field,omitempty"`
@@ -59,10 +62,20 @@ func (rules Rules) Validate() error {
 	if rules.PayoutMultiplier <= 0 {
 		return fmt.Errorf("%w: payout_multiplier must be positive", ErrInvalidRules)
 	}
+	if rules.PayoutDivisor < 0 {
+		return fmt.Errorf("%w: payout_divisor must not be negative", ErrInvalidRules)
+	}
 	if rules.ResultCount < 0 || rules.ResultCount > len(rules.Outcomes) {
 		return fmt.Errorf("%w: result_count must be between 1 and the outcome pool size", ErrInvalidRules)
 	}
 	return nil
+}
+
+func (rules Rules) PayoutScale() int64 {
+	if rules.PayoutDivisor <= 0 {
+		return 1
+	}
+	return rules.PayoutDivisor
 }
 
 // DrawCount 返回开奖时应选取的结果个数。

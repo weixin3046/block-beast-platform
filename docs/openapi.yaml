@@ -318,6 +318,76 @@ paths:
       responses:
         '200':
           description: 审计日志列表。
+  /v1/game-rooms:
+    get:
+      tags: [Rounds]
+      operationId: listGameRooms
+      summary: 查询启用的哈希游戏房间及房内玩法
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 动态房间列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GameRoom'
+  /v1/admin/game-rooms:
+    get:
+      tags: [Admin]
+      operationId: adminListGameRooms
+      summary: 查询全部游戏房间
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 房间列表。
+    post:
+      tags: [Admin]
+      operationId: createGameRoom
+      summary: 创建游戏房间
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameRoomInput'
+      responses:
+        '201':
+          description: 创建成功。
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/admin/game-rooms/{roomID}:
+    put:
+      tags: [Admin]
+      operationId: updateGameRoom
+      summary: 修改房间名称、赔率、顺序或启停状态
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameRoomInput'
+      responses:
+        '200':
+          description: 更新成功，房间赔率同步到房内玩法。
+        '404':
+          $ref: '#/components/responses/NotFound'
   /v1/admin/game-types:
     get:
       tags: [Admin]
@@ -2022,11 +2092,20 @@ components:
       additionalProperties: false
       required: [code, name, enabled, rules]
       properties:
+        room_id:
+          type: string
+          format: uuid
         code:
           type: string
           pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
         name:
           type: string
+        mode:
+          type: string
+          enum: [guess, bigsmall, dodge]
+        block_interval:
+          type: integer
+          minimum: 1
         enabled:
           type: boolean
         rules:
@@ -2041,6 +2120,10 @@ components:
             payout_multiplier:
               type: integer
               minimum: 1
+            payout_divisor:
+              type: integer
+              minimum: 1
+              description: 房间玩法固定为 100，因此 194 表示 1.94 倍。
             match_field:
               type: string
             result_count:
@@ -2048,6 +2131,48 @@ components:
               minimum: 1
             source:
               type: string
+              enum: [tron_hash, okx_kline]
+            extras:
+              type: object
+            dodge_mode:
+              type: boolean
+    GameRoomInput:
+      type: object
+      additionalProperties: false
+      required: [code, name, enabled, payout_multiplier, sort_order]
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
+        name:
+          type: string
+        enabled:
+          type: boolean
+        payout_multiplier:
+          type: integer
+          minimum: 1
+          description: 含本金的整数派奖倍数。
+        sort_order:
+          type: integer
+    GameRoom:
+      allOf:
+        - $ref: '#/components/schemas/GameRoomInput'
+        - type: object
+          required: [id, game_types, created_at, updated_at]
+          properties:
+            id:
+              type: string
+              format: uuid
+            game_types:
+              type: array
+              items:
+                type: object
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
     Error:
       type: object
       required: [error]
@@ -2088,7 +2213,7 @@ components:
         result_at:
           type: string
           format: date-time
-          description: 固定比 bet_closes_at 晚 5 秒，Worker 仅在此时刻后开奖。
+          description: 固定比 bet_closes_at 晚 3 秒，即目标 TRON 区块前一个区块封盘。
         settled_at:
           type: string
           format: date-time

@@ -81,6 +81,7 @@ func main() {
 	defer ticker.Stop()
 	logger.Info("worker started", "poll_interval", cfg.WorkerPollInterval)
 	processDueRounds(ctx, logger, roundRepository)
+	ensureScheduledRounds(ctx, logger, roundRepository)
 	settleDueRounds(ctx, logger, settlementService, resultSource)
 	processPending(logger, processor)
 	reconcileWithdrawals(ctx, logger, withdrawalSender)
@@ -104,6 +105,7 @@ func main() {
 			logger.Info("worker stopped", "consumer_stats", eventConsumer.Stats())
 			return
 		case <-ticker.C:
+			ensureScheduledRounds(ctx, logger, roundRepository)
 			processDueRounds(ctx, logger, roundRepository)
 			settleDueRounds(ctx, logger, settlementService, resultSource)
 			processPending(logger, processor)
@@ -116,6 +118,17 @@ func main() {
 		case <-leaderboardTicker.C:
 			refreshDailyLeaderboard(ctx, logger, leaderboardService)
 		}
+	}
+}
+
+func ensureScheduledRounds(ctx context.Context, logger *slog.Logger, repository *game.PostgresRepository) {
+	created, err := repository.EnsureScheduledRounds(ctx, time.Now().UTC())
+	if err != nil {
+		logger.Error("automatic round scheduling failed", "error", err)
+		return
+	}
+	if created > 0 {
+		logger.Info("automatic rounds scheduled", "count", created)
 	}
 }
 

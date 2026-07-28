@@ -30,7 +30,7 @@
 8. 大厅调用 `GET /v1/announcements` 获取当前时间窗口内启用的公告；该接口无需登录。
 
 轮次响应同时包含 `bet_closes_at` 和 `result_at`。前者是停止接受投注的时刻，
-后者固定晚 5 秒并用于开奖；倒计时必须以服务端字段为准。封盘后到开奖前不得
+后者固定晚 3 秒并用于开奖；倒计时必须以服务端字段为准。封盘后到开奖前不得
 继续提交投注，也不得把本地时间或行情提前当作开奖结果。
 
 管理后台可用 `GET/POST /v1/admin/announcements` 和 `PUT /v1/admin/announcements/{id}` 管理公告。`operator` 与 `admin` 均可管理公告；不可变审计日志 `GET /v1/admin/audit-logs?action={action}&actor_user_id={id}` 仅 `admin` 可查看。
@@ -57,9 +57,14 @@
 409，后台应重新读取后让操作者确认，不得静默覆盖。配置只保存非敏感业务 JSON，
 API 密钥、密码和令牌必须继续使用环境变量或密钥管理系统。
 
-游戏运营可通过 `GET/POST /v1/admin/game-types` 创建玩法规则，通过
-`PUT /v1/admin/game-types/{id}` 修改或启停玩法；`POST /v1/admin/rounds`
-创建固定封盘时间的新轮次，轮次序号由系统按玩法自动递增。
+玩家通过 `GET /v1/game-rooms` 动态读取启用房间及房内玩法。运营后台通过
+`GET/POST /v1/admin/game-rooms` 和 `PUT /v1/admin/game-rooms/{id}` 管理
+房间数量、名称、顺序、启停与百分赔率（194 表示 1.94 倍）。通过
+`GET/POST /v1/admin/game-types` 创建房内玩法，通过
+`PUT /v1/admin/game-types/{id}` 修改玩法和区块间隔。TRON 平均每 3 秒一个
+区块，因此哈希 N 每 N × 3 秒一期，并在目标块前一个区块（提前 3 秒）封盘。
+Worker 会为每个启用玩法自动保持三期未来轮次；`POST /v1/admin/rounds`
+仅作为人工补轮入口。
 
 ## TypeScript 示例
 

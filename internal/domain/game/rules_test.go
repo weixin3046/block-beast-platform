@@ -120,3 +120,12 @@ func TestSelectionWinsDodgeMode(t *testing.T) {
 		t.Fatal("normal mode should still work")
 	}
 }
+
+func TestPayoutScaleSupportsRoomOddsAndLegacyRules(t *testing.T) {
+	if got := (Rules{PayoutMultiplier: 194, PayoutDivisor: 100}).PayoutScale(); got != 100 {
+		t.Fatalf("room payout scale = %d, want 100", got)
+	}
+	if got := (Rules{PayoutMultiplier: 2}).PayoutScale(); got != 1 {
+		t.Fatalf("legacy payout scale = %d, want 1", got)
+	}
+}

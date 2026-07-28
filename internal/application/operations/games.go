@@ -22,20 +22,26 @@ var ErrInvalidRound = errors.New("game type and future bet close time are requir
 var gameCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,31}$`)
 
 type GameType struct {
-	ID        string          `json:"id"`
-	Code      string          `json:"code"`
-	Name      string          `json:"name"`
-	Enabled   bool            `json:"enabled"`
-	Rules     json.RawMessage `json:"rules"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID            string          `json:"id"`
+	RoomID        string          `json:"room_id,omitempty"`
+	Code          string          `json:"code"`
+	Name          string          `json:"name"`
+	Mode          string          `json:"mode,omitempty"`
+	BlockInterval int             `json:"block_interval,omitempty"`
+	Enabled       bool            `json:"enabled"`
+	Rules         json.RawMessage `json:"rules"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 type GameTypeInput struct {
-	Code    string          `json:"code"`
-	Name    string          `json:"name"`
-	Enabled bool            `json:"enabled"`
-	Rules   json.RawMessage `json:"rules"`
+	RoomID        string          `json:"room_id,omitempty"`
+	Code          string          `json:"code"`
+	Name          string          `json:"name"`
+	Mode          string          `json:"mode,omitempty"`
+	BlockInterval int             `json:"block_interval,omitempty"`
+	Enabled       bool            `json:"enabled"`
+	Rules         json.RawMessage `json:"rules"`
 }
 
 type ManagedRound struct {
@@ -51,7 +57,7 @@ type ManagedRound struct {
 }
 
 func (service *Service) ListGameTypes(ctx context.Context) ([]GameType, error) {
-	rows, err := service.pool.Query(ctx, `SELECT id::text,code,name,enabled,rules,created_at,updated_at FROM game_types ORDER BY created_at DESC`)
+	rows, err := service.pool.Query(ctx, `SELECT id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),enabled,rules,created_at,updated_at FROM game_types ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +65,7 @@ func (service *Service) ListGameTypes(ctx context.Context) ([]GameType, error) {
 	items := make([]GameType, 0)
 	for rows.Next() {
 		var item GameType
-		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -68,16 +74,22 @@ func (service *Service) ListGameTypes(ctx context.Context) ([]GameType, error) {
 }
 
 func (service *Service) CreateGameType(ctx context.Context, input GameTypeInput) (GameType, error) {
+	var err error
+	input.Rules, err = service.applyRoomPayout(ctx, input.RoomID, input.Rules)
+	if err != nil {
+		return GameType{}, err
+	}
 	if err := validateGameType(input); err != nil {
 		return GameType{}, err
 	}
 	var item GameType
-	err := service.pool.QueryRow(ctx, `
-		INSERT INTO game_types (id,code,name,enabled,rules)
-		VALUES ($1,$2,$3,$4,$5)
-		RETURNING id::text,code,name,enabled,rules,created_at,updated_at`,
-		uuid.NewString(), strings.TrimSpace(input.Code), strings.TrimSpace(input.Name), input.Enabled, input.Rules).
-		Scan(&item.ID, &item.Code, &item.Name, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
+	err = service.pool.QueryRow(ctx, `
+		INSERT INTO game_types (id,room_id,code,name,mode,block_interval,enabled,rules)
+		VALUES ($1,NULLIF($2,'')::uuid,$3,$4,NULLIF($5,''),NULLIF($6,0),$7,$8)
+		RETURNING id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),enabled,rules,created_at,updated_at`,
+		uuid.NewString(), input.RoomID, strings.TrimSpace(input.Code), strings.TrimSpace(input.Name),
+		strings.TrimSpace(input.Mode), input.BlockInterval, input.Enabled, input.Rules).
+		Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
 	if isUniqueViolation(err) {
 		return GameType{}, ErrGameTypeConflict
 	}
@@ -85,16 +97,23 @@ func (service *Service) CreateGameType(ctx context.Context, input GameTypeInput)
 }
 
 func (service *Service) UpdateGameType(ctx context.Context, id string, input GameTypeInput) (GameType, error) {
+	var err error
+	input.Rules, err = service.applyRoomPayout(ctx, input.RoomID, input.Rules)
+	if err != nil {
+		return GameType{}, err
+	}
 	if err := validateGameType(input); err != nil {
 		return GameType{}, err
 	}
 	var item GameType
-	err := service.pool.QueryRow(ctx, `
-		UPDATE game_types SET code=$2,name=$3,enabled=$4,rules=$5,updated_at=now()
+	err = service.pool.QueryRow(ctx, `
+		UPDATE game_types SET room_id=NULLIF($2,'')::uuid,code=$3,name=$4,
+			mode=NULLIF($5,''),block_interval=NULLIF($6,0),enabled=$7,rules=$8,updated_at=now()
 		WHERE id=$1
-		RETURNING id::text,code,name,enabled,rules,created_at,updated_at`,
-		id, strings.TrimSpace(input.Code), strings.TrimSpace(input.Name), input.Enabled, input.Rules).
-		Scan(&item.ID, &item.Code, &item.Name, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
+		RETURNING id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),enabled,rules,created_at,updated_at`,
+		id, input.RoomID, strings.TrimSpace(input.Code), strings.TrimSpace(input.Name),
+		strings.TrimSpace(input.Mode), input.BlockInterval, input.Enabled, input.Rules).
+		Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return GameType{}, ErrGameTypeNotFound
 	}
@@ -102,6 +121,25 @@ func (service *Service) UpdateGameType(ctx context.Context, id string, input Gam
 		return GameType{}, ErrGameTypeConflict
 	}
 	return item, err
+}
+
+func (service *Service) applyRoomPayout(ctx context.Context, roomID string, raw json.RawMessage) (json.RawMessage, error) {
+	if roomID == "" {
+		return raw, nil
+	}
+	var multiplier int64
+	if err := service.pool.QueryRow(ctx, `SELECT payout_multiplier FROM game_rooms WHERE id=$1`, roomID).Scan(&multiplier); errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrGameRoomNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, ErrInvalidGameType
+	}
+	value["payout_multiplier"] = multiplier
+	value["payout_divisor"] = 100
+	return json.Marshal(value)
 }
 
 func (service *Service) ListRounds(ctx context.Context, gameTypeCode, status string, limit int) ([]ManagedRound, error) {
@@ -167,6 +205,9 @@ func validateGameType(input GameTypeInput) error {
 		return ErrInvalidGameType
 	}
 	if _, err := game.ParseRules(input.Rules); err != nil {
+		return ErrInvalidGameType
+	}
+	if input.BlockInterval < 0 {
 		return ErrInvalidGameType
 	}
 	return nil

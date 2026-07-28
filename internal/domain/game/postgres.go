@@ -20,6 +20,98 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
+// EnsureScheduledRounds keeps three future TRON rounds available for every
+// enabled room game. One TRON block is treated as three seconds and betting
+// closes one block before the target result block.
+func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context, now time.Time) (int, error) {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('tron-round-scheduler',0))`); err != nil {
+		return 0, err
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT gt.id::text,gt.block_interval
+		FROM game_types gt
+		JOIN game_rooms gr ON gr.id=gt.room_id
+		WHERE gt.enabled=true AND gr.enabled=true
+		  AND gt.block_interval > 0 AND gt.rules->>'source'='tron_hash'
+		ORDER BY gr.sort_order,gt.code`)
+	if err != nil {
+		return 0, err
+	}
+	type scheduledType struct {
+		id       string
+		interval int
+	}
+	types := make([]scheduledType, 0)
+	for rows.Next() {
+		var item scheduledType
+		if err := rows.Scan(&item.id, &item.interval); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		types = append(types, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	created := 0
+	for _, item := range types {
+		cycle := time.Duration(item.interval*3) * time.Second
+		var lastSequence int64
+		var lastResult *time.Time
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(max(sequence),0),max(result_at)
+			FROM rounds WHERE game_type_id=$1`, item.id).
+			Scan(&lastSequence, &lastResult); err != nil {
+			return created, err
+		}
+		nextSequence := lastSequence + 1
+		nextResult := now.UTC().Add(cycle)
+		if lastResult != nil {
+			nextResult = lastResult.UTC().Add(cycle)
+			if !nextResult.After(now) {
+				skipped := int64(now.Sub(nextResult)/cycle) + 1
+				nextResult = nextResult.Add(time.Duration(skipped) * cycle)
+				nextSequence += skipped
+			}
+		}
+		var futureCount int
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*) FROM rounds
+			WHERE game_type_id=$1 AND status='open' AND result_at>$2`,
+			item.id, now.UTC()).Scan(&futureCount); err != nil {
+			return created, err
+		}
+		for futureCount < 3 {
+			betClosesAt := nextResult.Add(-3 * time.Second)
+			command, err := tx.Exec(ctx, `
+				INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at)
+				VALUES($1,$2,$3,'open',$4)
+				ON CONFLICT(game_type_id,sequence) DO NOTHING`,
+				uuid.NewString(), item.id, nextSequence, betClosesAt)
+			if err != nil {
+				return created, err
+			}
+			if command.RowsAffected() == 1 {
+				created++
+				futureCount++
+			}
+			nextSequence++
+			nextResult = nextResult.Add(cycle)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return created, err
+	}
+	return created, nil
+}
+
 func (repository *PostgresRepository) Find(ctx context.Context, roundID string) (Round, error) {
 	var round Round
 	var outcome json.RawMessage

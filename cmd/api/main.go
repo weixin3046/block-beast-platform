@@ -133,7 +133,7 @@ func main() {
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
 	operationsService := operations.NewService(pool)
-	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithGameAdmin(operationsService))
+	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService))
 	if cfg.PQPAAPISecret == "" {
 		logger.Warn("PQPA_API_SECRET is not set; chain deposit webhook is disabled")
 	} else {

@@ -96,7 +96,9 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `GET /v1/configs/{key}` | 匿名读取标记为 public 的平台 JSON 配置。 |
 | `GET /v1/admin/configs`、`PUT /v1/admin/configs/{key}` | 后台通过版本号安全管理平台配置。仅 admin。 |
 | `GET /v1/admin/audit-logs` | 按操作或管理员筛选不可变审计日志。仅 admin。 |
-| `GET/POST /v1/admin/game-types` | 查询或创建游戏玩法与结算规则。仅 operator/admin。 |
+| `GET /v1/game-rooms` | 查询启用的游戏房间及房内玩法。 |
+| `GET/POST /v1/admin/game-rooms` | 管理房间数量、赔率、排序和状态。仅 operator/admin。 |
+| `GET/POST /v1/admin/game-types` | 查询或创建房内玩法与结算规则。仅 operator/admin。 |
 | `PUT /v1/admin/game-types/{game_type_id}` | 修改玩法规则或启停玩法。仅 operator/admin。 |
 | `GET/POST /v1/admin/rounds` | 查询轮次或创建固定封盘时间的新轮次。仅 operator/admin。 |
 | `GET /v1/rounds?game_type={code}&limit={1-100}` | 查询指定游戏类型的开放轮次。 |
@@ -150,7 +152,7 @@ docker compose down --volumes
 
 ## 下一步实现顺序
 
-已实现轮次结算与 Worker 接入：每轮在 `bet_closes_at` 封盘，数据库固定生成 `result_at = bet_closes_at + 5 秒`，Worker 只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次并发布 outbox 事件。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、可选的中奖字段 `match_field`（支持点路径，限定只比较 selection 中该字段的值）和开奖个数 `result_count`。结算时按玩法加载规则：开奖结果必须落在结果池内，中奖投注在同一事务中完成派奖、账本记录、轮次状态更新和 outbox 事件写入；单轮结算失败会回滚并保持原状态，等待下个周期重试。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道，并在首次订阅或断线时通过 REST 补偿；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块哈希。未指定来源的本地玩法仍使用确定性哈希。
+已实现轮次结算与 Worker 接入：TRON 平均 3 秒出块，哈希 N 的轮次周期为 N × 3 秒；每轮在目标块前 3 秒封盘，数据库生成 `result_at = bet_closes_at + 3 秒`。Worker 为每个启用的房内玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。房间赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块哈希。
 
 玩法规则示例：
 

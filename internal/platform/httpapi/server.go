@@ -44,6 +44,7 @@ type Server struct {
 	userAdmin        UserAdminService
 	operations       OperationsService
 	gameAdmin        GameAdminService
+	gameRoomAdmin    GameRoomService
 	chat             ChatService
 	uploads          UploadService
 	leaderboards     LeaderboardService
@@ -140,6 +141,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("GET /v1/assets", server.assets)
+	mux.HandleFunc("GET /v1/game-rooms", server.protect(server.gameRooms))
 	mux.HandleFunc("GET /v1/announcements", server.announcements)
 	mux.HandleFunc("GET /v1/configs/{key}", server.publicConfig)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
@@ -199,6 +201,9 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/configs", server.protectRoles(server.adminConfigs, identity.RoleAdmin))
 	mux.HandleFunc("PUT /v1/admin/configs/{key}", server.protectRoles(server.putConfig, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/game-types", server.protectRoles(server.adminGameTypes, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/game-rooms", server.protectRoles(server.adminGameRooms, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/game-rooms", server.protectRoles(server.createGameRoom, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/game-rooms/{roomID}", server.protectRoles(server.updateGameRoom, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/game-types", server.protectRoles(server.createGameType, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/game-types/{gameTypeID}", server.protectRoles(server.updateGameType, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/rounds", server.protectRoles(server.adminRounds, identity.RoleAdmin, identity.RoleOperator))

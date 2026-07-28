@@ -42,6 +42,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		return SettlementResult{}, ErrOutcomeOutsidePool
 	}
 	payoutMultiplier := rules.PayoutMultiplier
+	payoutDivisor := rules.PayoutScale()
 
 	tx, err := service.pool.Begin(ctx)
 	if err != nil {
@@ -122,7 +123,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		if bet.stake > math.MaxInt64/payoutMultiplier {
 			return SettlementResult{}, ErrPayoutOverflow
 		}
-		payout := bet.stake * payoutMultiplier
+		payout := bet.stake * payoutMultiplier / payoutDivisor
 		var availableMinor int64
 		if err := tx.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1 FOR UPDATE`, bet.walletID).Scan(&availableMinor); err != nil {
 			return SettlementResult{}, err
