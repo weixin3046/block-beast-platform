@@ -86,7 +86,7 @@ func (service *Service) CreateGameRoom(ctx context.Context, input GameRoomInput)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 		RETURNING id::text,code,name,game_kind,enabled,payout_multiplier,close_before_seconds,sort_order,created_at,updated_at`,
 		uuid.NewString(), strings.TrimSpace(input.Code), strings.TrimSpace(input.Name),
-		normalizeGameKind(input.GameKind), input.Enabled, input.PayoutMultiplier, normalizeCloseBeforeSecs(input.CloseBeforeSecs), input.SortOrder).
+		normalizeGameKind(input.GameKind), input.Enabled, normalizeRoomLegacyMultiplier(input.PayoutMultiplier), normalizeCloseBeforeSecs(input.CloseBeforeSecs), input.SortOrder).
 		Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.PayoutMultiplier, &room.CloseBeforeSecs, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt)
 	if isRoomUniqueViolation(err) {
 		return GameRoom{}, ErrGameRoomConflict
@@ -123,7 +123,7 @@ func (service *Service) UpdateGameRoom(ctx context.Context, id string, input Gam
 
 func validateGameRoom(input GameRoomInput) error {
 	if !gameCodePattern.MatchString(strings.TrimSpace(input.Code)) ||
-		strings.TrimSpace(input.Name) == "" || input.PayoutMultiplier <= 0 {
+		strings.TrimSpace(input.Name) == "" {
 		return ErrInvalidGameRoom
 	}
 	if kind := normalizeGameKind(input.GameKind); kind != "hash" && kind != "kline" {
@@ -133,6 +133,13 @@ func validateGameRoom(input GameRoomInput) error {
 		return ErrInvalidGameRoom
 	}
 	return nil
+}
+
+func normalizeRoomLegacyMultiplier(value int64) int64 {
+	if value <= 0 {
+		return 100
+	}
+	return value
 }
 
 func normalizeCloseBeforeSecs(value int) int {

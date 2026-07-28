@@ -2106,6 +2106,12 @@ components:
         block_interval:
           type: integer
           minimum: 1
+        close_before_seconds:
+          type: integer
+          minimum: 1
+          maximum: 59
+          default: 3
+          description: 当前玩法在开奖前多少秒封盘，哈希和 K 线玩法均可独立配置。
         enabled:
           type: boolean
         rules:
@@ -2139,7 +2145,7 @@ components:
     GameRoomInput:
       type: object
       additionalProperties: false
-      required: [code, name, game_kind, enabled, payout_multiplier, close_before_seconds, sort_order]
+      required: [code, name, game_kind, enabled, sort_order]
       properties:
         code:
           type: string
@@ -2155,13 +2161,15 @@ components:
         payout_multiplier:
           type: integer
           minimum: 1
-          description: 房间档位的百分倍率标识；房内各玩法赔率由 game_types.rules 独立配置。
+          deprecated: true
+          description: 仅为旧客户端兼容保留；房间没有赔率，赔率由房内玩法独立配置。
         close_before_seconds:
           type: integer
           minimum: 1
           maximum: 59
           default: 3
-          description: 开奖前多少秒封盘；K 线轮次固定为 60 秒。
+          deprecated: true
+          description: 仅为旧客户端兼容保留；封盘秒数由房内玩法独立配置。
         sort_order:
           type: integer
     GameRoom:

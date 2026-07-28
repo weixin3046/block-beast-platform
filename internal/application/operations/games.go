@@ -22,26 +22,28 @@ var ErrInvalidRound = errors.New("game type and future bet close time are requir
 var gameCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,31}$`)
 
 type GameType struct {
-	ID            string          `json:"id"`
-	RoomID        string          `json:"room_id,omitempty"`
-	Code          string          `json:"code"`
-	Name          string          `json:"name"`
-	Mode          string          `json:"mode,omitempty"`
-	BlockInterval int             `json:"block_interval,omitempty"`
-	Enabled       bool            `json:"enabled"`
-	Rules         json.RawMessage `json:"rules"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	ID              string          `json:"id"`
+	RoomID          string          `json:"room_id,omitempty"`
+	Code            string          `json:"code"`
+	Name            string          `json:"name"`
+	Mode            string          `json:"mode,omitempty"`
+	BlockInterval   int             `json:"block_interval,omitempty"`
+	CloseBeforeSecs int             `json:"close_before_seconds"`
+	Enabled         bool            `json:"enabled"`
+	Rules           json.RawMessage `json:"rules"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 type GameTypeInput struct {
-	RoomID        string          `json:"room_id,omitempty"`
-	Code          string          `json:"code"`
-	Name          string          `json:"name"`
-	Mode          string          `json:"mode,omitempty"`
-	BlockInterval int             `json:"block_interval,omitempty"`
-	Enabled       bool            `json:"enabled"`
-	Rules         json.RawMessage `json:"rules"`
+	RoomID          string          `json:"room_id,omitempty"`
+	Code            string          `json:"code"`
+	Name            string          `json:"name"`
+	Mode            string          `json:"mode,omitempty"`
+	BlockInterval   int             `json:"block_interval,omitempty"`
+	CloseBeforeSecs int             `json:"close_before_seconds"`
+	Enabled         bool            `json:"enabled"`
+	Rules           json.RawMessage `json:"rules"`
 }
 
 type ManagedRound struct {
@@ -57,7 +59,7 @@ type ManagedRound struct {
 }
 
 func (service *Service) ListGameTypes(ctx context.Context) ([]GameType, error) {
-	rows, err := service.pool.Query(ctx, `SELECT id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),enabled,rules,created_at,updated_at FROM game_types ORDER BY created_at DESC`)
+	rows, err := service.pool.Query(ctx, `SELECT id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),close_before_seconds,enabled,rules,created_at,updated_at FROM game_types ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +67,7 @@ func (service *Service) ListGameTypes(ctx context.Context) ([]GameType, error) {
 	items := make([]GameType, 0)
 	for rows.Next() {
 		var item GameType
-		if err := rows.Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.CloseBeforeSecs, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -84,12 +86,12 @@ func (service *Service) CreateGameType(ctx context.Context, input GameTypeInput)
 	}
 	var item GameType
 	err = service.pool.QueryRow(ctx, `
-		INSERT INTO game_types (id,room_id,code,name,mode,block_interval,enabled,rules)
-		VALUES ($1,NULLIF($2,'')::uuid,$3,$4,NULLIF($5,''),NULLIF($6,0),$7,$8)
-		RETURNING id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),enabled,rules,created_at,updated_at`,
+		INSERT INTO game_types (id,room_id,code,name,mode,block_interval,close_before_seconds,enabled,rules)
+		VALUES ($1,NULLIF($2,'')::uuid,$3,$4,NULLIF($5,''),NULLIF($6,0),$7,$8,$9)
+		RETURNING id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),close_before_seconds,enabled,rules,created_at,updated_at`,
 		uuid.NewString(), input.RoomID, strings.TrimSpace(input.Code), strings.TrimSpace(input.Name),
-		strings.TrimSpace(input.Mode), input.BlockInterval, input.Enabled, input.Rules).
-		Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
+		strings.TrimSpace(input.Mode), input.BlockInterval, normalizeGameCloseBeforeSecs(input.CloseBeforeSecs), input.Enabled, input.Rules).
+		Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.CloseBeforeSecs, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
 	if isUniqueViolation(err) {
 		return GameType{}, ErrGameTypeConflict
 	}
@@ -108,12 +110,12 @@ func (service *Service) UpdateGameType(ctx context.Context, id string, input Gam
 	var item GameType
 	err = service.pool.QueryRow(ctx, `
 		UPDATE game_types SET room_id=NULLIF($2,'')::uuid,code=$3,name=$4,
-			mode=NULLIF($5,''),block_interval=NULLIF($6,0),enabled=$7,rules=$8,updated_at=now()
+			mode=NULLIF($5,''),block_interval=NULLIF($6,0),close_before_seconds=$7,enabled=$8,rules=$9,updated_at=now()
 		WHERE id=$1
-		RETURNING id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),enabled,rules,created_at,updated_at`,
+		RETURNING id::text,COALESCE(room_id::text,''),code,name,COALESCE(mode,''),COALESCE(block_interval,0),close_before_seconds,enabled,rules,created_at,updated_at`,
 		id, input.RoomID, strings.TrimSpace(input.Code), strings.TrimSpace(input.Name),
-		strings.TrimSpace(input.Mode), input.BlockInterval, input.Enabled, input.Rules).
-		Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
+		strings.TrimSpace(input.Mode), input.BlockInterval, normalizeGameCloseBeforeSecs(input.CloseBeforeSecs), input.Enabled, input.Rules).
+		Scan(&item.ID, &item.RoomID, &item.Code, &item.Name, &item.Mode, &item.BlockInterval, &item.CloseBeforeSecs, &item.Enabled, &item.Rules, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return GameType{}, ErrGameTypeNotFound
 	}
@@ -215,7 +217,17 @@ func validateGameType(input GameTypeInput) error {
 	if input.BlockInterval < 0 {
 		return ErrInvalidGameType
 	}
+	if seconds := normalizeGameCloseBeforeSecs(input.CloseBeforeSecs); seconds < 1 || seconds > 59 {
+		return ErrInvalidGameType
+	}
 	return nil
+}
+
+func normalizeGameCloseBeforeSecs(value int) int {
+	if value == 0 {
+		return 3
+	}
+	return value
 }
 
 func isUniqueViolation(err error) bool {

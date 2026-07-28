@@ -33,7 +33,7 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		return 0, err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT gt.id::text,COALESCE(gt.block_interval,0),gt.rules->>'source',gr.close_before_seconds
+		SELECT gt.id::text,COALESCE(gt.block_interval,0),gt.rules->>'source',gt.close_before_seconds
 		FROM game_types gt
 		JOIN game_rooms gr ON gr.id=gt.room_id
 		WHERE gt.enabled=true AND gr.enabled=true
