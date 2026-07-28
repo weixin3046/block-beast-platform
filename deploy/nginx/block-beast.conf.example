@@ -1,6 +1,6 @@
 # 服务器：156.234.80.122
-# 宝塔 Nginx 建议安装位置：
-# /www/server/panel/vhost/nginx/block-beast.conf
+# 当前服务器实际安装位置：
+# /www/server/nginx/conf/conf.d/block-beast.conf
 #
 # 依赖的公共代理参数安装到：
 # /www/server/nginx/conf/snippets/block-beast-proxy.conf
