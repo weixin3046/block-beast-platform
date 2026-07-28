@@ -1,18 +1,22 @@
-# 安装位置：/etc/nginx/conf.d/block-beast.conf
-# 使用前替换 api.example.com、ws.example.com 以及证书路径。
-# 本文件依赖 nginx.conf 在 http {} 中 include /etc/nginx/conf.d/*.conf。
+# 服务器：156.234.80.122
+# 宝塔 Nginx 建议安装位置：
+# /www/server/panel/vhost/nginx/block-beast.conf
+#
+# 依赖的公共代理参数安装到：
+# /www/server/nginx/conf/snippets/block-beast-proxy.conf
+#
+# 当前没有配置业务域名和 TLS 证书，因此只监听 HTTP 80。
+# 获得正式域名后应新增 HTTPS server，并将 HTTP 重定向至 HTTPS。
 
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
 }
 
-# 按真实客户端 IP 限流。若 Nginx 前还有可信负载均衡或 CDN，请先正确配置
-# set_real_ip_from/real_ip_header，否则此处看到的会是代理 IP。
-limit_req_zone $binary_remote_addr zone=api_general:10m rate=100r/s;
-limit_req_zone $binary_remote_addr zone=auth_sensitive:10m rate=10r/m;
-limit_req_zone $binary_remote_addr zone=webhook_chain:10m rate=30r/s;
-limit_conn_zone $binary_remote_addr zone=websocket_per_ip:10m;
+limit_req_zone $binary_remote_addr zone=block_beast_api:10m rate=100r/s;
+limit_req_zone $binary_remote_addr zone=block_beast_auth:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=block_beast_webhook:10m rate=30r/s;
+limit_conn_zone $binary_remote_addr zone=block_beast_ws:10m;
 limit_req_status 429;
 limit_conn_status 429;
 
@@ -26,107 +30,44 @@ upstream block_beast_realtime {
     keepalive 16;
 }
 
-# HTTP 仅保留 ACME 验证，其余请求跳转 HTTPS。
 server {
     listen 80;
     listen [::]:80;
-    server_name api.example.com ws.example.com;
-
-    location ^~ /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-        default_type text/plain;
-    }
-
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-# API、管理端 API 与 PQPA Webhook。
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name api.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/api.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:BlockBeastTLS:20m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
+    server_name 156.234.80.122;
 
     server_tokens off;
-    # 本地上传默认最大 10 MiB，代理限制略高于应用限制。
     client_max_body_size 12m;
     client_body_timeout 15s;
     keepalive_timeout 65s;
 
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    access_log /www/wwwlogs/block-beast.access.log;
+    error_log /www/wwwlogs/block-beast.error.log warn;
+
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
     add_header Permissions-Policy "camera=(), geolocation=(), microphone=()" always;
 
-    access_log /var/log/nginx/block-beast-api.access.log;
-    error_log /var/log/nginx/block-beast-api.error.log warn;
-
-    # 登录接口使用更严格的每 IP 限流；应用自身仍负责账号级失败锁定。
-    location = /v1/auth/login {
-        limit_req zone=auth_sensitive burst=5 nodelay;
-        include /etc/nginx/snippets/block-beast-proxy.conf;
-        proxy_pass http://block_beast_api;
-    }
-
-    location = /v1/admin/auth/login {
-        limit_req zone=auth_sensitive burst=5 nodelay;
-        include /etc/nginx/snippets/block-beast-proxy.conf;
-        proxy_pass http://block_beast_api;
-    }
-
-    # PQPA 回调验签和幂等由应用完成；这里额外限制异常流量。
-    location = /v1/webhooks/chain/deposits {
-        limit_req zone=webhook_chain burst=60 nodelay;
-        include /etc/nginx/snippets/block-beast-proxy.conf;
-        proxy_pass http://block_beast_api;
-    }
-
-    location / {
-        limit_req zone=api_general burst=200 nodelay;
-        include /etc/nginx/snippets/block-beast-proxy.conf;
-        proxy_pass http://block_beast_api;
-    }
-}
-
-# Realtime WSS。使用独立域名，避免普通 API 超时与缓冲策略影响长连接。
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ws.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/ws.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/ws.example.com/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:BlockBeastTLS:20m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-
-    server_tokens off;
-    client_max_body_size 64k;
-
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-
-    access_log /var/log/nginx/block-beast-realtime.access.log;
-    error_log /var/log/nginx/block-beast-realtime.error.log warn;
-
+    # API 存活与就绪检查。
     location = /healthz {
-        include /etc/nginx/snippets/block-beast-proxy.conf;
-        proxy_pass http://block_beast_realtime;
+        include /www/server/nginx/conf/snippets/block-beast-proxy.conf;
+        proxy_pass http://block_beast_api;
     }
 
+    location = /readyz {
+        include /www/server/nginx/conf/snippets/block-beast-proxy.conf;
+        proxy_pass http://block_beast_api;
+    }
+
+    # Realtime 健康检查使用独立路径，避免与 API /healthz 冲突。
+    location = /realtime/healthz {
+        include /www/server/nginx/conf/snippets/block-beast-proxy.conf;
+        proxy_pass http://block_beast_realtime/healthz;
+    }
+
+    # WebSocket 必须在普通 /v1/ API 规则之前精确匹配。
     location = /v1/ws {
-        limit_conn websocket_per_ip 5;
+        limit_conn block_beast_ws 5;
 
         proxy_pass http://block_beast_realtime;
         proxy_http_version 1.1;
@@ -142,6 +83,33 @@ server {
         proxy_read_timeout 75s;
         proxy_buffering off;
         proxy_request_buffering off;
+    }
+
+    # 登录接口使用更严格的每 IP 限流。
+    location = /v1/auth/login {
+        limit_req zone=block_beast_auth burst=5 nodelay;
+        include /www/server/nginx/conf/snippets/block-beast-proxy.conf;
+        proxy_pass http://block_beast_api;
+    }
+
+    location = /v1/admin/auth/login {
+        limit_req zone=block_beast_auth burst=5 nodelay;
+        include /www/server/nginx/conf/snippets/block-beast-proxy.conf;
+        proxy_pass http://block_beast_api;
+    }
+
+    # 链上充值回调。
+    location = /v1/webhooks/chain/deposits {
+        limit_req zone=block_beast_webhook burst=60 nodelay;
+        include /www/server/nginx/conf/snippets/block-beast-proxy.conf;
+        proxy_pass http://block_beast_api;
+    }
+
+    # 其余业务 API。
+    location ^~ /v1/ {
+        limit_req zone=block_beast_api burst=200 nodelay;
+        include /www/server/nginx/conf/snippets/block-beast-proxy.conf;
+        proxy_pass http://block_beast_api;
     }
 
     location / {
