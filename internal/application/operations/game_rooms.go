@@ -39,7 +39,7 @@ func (service *Service) ListGameRooms(ctx context.Context, enabledOnly bool) ([]
 	rows, err := service.pool.Query(ctx, `
 		SELECT id::text,code,name,game_kind,enabled,sort_order,created_at,updated_at
 		FROM game_rooms WHERE NOT $1 OR enabled=true
-		ORDER BY sort_order,created_at,id`)
+		ORDER BY sort_order,created_at,id`, enabledOnly)
 	if err != nil {
 		return nil, err
 	}
