@@ -1663,7 +1663,13 @@ paths:
           in: query
           schema: { type: string }
       responses:
-        '200': { description: 用户列表 }
+        '200':
+          description: 用户列表，包含可用于后台操作的用户 ID。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminUser' }
   /v1/admin/users/{userID}/status:
     put:
       tags: [Admin]
@@ -1826,6 +1832,18 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    AdminUser:
+      type: object
+      required: [id, login_name, display_name, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 用户 ID。
+        login_name: { type: string }
+        display_name: { type: string }
+        status: { type: string, enum: [active, disabled, bet_banned] }
+        created_at: { type: string, format: date-time }
     PlatformConfig:
       type: object
       required: [key, value, visibility, version, updated_at]
