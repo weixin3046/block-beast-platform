@@ -22,6 +22,8 @@
 
 1. 玩家端调用 `POST /v1/auth/register` 注册账号（或 `POST /v1/auth/login` 登录），并使用 `POST /v1/auth/refresh` 续期；管理后台必须调用 `POST /v1/admin/auth/login`，并使用 `POST /v1/admin/auth/refresh` 续期。两类刷新令牌绑定所属端，不能交叉使用，续期时还会重新检查当前角色。退出时调用 `POST /v1/auth/logout` 撤销刷新令牌。登录返回 `429` 表示该登录名因连续失败被临时锁定，前端应停止自动重试并遵循 `Retry-After`。
 2. 调用 `GET /v1/rounds?game_type={code}` 获取仍可下注的轮次。
+   游戏页同时调用 `GET /v1/rounds/state?game_type={code}` 展示当前轮次封盘倒计时
+   与最近一期已结算结果；倒计时始终以响应中的 `bet_closes_at` 为准。
 3. 调用 `POST /v1/bets` 创建投注，`currency` 传 `USDT` 或 `POINTS`。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
 4. 使用 `GET /v1/bets/{betID}` 轮询投注状态；当前状态有 `accepted`、`won`、`lost` 与 `refunded`。
 5. 使用 `GET /v1/wallets/{accountID}?currency=USDT` 查询单币种余额，或 `GET /v1/wallets/{accountID}/all` 一次拉取全部币种。

@@ -121,6 +121,7 @@ type WalletReader interface {
 type RoundReader interface {
 	Find(ctx context.Context, roundID string) (game.Round, error)
 	ListOpen(ctx context.Context, gameType string, limit int) ([]game.Round, error)
+	State(ctx context.Context, gameType string) (game.RoundState, error)
 }
 
 type RoundCanceller interface {
@@ -176,6 +177,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/bets", server.protect(server.userBets))
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.protect(server.balance))
 	mux.HandleFunc("GET /v1/rounds", server.protect(server.openRounds))
+	mux.HandleFunc("GET /v1/rounds/state", server.protect(server.roundState))
 	mux.HandleFunc("GET /v1/rounds/{roundID}", server.protect(server.round))
 	mux.HandleFunc("POST /v1/rounds/{roundID}/cancel", server.protectRoles(server.cancelRound, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/webhooks/chain/deposits", server.chainDepositWebhook)
@@ -538,6 +540,24 @@ func (server *Server) openRounds(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	writeJSON(writer, http.StatusOK, rounds)
+}
+
+func (server *Server) roundState(writer http.ResponseWriter, request *http.Request) {
+	if server.rounds == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "rounds are unavailable"})
+		return
+	}
+	gameType := request.URL.Query().Get("game_type")
+	if gameType == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "game type is required"})
+		return
+	}
+	state, err := server.rounds.State(request.Context(), gameType)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to load round state"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, state)
 }
 
 func (server *Server) round(writer http.ResponseWriter, request *http.Request) {

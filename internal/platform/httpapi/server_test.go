@@ -136,6 +136,27 @@ func TestOpenRoundsRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
+func TestRoundStateReturnsCurrentAndPrevious(t *testing.T) {
+	current := game.Round{RoundID: "current", GameType: "play_hash", Status: game.RoundOpen}
+	previous := game.Round{RoundID: "previous", GameType: "play_hash", Status: game.RoundSettled, Outcome: []string{"5"}}
+	rounds := &recordingRoundReader{state: game.RoundState{Current: &current, Previous: &previous}}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/rounds/state?game_type=play_hash", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if rounds.gameType != "play_hash" {
+		t.Fatalf("game type = %q, want play_hash", rounds.gameType)
+	}
+	if !strings.Contains(response.Body.String(), `"outcome":["5"]`) {
+		t.Fatalf("response = %s, want previous outcome", response.Body.String())
+	}
+}
+
 func TestBetReturnsBet(t *testing.T) {
 	bets := &recordingBetReader{bet: betting.PlacedBet{BetID: "bet-1", Status: "accepted"}}
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets, nil)
@@ -231,6 +252,7 @@ type recordingRoundReader struct {
 	gameType string
 	limit    int
 	err      error
+	state    game.RoundState
 }
 
 func (reader *recordingRoundReader) Find(_ context.Context, roundID string) (game.Round, error) {
@@ -242,6 +264,11 @@ func (reader *recordingRoundReader) ListOpen(_ context.Context, gameType string,
 	reader.gameType = gameType
 	reader.limit = limit
 	return reader.rounds, reader.err
+}
+
+func (reader *recordingRoundReader) State(_ context.Context, gameType string) (game.RoundState, error) {
+	reader.gameType = gameType
+	return reader.state, reader.err
 }
 
 func (checker readinessChecker) Ping(context.Context) error {

@@ -26,6 +26,11 @@ type Round struct {
 	Outcome     []string    `json:"outcome,omitempty"`
 }
 
+type RoundState struct {
+	Current  *Round `json:"current"`
+	Previous *Round `json:"previous"`
+}
+
 type Bet struct {
 	BetID      string
 	RoundID    string

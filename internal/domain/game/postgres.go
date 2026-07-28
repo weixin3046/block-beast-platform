@@ -209,6 +209,54 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 	return rounds, nil
 }
 
+func (repository *PostgresRepository) State(ctx context.Context, gameType string) (RoundState, error) {
+	var state RoundState
+	current, err := repository.findGameTypeRound(ctx, gameType, "status = 'open'", "bet_closes_at ASC")
+	if err != nil && !errors.Is(err, ErrRoundNotFound) {
+		return state, err
+	}
+	if err == nil {
+		state.Current = &current
+	}
+	previous, err := repository.findGameTypeRound(ctx, gameType, "status = 'settled'", "result_at DESC")
+	if err != nil && !errors.Is(err, ErrRoundNotFound) {
+		return state, err
+	}
+	if err == nil {
+		state.Previous = &previous
+	}
+	return state, nil
+}
+
+func (repository *PostgresRepository) findGameTypeRound(ctx context.Context, gameType, statusClause, orderBy string) (Round, error) {
+	query := `
+		SELECT rounds.id,game_types.code,rounds.sequence,rounds.status,
+			rounds.bet_closes_at,rounds.result_at,rounds.settled_at,rounds.outcome
+		FROM rounds
+		JOIN game_types ON game_types.id=rounds.game_type_id
+		WHERE game_types.code=$1 AND ` + statusClause + `
+		ORDER BY ` + orderBy + `,rounds.id
+		LIMIT 1`
+	var round Round
+	var outcome json.RawMessage
+	err := repository.pool.QueryRow(ctx, query, gameType).Scan(
+		&round.RoundID, &round.GameType, &round.Sequence, &round.Status,
+		&round.BetClosesAt, &round.ResultAt, &round.SettledAt, &outcome,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Round{}, ErrRoundNotFound
+	}
+	if err != nil {
+		return Round{}, err
+	}
+	if len(outcome) > 0 {
+		if err := json.Unmarshal(outcome, &round.Outcome); err != nil {
+			return Round{}, err
+		}
+	}
+	return round, nil
+}
+
 func (repository *PostgresRepository) BeginSettlement(ctx context.Context, roundID string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {

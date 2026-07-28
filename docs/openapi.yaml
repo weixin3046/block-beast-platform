@@ -515,6 +515,40 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/rounds/state:
+    get:
+      tags: [Rounds]
+      operationId: getRoundState
+      summary: 查询指定玩法的当前轮次和上一期开奖结果
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: game_type
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 当前最早开放轮次和最近已结算轮次；尚不存在时对应字段为 null。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [current, previous]
+                properties:
+                  current:
+                    oneOf:
+                      - $ref: '#/components/schemas/Round'
+                      - type: 'null'
+                  previous:
+                    oneOf:
+                      - $ref: '#/components/schemas/Round'
+                      - type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/rounds/{roundID}:
     get:
       tags: [Rounds]
