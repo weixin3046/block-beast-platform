@@ -19,6 +19,8 @@ var ErrBetNotFound = errors.New("bet not found")
 var ErrInvalidSelection = errors.New("selection must be valid JSON")
 var ErrAccountDisabled = errors.New("account is disabled")
 var ErrBettingBanned = errors.New("account is banned from betting")
+var ErrStakeOutsideLimits = errors.New("stake is outside the configured play limits")
+var ErrSelectionOutsidePlay = errors.New("selection is not available for this play")
 
 type PlaceBetRequest struct {
 	ClientRequestID string          `json:"client_request_id"`
@@ -144,11 +146,13 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 
 	var status game.RoundStatus
 	var betClosesAt time.Time
+	var rawRules json.RawMessage
 	err = tx.QueryRow(ctx, `
-		SELECT status, bet_closes_at
+		SELECT rounds.status, rounds.bet_closes_at, game_types.rules
 		FROM rounds
+		JOIN game_types ON game_types.id=rounds.game_type_id
 		WHERE id = $1
-		FOR UPDATE`, request.RoundID).Scan(&status, &betClosesAt)
+		FOR UPDATE OF rounds`, request.RoundID).Scan(&status, &betClosesAt, &rawRules)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, ErrRoundNotFound
 	}
@@ -157,6 +161,17 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 	}
 	if status != game.RoundOpen || !time.Now().UTC().Before(betClosesAt) {
 		return PlacedBet{}, game.ErrBettingClosed
+	}
+	rules, err := game.ParseRules(rawRules)
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	if !rules.SelectionAllowed(request.Selection) {
+		return PlacedBet{}, ErrSelectionOutsidePlay
+	}
+	if limit, ok := rules.BetLimits[request.Currency]; ok &&
+		(request.StakeMinor < limit.MinStakeMinor || request.StakeMinor > limit.MaxStakeMinor) {
+		return PlacedBet{}, ErrStakeOutsideLimits
 	}
 
 	existing, err = findBet(ctx, tx, request.AccountID, request.ClientRequestID)
