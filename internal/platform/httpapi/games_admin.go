@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -36,6 +37,7 @@ func WithGameRooms(service GameRoomService) Option {
 func (server *Server) gameRooms(writer http.ResponseWriter, request *http.Request) {
 	items, err := server.gameRoomAdmin.ListGameRooms(request.Context(), true)
 	if err != nil {
+		slog.Error("unable to list game rooms", "error", err)
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list game rooms"})
 		return
 	}
@@ -45,6 +47,7 @@ func (server *Server) gameRooms(writer http.ResponseWriter, request *http.Reques
 func (server *Server) adminGameRooms(writer http.ResponseWriter, request *http.Request) {
 	items, err := server.gameRoomAdmin.ListGameRooms(request.Context(), false)
 	if err != nil {
+		slog.Error("unable to list admin game rooms", "error", err)
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list game rooms"})
 		return
 	}

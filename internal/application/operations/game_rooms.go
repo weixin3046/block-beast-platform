@@ -56,6 +56,7 @@ func (service *Service) ListGameRooms(ctx context.Context, enabledOnly bool) ([]
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close()
 	types, err := service.ListGameTypes(ctx)
 	if err != nil {
 		return nil, err
