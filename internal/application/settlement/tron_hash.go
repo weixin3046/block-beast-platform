@@ -9,13 +9,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/block-beast/platform/internal/domain/game"
 )
 
 // TronHashResultSource 从 TRON 区块哈希提取尾数作为开奖结果。
-// 目标区块高度 = base_block_height + sequence × block_interval，由轮次唯一确定，天然幂等。
+// 哈希轮次的 sequence 就是创建轮次时锁定的目标区块高度。
 type TronHashResultSource struct {
 	baseURL string
 	client  *http.Client
@@ -31,8 +32,7 @@ func NewTronHashResultSource(baseURL string) TronHashResultSource {
 
 // tronExtras 解析 rules.extras 中的 TRON 数据源参数。
 type tronExtras struct {
-	BaseBlockHeight int64 `json:"base_block_height"`
-	BlockInterval   int64 `json:"block_interval"`
+	BlockInterval int64 `json:"block_interval"`
 }
 
 // jsonRPCRequest 是 JSON-RPC 2.0 请求结构。
@@ -71,13 +71,13 @@ func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round
 			return nil, fmt.Errorf("parse tron extras: %w", err)
 		}
 	}
-	if extras.BaseBlockHeight <= 0 {
-		return nil, errors.New("tron_hash: base_block_height is required in extras")
-	}
 	if extras.BlockInterval <= 0 {
 		extras.BlockInterval = 5
 	}
-	targetHeight := extras.BaseBlockHeight + round.Sequence*extras.BlockInterval
+	if round.Sequence <= 0 {
+		return nil, errors.New("tron_hash: target block height is required")
+	}
+	targetHeight := round.Sequence
 
 	hash, err := source.fetchBlockHash(ctx, targetHeight)
 	if err != nil {
@@ -91,6 +91,53 @@ func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round
 
 	shape := detectShape(rules.Outcomes, rules.DodgeMode)
 	return mapOutcome(digit, shape), nil
+}
+
+// CurrentBlockHeight 返回 TRON 最新已生成区块高度，供轮次调度器选择下一个
+// interval 整倍数区块。目标高度一旦写入 round.sequence，后续重试不会漂移。
+func (source TronHashResultSource) CurrentBlockHeight(ctx context.Context) (int64, error) {
+	if source.baseURL == "" {
+		return 0, errors.New("tron_hash: QUICKNODE_TRON_URL is required")
+	}
+	requestBody, err := json.Marshal(jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "eth_blockNumber",
+		Params:  []any{},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("marshal jsonrpc request: %w", err)
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, source.baseURL, bytes.NewReader(requestBody))
+	if err != nil {
+		return 0, fmt.Errorf("create block height request: %w", err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpResponse, err := source.client.Do(httpRequest)
+	if err != nil {
+		return 0, fmt.Errorf("call tron block height rpc: %w", err)
+	}
+	defer httpResponse.Body.Close()
+	body, err := io.ReadAll(httpResponse.Body)
+	if err != nil {
+		return 0, fmt.Errorf("read block height response: %w", err)
+	}
+	var rpcResponse jsonRPCResponse
+	if err := json.Unmarshal(body, &rpcResponse); err != nil {
+		return 0, fmt.Errorf("unmarshal block height response: %w", err)
+	}
+	if rpcResponse.Error != nil {
+		return 0, fmt.Errorf("tron rpc error %d: %s", rpcResponse.Error.Code, rpcResponse.Error.Message)
+	}
+	var heightHex string
+	if err := json.Unmarshal(rpcResponse.Result, &heightHex); err != nil {
+		return 0, fmt.Errorf("decode block height: %w", err)
+	}
+	height, err := strconv.ParseInt(strings.TrimPrefix(heightHex, "0x"), 16, 64)
+	if err != nil || height <= 0 {
+		return 0, errors.New("tron rpc returned invalid block height")
+	}
+	return height, nil
 }
 
 // fetchBlockHash 调用兼容的 JSON-RPC eth_getBlockByNumber 获取区块哈希。

@@ -40,6 +40,10 @@ func (composite *CompositeResultSource) Close() {
 	}
 }
 
+func (composite CompositeResultSource) CurrentTronBlockHeight(ctx context.Context) (int64, error) {
+	return composite.tronHash.CurrentBlockHeight(ctx)
+}
+
 // Outcome 实现 ResultSource 接口，按 rules.Source 路由到对应的子源。
 func (composite CompositeResultSource) Outcome(ctx context.Context, round game.Round, rules game.Rules) ([]string, error) {
 	switch rules.Source {

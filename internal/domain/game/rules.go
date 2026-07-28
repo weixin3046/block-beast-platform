@@ -31,7 +31,7 @@ type Rules struct {
 	ResultCount int `json:"result_count,omitempty"`
 	// Source 标识外部数据源，如 "tron_hash"、"okx_kline"；为空时使用本地哈希回退。
 	Source string `json:"source,omitempty"`
-	// Extras 存储数据源参数，如 {"base_block_height":N,"block_interval":5} 或 {"symbol":"BTC-USDT"}。
+	// Extras 存储数据源参数，如 {"block_interval":5} 或 {"symbol":"BTC-USDT"}。
 	Extras json.RawMessage `json:"extras,omitempty"`
 	// DodgeMode 为 true 时启用躲避玩法判定：选中值不在 outcome 中即赢。
 	DodgeMode bool `json:"dodge_mode,omitempty"`

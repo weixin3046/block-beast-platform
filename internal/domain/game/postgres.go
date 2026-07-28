@@ -21,9 +21,10 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 // EnsureScheduledRounds keeps three future rounds available for every enabled
-// room game. TRON games use block_interval × 3 seconds; K-line games settle on
-// minute boundaries. Both close betting three seconds before the result time.
-func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context, now time.Time) (int, error) {
+// room game. A TRON round sequence is its immutable target block height, selected
+// from the next block_interval multiple after tronHeight. K-line games settle on
+// minute boundaries.
+func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context, now time.Time, tronHeight int64) (int, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -83,13 +84,29 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		}
 		nextSequence := lastSequence + 1
 		nextResult := now.UTC().Add(cycle)
+		if item.source == "tron_hash" {
+			if tronHeight <= 0 {
+				continue
+			}
+			interval := int64(item.interval)
+			nextSequence = nextTronTarget(tronHeight, interval)
+			if lastSequence >= nextSequence {
+				nextSequence = lastSequence + interval
+			}
+			blockDistance := nextSequence - tronHeight
+			nextResult = now.UTC().Add(time.Duration(blockDistance*3) * time.Second)
+			if !nextResult.Add(-item.closeBefore).After(now.UTC()) {
+				nextSequence += interval
+				nextResult = nextResult.Add(cycle)
+			}
+		}
 		if item.source == "okx_kline" {
 			nextResult = now.UTC().Truncate(time.Minute).Add(time.Minute)
 			if !nextResult.Add(-item.closeBefore).After(now.UTC()) {
 				nextResult = nextResult.Add(time.Minute)
 			}
 		}
-		if lastResult != nil {
+		if lastResult != nil && item.source == "okx_kline" {
 			nextResult = lastResult.UTC().Add(cycle)
 			if !nextResult.Add(-item.closeBefore).After(now) {
 				skipped := int64(now.Sub(nextResult.Add(-item.closeBefore))/cycle) + 1
@@ -118,7 +135,11 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 				created++
 				futureCount++
 			}
-			nextSequence++
+			if item.source == "tron_hash" {
+				nextSequence += int64(item.interval)
+			} else {
+				nextSequence++
+			}
 			nextResult = nextResult.Add(cycle)
 		}
 	}
@@ -126,6 +147,13 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		return created, err
 	}
 	return created, nil
+}
+
+func nextTronTarget(currentHeight, interval int64) int64 {
+	if currentHeight <= 0 || interval <= 0 {
+		return 0
+	}
+	return (currentHeight/interval + 1) * interval
 }
 
 func (repository *PostgresRepository) Find(ctx context.Context, roundID string) (Round, error) {

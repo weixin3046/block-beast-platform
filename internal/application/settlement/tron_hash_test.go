@@ -20,7 +20,7 @@ func TestTronHashOutcome(t *testing.T) {
 		if req.Method != "eth_getBlockByNumber" {
 			t.Errorf("unexpected method: %s", req.Method)
 		}
-		// 区块高度 84687810 = 84687805 + 1*5，hex = 0x50c3bc2
+		// 轮次序号直接保存目标区块高度。
 		if req.Params[0] != "0x50c3bc2" {
 			t.Errorf("unexpected height param: %v", req.Params[0])
 		}
@@ -31,12 +31,12 @@ func TestTronHashOutcome(t *testing.T) {
 	defer server.Close()
 
 	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 1, BetClosesAt: time.Now()}
+	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 84687810, BetClosesAt: time.Now()}
 	rules := game.Rules{
 		Outcomes:         []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
 		PayoutMultiplier: 194,
 		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"base_block_height":84687805,"block_interval":5}`),
+		Extras:           json.RawMessage(`{"block_interval":5}`),
 	}
 
 	outcome, err := source.Outcome(context.Background(), round, rules)
@@ -57,12 +57,12 @@ func TestTronHashOutcomeBigSmall(t *testing.T) {
 	defer server.Close()
 
 	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_bigsmall_194", Sequence: 1, BetClosesAt: time.Now()}
+	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_bigsmall_194", Sequence: 84687810, BetClosesAt: time.Now()}
 	rules := game.Rules{
 		Outcomes:         []string{"small", "big", "odd", "even"},
 		PayoutMultiplier: 194,
 		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"base_block_height":84687805,"block_interval":5}`),
+		Extras:           json.RawMessage(`{"block_interval":5}`),
 	}
 
 	outcome, err := source.Outcome(context.Background(), round, rules)
@@ -84,13 +84,13 @@ func TestTronHashOutcomeDodge(t *testing.T) {
 	defer server.Close()
 
 	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_dodge_194", Sequence: 1, BetClosesAt: time.Now()}
+	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_dodge_194", Sequence: 84687810, BetClosesAt: time.Now()}
 	rules := game.Rules{
 		Outcomes:         []string{"dodge_0", "dodge_1", "dodge_2", "dodge_3", "dodge_4", "dodge_5", "dodge_6", "dodge_7", "dodge_8", "dodge_9"},
 		PayoutMultiplier: 194,
 		Source:           "tron_hash",
 		DodgeMode:        true,
-		Extras:           json.RawMessage(`{"base_block_height":84687805,"block_interval":5}`),
+		Extras:           json.RawMessage(`{"block_interval":5}`),
 	}
 
 	outcome, err := source.Outcome(context.Background(), round, rules)
@@ -110,12 +110,12 @@ func TestTronHashBlockNotFound(t *testing.T) {
 	defer server.Close()
 
 	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 1, BetClosesAt: time.Now()}
+	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 84687810, BetClosesAt: time.Now()}
 	rules := game.Rules{
 		Outcomes:         []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
 		PayoutMultiplier: 194,
 		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"base_block_height":84687805,"block_interval":5}`),
+		Extras:           json.RawMessage(`{"block_interval":5}`),
 	}
 
 	_, err := source.Outcome(context.Background(), round, rules)
@@ -124,9 +124,9 @@ func TestTronHashBlockNotFound(t *testing.T) {
 	}
 }
 
-func TestTronHashMissingExtras(t *testing.T) {
+func TestTronHashMissingTargetHeight(t *testing.T) {
 	source := NewTronHashResultSource("http://unused")
-	round := game.Round{RoundID: "r1", GameType: "test", Sequence: 1, BetClosesAt: time.Now()}
+	round := game.Round{RoundID: "r1", GameType: "test", Sequence: 0, BetClosesAt: time.Now()}
 	rules := game.Rules{
 		Outcomes:         []string{"0", "1"},
 		PayoutMultiplier: 194,
@@ -136,7 +136,7 @@ func TestTronHashMissingExtras(t *testing.T) {
 
 	_, err := source.Outcome(context.Background(), round, rules)
 	if err == nil {
-		t.Fatal("should fail when base_block_height is missing")
+		t.Fatal("should fail when target block height is missing")
 	}
 }
 
@@ -157,7 +157,7 @@ func TestTronHashRPCError(t *testing.T) {
 		Outcomes:         []string{"0", "1"},
 		PayoutMultiplier: 194,
 		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"base_block_height":84687805,"block_interval":5}`),
+		Extras:           json.RawMessage(`{"block_interval":5}`),
 	}
 
 	_, err := source.Outcome(context.Background(), round, rules)

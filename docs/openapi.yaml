@@ -322,7 +322,7 @@ paths:
     get:
       tags: [Rounds]
       operationId: listGameRooms
-      summary: 查询启用的哈希游戏房间及房内玩法
+      summary: 查询启用的游戏房间及房内玩法
       security:
         - bearerAuth: []
       responses:
@@ -367,7 +367,7 @@ paths:
     put:
       tags: [Admin]
       operationId: updateGameRoom
-      summary: 修改房间名称、赔率、顺序或启停状态
+      summary: 修改房间名称、分类、顺序或启停状态
       security:
         - bearerAuth: []
       parameters:
@@ -385,7 +385,7 @@ paths:
               $ref: '#/components/schemas/GameRoomInput'
       responses:
         '200':
-          description: 更新成功，房间赔率同步到房内玩法。
+          description: 更新成功。
         '404':
           $ref: '#/components/responses/NotFound'
   /v1/admin/game-types:
@@ -2090,14 +2090,11 @@ components:
     GameTypeInput:
       type: object
       additionalProperties: false
-      required: [code, name, enabled, rules]
+      required: [name, enabled, rules]
       properties:
         room_id:
           type: string
           format: uuid
-        code:
-          type: string
-          pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
         name:
           type: string
         mode:
@@ -2163,11 +2160,8 @@ components:
     GameRoomInput:
       type: object
       additionalProperties: false
-      required: [code, name, game_kind, enabled, sort_order]
+      required: [name, game_kind, enabled, sort_order]
       properties:
-        code:
-          type: string
-          pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
         name:
           type: string
         game_kind:
@@ -2187,6 +2181,9 @@ components:
             id:
               type: string
               format: uuid
+            code:
+              type: string
+              description: 后端自动生成的内部标识，前端不得要求运营人员填写。
             game_types:
               type: array
               items:

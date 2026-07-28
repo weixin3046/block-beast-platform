@@ -97,7 +97,7 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 | `GET /v1/admin/configs`、`PUT /v1/admin/configs/{key}` | 后台通过版本号安全管理平台配置。仅 admin。 |
 | `GET /v1/admin/audit-logs` | 按操作或管理员筛选不可变审计日志。仅 admin。 |
 | `GET /v1/game-rooms` | 查询启用的游戏房间及房内玩法。 |
-| `GET/POST /v1/admin/game-rooms` | 管理房间数量、赔率、排序和状态。仅 operator/admin。 |
+| `GET/POST /v1/admin/game-rooms` | 管理房间数量、名称、分类、排序和状态；代码由后端生成。仅 operator/admin。 |
 | `GET/POST /v1/admin/game-types` | 查询或创建房内玩法与结算规则。仅 operator/admin。 |
 | `PUT /v1/admin/game-types/{game_type_id}` | 修改玩法规则或启停玩法。仅 operator/admin。 |
 | `GET/POST /v1/admin/rounds` | 查询轮次或创建固定封盘时间的新轮次。仅 operator/admin。 |
@@ -152,7 +152,7 @@ docker compose down --volumes
 
 ## 下一步实现顺序
 
-已实现轮次结算与 Worker 接入：倍率房间按 `game_kind` 分为哈希和 K 线两类。TRON 平均 3 秒出块，哈希 N 的轮次周期为 N × 3 秒；K 线房间内可选择 BTC 或 ETH，每分钟使用刚闭合的上一根 1 分钟 K 线开奖。所有自动轮次均提前 3 秒封盘，数据库生成 `result_at = bet_closes_at + 3 秒`。Worker 为每个启用的房内玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。房间赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块哈希。
+已实现轮次结算与 Worker 接入：房间按 `game_kind` 分为哈希和 K 线两类。房间和玩法代码均由后端自动生成。TRON 平均 3 秒出块，哈希 N 使用当前高度 H 的下一个 N 整倍数 `(floor(H/N)+1)×N` 作为目标区块，并把该高度直接保存为轮次号，不需要基准区块；K 线房间内可选择 BTC 或 ETH，每分钟使用刚闭合的上一根 1 分钟 K 线开奖。每个房内玩法独立配置赔率、投注限额和提前封盘秒数。Worker 为每个启用玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。玩法赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块高度与哈希。
 
 玩法规则示例：
 

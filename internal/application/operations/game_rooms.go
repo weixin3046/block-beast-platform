@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-var ErrInvalidGameRoom = errors.New("room code, name and positive payout multiplier are required")
+var ErrInvalidGameRoom = errors.New("room name and game kind are required")
 var ErrGameRoomNotFound = errors.New("game room not found")
 var ErrGameRoomConflict = errors.New("game room code already exists")
 
@@ -28,7 +28,6 @@ type GameRoom struct {
 }
 
 type GameRoomInput struct {
-	Code      string `json:"code"`
 	Name      string `json:"name"`
 	GameKind  string `json:"game_kind"`
 	Enabled   bool   `json:"enabled"`
@@ -78,11 +77,12 @@ func (service *Service) CreateGameRoom(ctx context.Context, input GameRoomInput)
 		return GameRoom{}, err
 	}
 	var room GameRoom
+	roomCode := generatedCode("room")
 	err := service.pool.QueryRow(ctx, `
 		INSERT INTO game_rooms(id,code,name,game_kind,enabled,sort_order)
 		VALUES($1,$2,$3,$4,$5,$6)
 		RETURNING id::text,code,name,game_kind,enabled,sort_order,created_at,updated_at`,
-		uuid.NewString(), strings.TrimSpace(input.Code), strings.TrimSpace(input.Name),
+		uuid.NewString(), roomCode, strings.TrimSpace(input.Name),
 		normalizeGameKind(input.GameKind), input.Enabled, input.SortOrder).
 		Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt)
 	if isRoomUniqueViolation(err) {
@@ -98,11 +98,11 @@ func (service *Service) UpdateGameRoom(ctx context.Context, id string, input Gam
 	}
 	var room GameRoom
 	err := service.pool.QueryRow(ctx, `
-		UPDATE game_rooms SET code=$2,name=$3,game_kind=$4,enabled=$5,
-			sort_order=$6,updated_at=now()
+		UPDATE game_rooms SET name=$2,game_kind=$3,enabled=$4,
+			sort_order=$5,updated_at=now()
 		WHERE id=$1
 		RETURNING id::text,code,name,game_kind,enabled,sort_order,created_at,updated_at`,
-		id, strings.TrimSpace(input.Code), strings.TrimSpace(input.Name), normalizeGameKind(input.GameKind), input.Enabled,
+		id, strings.TrimSpace(input.Name), normalizeGameKind(input.GameKind), input.Enabled,
 		input.SortOrder).
 		Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -119,14 +119,17 @@ func (service *Service) UpdateGameRoom(ctx context.Context, id string, input Gam
 }
 
 func validateGameRoom(input GameRoomInput) error {
-	if !gameCodePattern.MatchString(strings.TrimSpace(input.Code)) ||
-		strings.TrimSpace(input.Name) == "" {
+	if strings.TrimSpace(input.Name) == "" {
 		return ErrInvalidGameRoom
 	}
 	if kind := normalizeGameKind(input.GameKind); kind != "hash" && kind != "kline" {
 		return ErrInvalidGameRoom
 	}
 	return nil
+}
+
+func generatedCode(prefix string) string {
+	return prefix + "_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 }
 
 func normalizeGameKind(value string) string {

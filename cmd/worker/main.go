@@ -81,7 +81,7 @@ func main() {
 	defer ticker.Stop()
 	logger.Info("worker started", "poll_interval", cfg.WorkerPollInterval)
 	processDueRounds(ctx, logger, roundRepository)
-	ensureScheduledRounds(ctx, logger, roundRepository)
+	ensureScheduledRounds(ctx, logger, roundRepository, resultSource)
 	settleDueRounds(ctx, logger, settlementService, resultSource)
 	processPending(logger, processor)
 	reconcileWithdrawals(ctx, logger, withdrawalSender)
@@ -105,7 +105,7 @@ func main() {
 			logger.Info("worker stopped", "consumer_stats", eventConsumer.Stats())
 			return
 		case <-ticker.C:
-			ensureScheduledRounds(ctx, logger, roundRepository)
+			ensureScheduledRounds(ctx, logger, roundRepository, resultSource)
 			processDueRounds(ctx, logger, roundRepository)
 			settleDueRounds(ctx, logger, settlementService, resultSource)
 			processPending(logger, processor)
@@ -121,8 +121,12 @@ func main() {
 	}
 }
 
-func ensureScheduledRounds(ctx context.Context, logger *slog.Logger, repository *game.PostgresRepository) {
-	created, err := repository.EnsureScheduledRounds(ctx, time.Now().UTC())
+func ensureScheduledRounds(ctx context.Context, logger *slog.Logger, repository *game.PostgresRepository, source *settlement.CompositeResultSource) {
+	tronHeight, err := source.CurrentTronBlockHeight(ctx)
+	if err != nil {
+		logger.Error("TRON block height query failed; hash scheduling skipped", "error", err)
+	}
+	created, err := repository.EnsureScheduledRounds(ctx, time.Now().UTC(), tronHeight)
 	if err != nil {
 		logger.Error("automatic round scheduling failed", "error", err)
 		return

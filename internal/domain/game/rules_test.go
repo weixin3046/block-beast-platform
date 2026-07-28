@@ -75,7 +75,7 @@ func TestSelectionWinsWithNestedMatchField(t *testing.T) {
 
 func TestParseRulesWithNewFields(t *testing.T) {
 	// 新字段（source/extras/dodge_mode）应能正确解析，旧数据无这些字段也能兼容。
-	raw := json.RawMessage(`{"outcomes":["0","1"],"payout_multiplier":194,"source":"tron_hash","extras":{"base_block_height":84687805},"dodge_mode":true}`)
+	raw := json.RawMessage(`{"outcomes":["0","1"],"payout_multiplier":194,"source":"tron_hash","extras":{"block_interval":5},"dodge_mode":true}`)
 	rules, err := ParseRules(raw)
 	if err != nil {
 		t.Fatalf("parse rules with new fields: %v", err)

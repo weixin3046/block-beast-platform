@@ -16,7 +16,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "outcomes": ["0","1","2","3","4","5","6","7","8","9"],
         "payout_multiplier": 194,
         "source": "tron_hash",
-        "extras": {"base_block_height": 84687805, "block_interval": 5}
+        "extras": {"block_interval": 5}
     }'::jsonb
 );
 
@@ -30,7 +30,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "outcomes": ["small","big","odd","even"],
         "payout_multiplier": 194,
         "source": "tron_hash",
-        "extras": {"base_block_height": 84687805, "block_interval": 5}
+        "extras": {"block_interval": 5}
     }'::jsonb
 );
 
@@ -45,7 +45,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "payout_multiplier": 194,
         "source": "tron_hash",
         "dodge_mode": true,
-        "extras": {"base_block_height": 84687805, "block_interval": 5}
+        "extras": {"block_interval": 5}
     }'::jsonb
 );
 
@@ -59,7 +59,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "outcomes": ["0","1","2","3","4","5","6","7","8","9"],
         "payout_multiplier": 194,
         "source": "tron_hash",
-        "extras": {"base_block_height": 84687805, "block_interval": 9}
+        "extras": {"block_interval": 9}
     }'::jsonb
 );
 
@@ -73,7 +73,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "outcomes": ["small","big","odd","even"],
         "payout_multiplier": 194,
         "source": "tron_hash",
-        "extras": {"base_block_height": 84687805, "block_interval": 9}
+        "extras": {"block_interval": 9}
     }'::jsonb
 );
 
@@ -88,7 +88,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "payout_multiplier": 194,
         "source": "tron_hash",
         "dodge_mode": true,
-        "extras": {"base_block_height": 84687805, "block_interval": 9}
+        "extras": {"block_interval": 9}
     }'::jsonb
 );
 
@@ -102,7 +102,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "outcomes": ["0","1","2","3","4","5","6","7","8","9"],
         "payout_multiplier": 195,
         "source": "tron_hash",
-        "extras": {"base_block_height": 84687805, "block_interval": 5}
+        "extras": {"block_interval": 5}
     }'::jsonb
 );
 
@@ -116,7 +116,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "outcomes": ["small","big","odd","even"],
         "payout_multiplier": 195,
         "source": "tron_hash",
-        "extras": {"base_block_height": 84687805, "block_interval": 5}
+        "extras": {"block_interval": 5}
     }'::jsonb
 );
 
@@ -131,7 +131,7 @@ INSERT INTO game_types (id, code, name, enabled, rules) VALUES (
         "payout_multiplier": 195,
         "source": "tron_hash",
         "dodge_mode": true,
-        "extras": {"base_block_height": 84687805, "block_interval": 5}
+        "extras": {"block_interval": 5}
     }'::jsonb
 );
 

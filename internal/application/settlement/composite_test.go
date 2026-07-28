@@ -20,12 +20,12 @@ func TestCompositeRoutesTronHash(t *testing.T) {
 	defer server.Close()
 
 	composite := NewCompositeResultSource(server.URL, "http://unused-okx")
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 1, BetClosesAt: time.Now()}
+	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 84687810, BetClosesAt: time.Now()}
 	rules := game.Rules{
 		Outcomes:         []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
 		PayoutMultiplier: 194,
 		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"base_block_height":84687805,"block_interval":5}`),
+		Extras:           json.RawMessage(`{"block_interval":5}`),
 	}
 
 	outcome, err := composite.Outcome(context.Background(), round, rules)

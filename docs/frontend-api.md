@@ -59,10 +59,12 @@ API 密钥、密码和令牌必须继续使用环境变量或密钥管理系统�
 
 玩家通过 `GET /v1/game-rooms` 动态读取启用房间及房内玩法。运营后台通过
 `GET/POST /v1/admin/game-rooms` 和 `PUT /v1/admin/game-rooms/{id}` 管理
-房间数量、名称、顺序、启停与百分赔率（194 表示 1.94 倍）。通过
+房间数量、名称、分类、顺序与启停状态。房间代码由后端自动生成。通过
 `GET/POST /v1/admin/game-types` 创建房内玩法，通过
-`PUT /v1/admin/game-types/{id}` 修改玩法和区块间隔。TRON 平均每 3 秒一个
-区块，因此哈希 N 每 N × 3 秒一期，并在目标块前一个区块（提前 3 秒）封盘。
+`PUT /v1/admin/game-types/{id}` 修改玩法、独立赔率和区块间隔；玩法代码同样
+由后端自动生成。TRON 平均每 3 秒一个区块，Worker 根据当前区块高度 H 计算
+`(floor(H/N)+1)×N` 作为哈希 N 的下一目标块，并把目标块高度直接保存为轮次号，
+不配置基准区块。每个玩法按自己的 `close_before_seconds` 提前封盘。
 Worker 会为每个启用玩法自动保持三期未来轮次；`POST /v1/admin/rounds`
 仅作为人工补轮入口。
 

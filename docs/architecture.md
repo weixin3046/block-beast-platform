@@ -17,7 +17,7 @@
 | 账号、密码登录、角色及会话 | Identity | 会话必须可撤销，密码必须使用 Argon2id；登录失败计数和临时锁定持久化到 PostgreSQL，供多 API 实例共享；严禁使用 MD5。 |
 | 玩家与 GM API | API / Operations | 对特权指令实施 RBAC，并保留不可变审计日志。 |
 | 余额、扣除投注、派奖、退款、充值及提现 | Wallet | 账本记录与余额更新必须处于同一个 PostgreSQL 事务中。 |
-| 轮次、停止投注、TRON/K 线结果及结算 | Game / Worker | TRON 平均 3 秒出块，`bet_closes_at` 比目标块对应的 `result_at` 提前 3 秒；哈希 N 的轮次周期为 N × 3 秒。Worker 为每个启用玩法保持三期未来轮次。OKX `candle1m` WebSocket 为 K 线主通道、REST 为断线补偿；TRON 区块通过 QuickNode JSON-RPC 查询。通过轮次版本和唯一结算键保证结算幂等。 |
+| 轮次、停止投注、TRON/K 线结果及结算 | Game / Worker | TRON 平均 3 秒出块；哈希 N 以当前高度的下一个 N 整倍数为目标块，并将目标高度保存为轮次号。`bet_closes_at` 按玩法配置早于预计 `result_at`。Worker 为每个启用玩法保持三期未来轮次。OKX `candle1m` WebSocket 为 K 线主通道、REST 为断线补偿；TRON 区块通过 QuickNode JSON-RPC 查询。通过轮次版本和唯一结算键保证结算幂等。 |
 | 代理层级与返水 | Agent / Worker | 佣金来源必须是已结算投注，且只能被唯一记录一次。 |
 | 聊天、客服、红包及推送 | Realtime | 消息先持久化再通过 NATS 扇出；红包扣款、领取和过期退款必须与钱包账本及 outbox 位于同一事务。 |
 | TRON 监听、K 线订阅和 PQPA 回调 | Chain / Worker | 必须验证回调签名、服务商事件 ID 和交易哈希，并保证幂等。 |

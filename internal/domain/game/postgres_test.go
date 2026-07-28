@@ -12,6 +12,24 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestNextTronTargetUsesNextIntervalMultiple(t *testing.T) {
+	tests := []struct {
+		height   int64
+		interval int64
+		want     int64
+	}{
+		{height: 1002, interval: 5, want: 1005},
+		{height: 1002, interval: 9, want: 1008},
+		{height: 1002, interval: 17, want: 1003},
+		{height: 1005, interval: 5, want: 1010},
+	}
+	for _, test := range tests {
+		if got := nextTronTarget(test.height, test.interval); got != test.want {
+			t.Fatalf("nextTronTarget(%d, %d) = %d, want %d", test.height, test.interval, got, test.want)
+		}
+	}
+}
+
 func TestPostgresRepositoryCloseDue(t *testing.T) {
 	dsn := os.Getenv("POSTGRES_TEST_DSN")
 	if dsn == "" {
