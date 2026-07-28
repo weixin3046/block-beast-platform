@@ -33,7 +33,7 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		return 0, err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT gt.id::text,COALESCE(gt.block_interval,0),gt.rules->>'source'
+		SELECT gt.id::text,COALESCE(gt.block_interval,0),gt.rules->>'source',gr.close_before_seconds
 		FROM game_types gt
 		JOIN game_rooms gr ON gr.id=gt.room_id
 		WHERE gt.enabled=true AND gr.enabled=true
@@ -46,17 +46,20 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		return 0, err
 	}
 	type scheduledType struct {
-		id       string
-		interval int
-		source   string
+		id          string
+		interval    int
+		source      string
+		closeBefore time.Duration
 	}
 	types := make([]scheduledType, 0)
 	for rows.Next() {
 		var item scheduledType
-		if err := rows.Scan(&item.id, &item.interval, &item.source); err != nil {
+		var closeBeforeSeconds int
+		if err := rows.Scan(&item.id, &item.interval, &item.source, &closeBeforeSeconds); err != nil {
 			rows.Close()
 			return 0, err
 		}
+		item.closeBefore = time.Duration(closeBeforeSeconds) * time.Second
 		types = append(types, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -82,14 +85,14 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		nextResult := now.UTC().Add(cycle)
 		if item.source == "okx_kline" {
 			nextResult = now.UTC().Truncate(time.Minute).Add(time.Minute)
-			if !nextResult.Add(-3 * time.Second).After(now.UTC()) {
+			if !nextResult.Add(-item.closeBefore).After(now.UTC()) {
 				nextResult = nextResult.Add(time.Minute)
 			}
 		}
 		if lastResult != nil {
 			nextResult = lastResult.UTC().Add(cycle)
-			if !nextResult.Add(-3 * time.Second).After(now) {
-				skipped := int64(now.Sub(nextResult.Add(-3*time.Second))/cycle) + 1
+			if !nextResult.Add(-item.closeBefore).After(now) {
+				skipped := int64(now.Sub(nextResult.Add(-item.closeBefore))/cycle) + 1
 				nextResult = nextResult.Add(time.Duration(skipped) * cycle)
 				nextSequence += skipped
 			}
@@ -102,7 +105,7 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 			return created, err
 		}
 		for futureCount < 3 {
-			betClosesAt := nextResult.Add(-3 * time.Second)
+			betClosesAt := nextResult.Add(-item.closeBefore)
 			command, err := tx.Exec(ctx, `
 				INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at)
 				VALUES($1,$2,$3,'open',$4)

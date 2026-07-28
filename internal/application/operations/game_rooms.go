@@ -22,6 +22,7 @@ type GameRoom struct {
 	GameKind         string     `json:"game_kind"`
 	Enabled          bool       `json:"enabled"`
 	PayoutMultiplier int64      `json:"payout_multiplier"`
+	CloseBeforeSecs  int        `json:"close_before_seconds"`
 	SortOrder        int        `json:"sort_order"`
 	GameTypes        []GameType `json:"game_types"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -34,12 +35,13 @@ type GameRoomInput struct {
 	GameKind         string `json:"game_kind"`
 	Enabled          bool   `json:"enabled"`
 	PayoutMultiplier int64  `json:"payout_multiplier"`
+	CloseBeforeSecs  int    `json:"close_before_seconds"`
 	SortOrder        int    `json:"sort_order"`
 }
 
 func (service *Service) ListGameRooms(ctx context.Context, enabledOnly bool) ([]GameRoom, error) {
 	rows, err := service.pool.Query(ctx, `
-		SELECT id::text,code,name,game_kind,enabled,payout_multiplier,sort_order,created_at,updated_at
+		SELECT id::text,code,name,game_kind,enabled,payout_multiplier,close_before_seconds,sort_order,created_at,updated_at
 		FROM game_rooms WHERE NOT $1 OR enabled=true
 		ORDER BY sort_order,created_at,id`)
 	if err != nil {
@@ -49,7 +51,7 @@ func (service *Service) ListGameRooms(ctx context.Context, enabledOnly bool) ([]
 	rooms := make([]GameRoom, 0)
 	for rows.Next() {
 		var room GameRoom
-		if err := rows.Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.PayoutMultiplier, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt); err != nil {
+		if err := rows.Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.PayoutMultiplier, &room.CloseBeforeSecs, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt); err != nil {
 			return nil, err
 		}
 		room.GameTypes = make([]GameType, 0)
@@ -80,12 +82,12 @@ func (service *Service) CreateGameRoom(ctx context.Context, input GameRoomInput)
 	}
 	var room GameRoom
 	err := service.pool.QueryRow(ctx, `
-		INSERT INTO game_rooms(id,code,name,game_kind,enabled,payout_multiplier,sort_order)
-		VALUES($1,$2,$3,$4,$5,$6,$7)
-		RETURNING id::text,code,name,game_kind,enabled,payout_multiplier,sort_order,created_at,updated_at`,
+		INSERT INTO game_rooms(id,code,name,game_kind,enabled,payout_multiplier,close_before_seconds,sort_order)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+		RETURNING id::text,code,name,game_kind,enabled,payout_multiplier,close_before_seconds,sort_order,created_at,updated_at`,
 		uuid.NewString(), strings.TrimSpace(input.Code), strings.TrimSpace(input.Name),
-		normalizeGameKind(input.GameKind), input.Enabled, input.PayoutMultiplier, input.SortOrder).
-		Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.PayoutMultiplier, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt)
+		normalizeGameKind(input.GameKind), input.Enabled, input.PayoutMultiplier, normalizeCloseBeforeSecs(input.CloseBeforeSecs), input.SortOrder).
+		Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.PayoutMultiplier, &room.CloseBeforeSecs, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt)
 	if isRoomUniqueViolation(err) {
 		return GameRoom{}, ErrGameRoomConflict
 	}
@@ -105,12 +107,12 @@ func (service *Service) UpdateGameRoom(ctx context.Context, id string, input Gam
 	var room GameRoom
 	err = tx.QueryRow(ctx, `
 		UPDATE game_rooms SET code=$2,name=$3,game_kind=$4,enabled=$5,payout_multiplier=$6,
-			sort_order=$7,updated_at=now()
+			close_before_seconds=$7,sort_order=$8,updated_at=now()
 		WHERE id=$1
-		RETURNING id::text,code,name,game_kind,enabled,payout_multiplier,sort_order,created_at,updated_at`,
+		RETURNING id::text,code,name,game_kind,enabled,payout_multiplier,close_before_seconds,sort_order,created_at,updated_at`,
 		id, strings.TrimSpace(input.Code), strings.TrimSpace(input.Name), normalizeGameKind(input.GameKind), input.Enabled,
-		input.PayoutMultiplier, input.SortOrder).
-		Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.PayoutMultiplier, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt)
+		input.PayoutMultiplier, normalizeCloseBeforeSecs(input.CloseBeforeSecs), input.SortOrder).
+		Scan(&room.ID, &room.Code, &room.Name, &room.GameKind, &room.Enabled, &room.PayoutMultiplier, &room.CloseBeforeSecs, &room.SortOrder, &room.CreatedAt, &room.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return GameRoom{}, ErrGameRoomNotFound
 	}
@@ -144,7 +146,17 @@ func validateGameRoom(input GameRoomInput) error {
 	if kind := normalizeGameKind(input.GameKind); kind != "hash" && kind != "kline" {
 		return ErrInvalidGameRoom
 	}
+	if seconds := normalizeCloseBeforeSecs(input.CloseBeforeSecs); seconds < 1 || seconds > 59 {
+		return ErrInvalidGameRoom
+	}
 	return nil
+}
+
+func normalizeCloseBeforeSecs(value int) int {
+	if value == 0 {
+		return 3
+	}
+	return value
 }
 
 func normalizeGameKind(value string) string {

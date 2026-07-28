@@ -2139,7 +2139,7 @@ components:
     GameRoomInput:
       type: object
       additionalProperties: false
-      required: [code, name, game_kind, enabled, payout_multiplier, sort_order]
+      required: [code, name, game_kind, enabled, payout_multiplier, close_before_seconds, sort_order]
       properties:
         code:
           type: string
@@ -2156,6 +2156,12 @@ components:
           type: integer
           minimum: 1
           description: 含本金的整数派奖倍数。
+        close_before_seconds:
+          type: integer
+          minimum: 1
+          maximum: 59
+          default: 3
+          description: 开奖前多少秒封盘；K 线轮次固定为 60 秒。
         sort_order:
           type: integer
     GameRoom:
