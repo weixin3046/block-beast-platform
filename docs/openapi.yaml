@@ -2102,7 +2102,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [guess, bigsmall, dodge, btc, eth]
+          enum: [guess, bigsmall, dodge]
         block_interval:
           type: integer
           minimum: 1

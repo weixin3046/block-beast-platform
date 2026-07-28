@@ -16,8 +16,5 @@ SET room_id = CASE
         WHEN code LIKE 'kline\_%\_195' ESCAPE '\' THEN '8f3eb416-31e7-4f08-8f2c-bafbf53cc195'::uuid
         ELSE '8f3eb416-31e7-4f08-8f2c-bafbf53cc194'::uuid
     END,
-    mode = CASE
-        WHEN code LIKE 'kline\_eth%' ESCAPE '\' THEN 'eth'
-        ELSE 'btc'
-    END
+    mode = 'guess'
 WHERE rules->>'source' = 'okx_kline';
