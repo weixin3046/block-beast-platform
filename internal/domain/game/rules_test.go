@@ -121,6 +121,41 @@ func TestSelectionWinsDodgeMode(t *testing.T) {
 	}
 }
 
+func TestSelectionAllowedSupportsNormalAndDodgePlays(t *testing.T) {
+	normal := Rules{Outcomes: []string{"odd", "even"}, PayoutMultiplier: 2}
+	if !normal.SelectionAllowed(json.RawMessage(`{"pick":"odd"}`)) {
+		t.Fatal("odd should be available")
+	}
+	if normal.SelectionAllowed(json.RawMessage(`{"pick":"big"}`)) {
+		t.Fatal("big should not be available")
+	}
+	dodge := Rules{
+		Outcomes:         []string{"dodge_0", "dodge_1"},
+		PayoutMultiplier: 110,
+		DodgeMode:        true,
+	}
+	if !dodge.SelectionAllowed(json.RawMessage(`{"pick":"1"}`)) {
+		t.Fatal("raw dodge pick should map to dodge_1")
+	}
+}
+
+func TestRulesValidateBetLimits(t *testing.T) {
+	valid := Rules{
+		Outcomes:         []string{"odd", "even"},
+		PayoutMultiplier: 200,
+		BetLimits: map[string]BetLimit{
+			"USDT": {MinStakeMinor: 1, MaxStakeMinor: 1_000_000},
+		},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid limits: %v", err)
+	}
+	valid.BetLimits["USDT"] = BetLimit{MinStakeMinor: 100, MaxStakeMinor: 10}
+	if err := valid.Validate(); !errors.Is(err, ErrInvalidRules) {
+		t.Fatalf("invalid limits should fail, got %v", err)
+	}
+}
+
 func TestPayoutScaleSupportsRoomOddsAndLegacyRules(t *testing.T) {
 	if got := (Rules{PayoutMultiplier: 194, PayoutDivisor: 100}).PayoutScale(); got != 100 {
 		t.Fatalf("room payout scale = %d, want 100", got)
