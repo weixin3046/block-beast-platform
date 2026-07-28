@@ -128,13 +128,18 @@ func (service *Service) applyRoomPayout(ctx context.Context, roomID string, raw 
 		return raw, nil
 	}
 	var multiplier int64
-	if err := service.pool.QueryRow(ctx, `SELECT payout_multiplier FROM game_rooms WHERE id=$1`, roomID).Scan(&multiplier); errors.Is(err, pgx.ErrNoRows) {
+	var gameKind string
+	if err := service.pool.QueryRow(ctx, `SELECT payout_multiplier,game_kind FROM game_rooms WHERE id=$1`, roomID).Scan(&multiplier, &gameKind); errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrGameRoomNotFound
 	} else if err != nil {
 		return nil, err
 	}
 	var value map[string]any
 	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, ErrInvalidGameType
+	}
+	source, _ := value["source"].(string)
+	if (gameKind == "hash" && source != "tron_hash") || (gameKind == "kline" && source != "okx_kline") {
 		return nil, ErrInvalidGameType
 	}
 	value["payout_multiplier"] = multiplier

@@ -33,7 +33,7 @@ func TestOkxKlineUsesWebSocketCacheBeforeREST(t *testing.T) {
 	target := time.Now().UTC().Truncate(time.Minute)
 	cache := &cachedKline{minute: target, price: "65032.17"}
 	source := NewOkxKlineResultSourceWithStream("://invalid-rest-url", cache)
-	outcome, err := source.Outcome(context.Background(), game.Round{BetClosesAt: target}, game.Rules{
+	outcome, err := source.Outcome(context.Background(), game.Round{ResultAt: target.Add(time.Minute)}, game.Rules{
 		Outcomes: []string{"odd", "even"}, Extras: json.RawMessage(`{"symbol":"BTC-USDT"}`),
 	})
 	if err != nil {
@@ -69,10 +69,10 @@ func TestOkxKlineOutcome(t *testing.T) {
 
 	source := NewOkxKlineResultSource(server.URL)
 	round := game.Round{
-		RoundID:     "r1",
-		GameType:    "kline_btc_oddeven_194",
-		Sequence:    1,
-		BetClosesAt: targetMinute,
+		RoundID:  "r1",
+		GameType: "kline_btc_oddeven_194",
+		Sequence: 1,
+		ResultAt: targetMinute.Add(time.Minute),
 	}
 	rules := game.Rules{
 		Outcomes:         []string{"odd", "even"},
@@ -107,7 +107,7 @@ func TestOkxKlineOutcomeEven(t *testing.T) {
 	defer server.Close()
 
 	source := NewOkxKlineResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, BetClosesAt: targetMinute}
+	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, ResultAt: targetMinute.Add(time.Minute)}
 	rules := game.Rules{
 		Outcomes:         []string{"odd", "even"},
 		PayoutMultiplier: 194,
@@ -138,7 +138,7 @@ func TestOkxKlineNotReady(t *testing.T) {
 	defer server.Close()
 
 	source := NewOkxKlineResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, BetClosesAt: targetMinute}
+	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, ResultAt: targetMinute.Add(time.Minute)}
 	rules := game.Rules{
 		Outcomes:         []string{"odd", "even"},
 		PayoutMultiplier: 194,
@@ -168,7 +168,7 @@ func TestOkxKlineNotConfirmed(t *testing.T) {
 	defer server.Close()
 
 	source := NewOkxKlineResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, BetClosesAt: targetMinute}
+	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, ResultAt: targetMinute.Add(time.Minute)}
 	rules := game.Rules{
 		Outcomes:         []string{"odd", "even"},
 		PayoutMultiplier: 194,
@@ -198,7 +198,7 @@ func TestOkxKlineTimestampMismatch(t *testing.T) {
 	defer server.Close()
 
 	source := NewOkxKlineResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, BetClosesAt: targetMinute}
+	round := game.Round{RoundID: "r1", GameType: "kline_btc_oddeven_194", Sequence: 1, ResultAt: targetMinute.Add(time.Minute)}
 	rules := game.Rules{
 		Outcomes:         []string{"odd", "even"},
 		PayoutMultiplier: 194,

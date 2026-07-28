@@ -2102,7 +2102,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [guess, bigsmall, dodge]
+          enum: [guess, bigsmall, dodge, btc, eth]
         block_interval:
           type: integer
           minimum: 1
@@ -2139,13 +2139,17 @@ components:
     GameRoomInput:
       type: object
       additionalProperties: false
-      required: [code, name, enabled, payout_multiplier, sort_order]
+      required: [code, name, game_kind, enabled, payout_multiplier, sort_order]
       properties:
         code:
           type: string
           pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
         name:
           type: string
+        game_kind:
+          type: string
+          enum: [hash, kline]
+          description: 房间游戏分类；进入 K 线房间后再选择 BTC 或 ETH。
         enabled:
           type: boolean
         payout_multiplier:

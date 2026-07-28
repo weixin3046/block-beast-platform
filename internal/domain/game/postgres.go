@@ -20,24 +20,27 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
-// EnsureScheduledRounds keeps three future TRON rounds available for every
-// enabled room game. One TRON block is treated as three seconds and betting
-// closes one block before the target result block.
+// EnsureScheduledRounds keeps three future rounds available for every enabled
+// room game. TRON games use block_interval × 3 seconds; K-line games settle on
+// minute boundaries. Both close betting three seconds before the result time.
 func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context, now time.Time) (int, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('tron-round-scheduler',0))`); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('game-round-scheduler',0))`); err != nil {
 		return 0, err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT gt.id::text,gt.block_interval
+		SELECT gt.id::text,COALESCE(gt.block_interval,0),gt.rules->>'source'
 		FROM game_types gt
 		JOIN game_rooms gr ON gr.id=gt.room_id
 		WHERE gt.enabled=true AND gr.enabled=true
-		  AND gt.block_interval > 0 AND gt.rules->>'source'='tron_hash'
+		  AND (
+		    (gt.rules->>'source'='tron_hash' AND gt.block_interval > 0)
+		    OR gt.rules->>'source'='okx_kline'
+		  )
 		ORDER BY gr.sort_order,gt.code`)
 	if err != nil {
 		return 0, err
@@ -45,11 +48,12 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 	type scheduledType struct {
 		id       string
 		interval int
+		source   string
 	}
 	types := make([]scheduledType, 0)
 	for rows.Next() {
 		var item scheduledType
-		if err := rows.Scan(&item.id, &item.interval); err != nil {
+		if err := rows.Scan(&item.id, &item.interval, &item.source); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -62,7 +66,10 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 	rows.Close()
 	created := 0
 	for _, item := range types {
-		cycle := time.Duration(item.interval*3) * time.Second
+		cycle := time.Minute
+		if item.source == "tron_hash" {
+			cycle = time.Duration(item.interval*3) * time.Second
+		}
 		var lastSequence int64
 		var lastResult *time.Time
 		if err := tx.QueryRow(ctx, `
@@ -73,10 +80,16 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		}
 		nextSequence := lastSequence + 1
 		nextResult := now.UTC().Add(cycle)
+		if item.source == "okx_kline" {
+			nextResult = now.UTC().Truncate(time.Minute).Add(time.Minute)
+			if !nextResult.Add(-3 * time.Second).After(now.UTC()) {
+				nextResult = nextResult.Add(time.Minute)
+			}
+		}
 		if lastResult != nil {
 			nextResult = lastResult.UTC().Add(cycle)
-			if !nextResult.After(now) {
-				skipped := int64(now.Sub(nextResult)/cycle) + 1
+			if !nextResult.Add(-3 * time.Second).After(now) {
+				skipped := int64(now.Sub(nextResult.Add(-3*time.Second))/cycle) + 1
 				nextResult = nextResult.Add(time.Duration(skipped) * cycle)
 				nextSequence += skipped
 			}

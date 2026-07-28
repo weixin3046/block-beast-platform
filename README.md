@@ -152,7 +152,7 @@ docker compose down --volumes
 
 ## 下一步实现顺序
 
-已实现轮次结算与 Worker 接入：TRON 平均 3 秒出块，哈希 N 的轮次周期为 N × 3 秒；每轮在目标块前 3 秒封盘，数据库生成 `result_at = bet_closes_at + 3 秒`。Worker 为每个启用的房内玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。房间赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块哈希。
+已实现轮次结算与 Worker 接入：倍率房间按 `game_kind` 分为哈希和 K 线两类。TRON 平均 3 秒出块，哈希 N 的轮次周期为 N × 3 秒；K 线房间内可选择 BTC 或 ETH，每分钟使用刚闭合的上一根 1 分钟 K 线开奖。所有自动轮次均提前 3 秒封盘，数据库生成 `result_at = bet_closes_at + 3 秒`。Worker 为每个启用的房内玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。房间赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块哈希。
 
 玩法规则示例：
 

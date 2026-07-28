@@ -14,7 +14,7 @@ import (
 
 // OkxKlineResultSource 从 OKX 现货 1 分钟 K 线收盘价提取尾数作为开奖结果。
 // WebSocket 缓存是主数据通道，REST 用于启动及断线期间的历史补偿。
-// 目标 K 线分钟 = floor(round.ResultAt / 60s)，取开奖时刻所在且已收盘的 K 线。
+// 目标 K 线分钟 = floor(round.ResultAt / 60s) - 1 分钟，取开奖时刻刚刚闭合的 K 线。
 type OkxKlineResultSource struct {
 	baseURL string
 	client  *http.Client
@@ -60,12 +60,12 @@ func (source OkxKlineResultSource) Outcome(ctx context.Context, round game.Round
 		return nil, errors.New("okx_kline: symbol is required in extras")
 	}
 
-	// 目标 K 线分钟 = 封盘时间向下取整到分钟。
+	// 在整分钟开奖，使用该时刻刚闭合的上一根 1 分钟 K 线。
 	resultAt := round.ResultAt
 	if resultAt.IsZero() {
-		resultAt = round.BetClosesAt
+		resultAt = round.BetClosesAt.Add(3 * time.Second)
 	}
-	targetMinute := resultAt.UTC().Truncate(time.Minute)
+	targetMinute := resultAt.UTC().Truncate(time.Minute).Add(-time.Minute)
 	if source.stream != nil {
 		source.stream.Subscribe(extras.Symbol)
 		if closePrice, ok := source.stream.ClosePrice(extras.Symbol, targetMinute); ok {
