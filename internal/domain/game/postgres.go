@@ -211,7 +211,12 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 
 func (repository *PostgresRepository) State(ctx context.Context, gameType string) (RoundState, error) {
 	var state RoundState
-	current, err := repository.findGameTypeRound(ctx, gameType, "status = 'open'", "bet_closes_at ASC")
+	current, err := repository.findGameTypeRound(
+		ctx,
+		gameType,
+		"status IN ('open','closed','settling')",
+		"result_at ASC",
+	)
 	if err != nil && !errors.Is(err, ErrRoundNotFound) {
 		return state, err
 	}
