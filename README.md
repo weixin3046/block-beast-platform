@@ -65,6 +65,21 @@ API 健康检查：`http://localhost:8080/healthz`。
 
 Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket 地址为 `ws://localhost:8081/v1/ws`。
 
+### 初始化首个管理员
+
+空数据库不会创建默认账号。数据库迁移完成后，通过一次性命令创建首个管理员：
+
+```bash
+read -rsp "管理员密码: " BOOTSTRAP_ADMIN_PASSWORD
+export BOOTSTRAP_ADMIN_PASSWORD
+./bin/bootstrap-admin --login-name first-admin --display-name "平台管理员"
+unset BOOTSTRAP_ADMIN_PASSWORD
+```
+
+密码不会作为命令行参数出现，必须至少包含 12 个字符。命令使用事务锁检查管理员
+角色；只要平台已经存在任意管理员，就会拒绝再次执行，也不会修改或覆盖已有账号。
+创建成功后使用 `POST /v1/admin/auth/login` 登录。
+
 ## 当前接口
 
 前端可直接使用的完整接口契约见 [OpenAPI 3.1 文档](docs/openapi.yaml)，接入顺序与 TypeScript 示例见 [前端接入说明](docs/frontend-api.md)。

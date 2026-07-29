@@ -13,6 +13,7 @@ import (
 
 var ErrIdentityNotFound = errors.New("identity not found")
 var ErrLoginNameTaken = errors.New("login name is already taken")
+var ErrAdminAlreadyExists = errors.New("an administrator already exists")
 
 // PasswordCredentials 是 password 提供方下的登录凭证与账号状态。
 type PasswordCredentials struct {
@@ -131,6 +132,75 @@ func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, 
 		if _, err := tx.Exec(ctx, `INSERT INTO wallets (id, user_id, currency) VALUES ($1, $2, $3)`, uuid.NewString(), userID, currency); err != nil {
 			return "", err
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return userID, nil
+}
+
+// CreateFirstAdmin 创建平台的首个管理员。事务级 advisory lock 保证并发执行时
+// 最多只有一个命令可以成功；一旦存在任何 admin 角色账号，此入口永久拒绝执行。
+func (repository *PostgresRepository) CreateFirstAdmin(ctx context.Context, loginName string, displayName string, passwordHash string) (string, error) {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('admin-role-management', 0))`); err != nil {
+		return "", err
+	}
+	var adminExists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM user_roles
+			JOIN roles ON roles.id = user_roles.role_id
+			WHERE roles.code = $1
+		)`, RoleAdmin).Scan(&adminExists); err != nil {
+		return "", err
+	}
+	if adminExists {
+		return "", ErrAdminAlreadyExists
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO roles (id, code, description)
+		VALUES ($1, $2, 'platform administrator')
+		ON CONFLICT (code) DO NOTHING`, uuid.NewString(), RoleAdmin); err != nil {
+		return "", err
+	}
+	var roleID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE code = $1`, RoleAdmin).Scan(&roleID); err != nil {
+		return "", err
+	}
+
+	userID := uuid.NewString()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO users (id, login_name, display_name)
+		VALUES ($1, $2, $3)`, userID, loginName, displayName); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return "", ErrLoginNameTaken
+		}
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_identities (id, user_id, provider, subject, password_hash)
+		VALUES ($1, $2, 'password', $3, $4)`, uuid.NewString(), userID, loginName, passwordHash); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id)
+		VALUES ($1, $2)`, userID, roleID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, payload)
+		VALUES ($1, $2, 'auth.bootstrap_admin', 'user', $2, jsonb_build_object('login_name', $3))`,
+		uuid.NewString(), userID, loginName); err != nil {
+		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
