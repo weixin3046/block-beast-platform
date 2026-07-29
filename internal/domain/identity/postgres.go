@@ -198,8 +198,8 @@ func (repository *PostgresRepository) CreateFirstAdmin(ctx context.Context, logi
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, payload)
-		VALUES ($1, $2, 'auth.bootstrap_admin', 'user', $2, jsonb_build_object('login_name', $3))`,
-		uuid.NewString(), userID, loginName); err != nil {
+		VALUES ($1, $2, 'auth.bootstrap_admin', 'user', $3, jsonb_build_object('login_name', $4))`,
+		uuid.NewString(), userID, userID, loginName); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
