@@ -1011,6 +1011,50 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/tasks/bet-progress:
+    get:
+      tags: [Tasks]
+      operationId: listBetTaskProgress
+      summary: 查询当前用户今日投注任务进度
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 已启用的投注任务及完成、发奖状态。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BetTask'
+  /v1/activities/lucky-spin:
+    post:
+      tags: [Tasks]
+      operationId: luckySpin
+      summary: 幂等参与幸运转盘并原子扣体力、发放奖品
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id]
+              properties:
+                request_id:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: 抽奖结果。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpinResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/wallets/{accountID}/all:
     get:
       tags: [Wallets]
@@ -1439,6 +1483,44 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/PlatformConfig' }
+  /v1/admin/tasks/bet-configs:
+    get:
+      tags: [Admin]
+      summary: 查询活动任务档位配置
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 投注任务配置列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BetTaskConfig' }
+    put:
+      tags: [Admin]
+      summary: 替换活动任务档位配置
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items: { $ref: '#/components/schemas/BetTaskConfig' }
+      responses:
+        '200':
+          description: 保存后的任务配置。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BetTaskConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /v1/admin/configs/{key}:
     put:
       tags: [Admin]
@@ -2478,6 +2560,37 @@ components:
         occurred_at:
           type: string
           format: date-time
+    BetTask:
+      type: object
+      required: [id, threshold_minor, reward_minor, progress_minor, completed, rewarded]
+      properties:
+        id: { type: string, format: uuid }
+        threshold_minor: { type: integer, format: int64 }
+        reward_minor: { type: integer, format: int64 }
+        progress_minor: { type: integer, format: int64 }
+        completed: { type: boolean }
+        rewarded: { type: boolean }
+    BetTaskConfig:
+      type: object
+      required: [id, threshold_minor, reward_minor, enabled]
+      properties:
+        id: { type: string }
+        threshold_minor: { type: integer, format: int64, minimum: 1 }
+        reward_minor: { type: integer, format: int64, minimum: 1 }
+        enabled: { type: boolean }
+    SpinResult:
+      type: object
+      required: [id, prize_id, prize_label, reward_currency, reward_minor, stamina_cost, stamina_balance, reward_balance, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        prize_id: { type: string }
+        prize_label: { type: string }
+        reward_currency: { type: string, enum: [POINTS, USDT, STAMINA] }
+        reward_minor: { type: integer, format: int64 }
+        stamina_cost: { type: integer, format: int64 }
+        stamina_balance: { type: integer, format: int64 }
+        reward_balance: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
     LedgerEntry:
       type: object
       required: [id, user_id, business_type, business_id, amount_minor, balance_after_minor, remark, occurred_at]

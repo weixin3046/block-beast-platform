@@ -43,6 +43,117 @@ type CheckinResult struct {
 	OccurredAt        time.Time `json:"occurred_at"`
 }
 
+type BetTask struct {
+	ID             string `json:"id"`
+	ThresholdMinor int64  `json:"threshold_minor"`
+	RewardMinor    int64  `json:"reward_minor"`
+	ProgressMinor  int64  `json:"progress_minor"`
+	Completed      bool   `json:"completed"`
+	Rewarded       bool   `json:"rewarded"`
+}
+
+type BetTaskConfig struct {
+	ID             string `json:"id"`
+	ThresholdMinor int64  `json:"threshold_minor"`
+	RewardMinor    int64  `json:"reward_minor"`
+	Enabled        bool   `json:"enabled"`
+}
+
+func (service *Service) BetTaskConfigs(ctx context.Context) ([]BetTaskConfig, error) {
+	rows, err := service.pool.Query(ctx, `
+		SELECT id::text,threshold_minor,reward_minor,enabled
+		FROM bet_task_configs ORDER BY threshold_minor`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]BetTaskConfig, 0)
+	for rows.Next() {
+		var item BetTaskConfig
+		if err := rows.Scan(&item.ID, &item.ThresholdMinor, &item.RewardMinor, &item.Enabled); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (service *Service) ReplaceBetTaskConfigs(ctx context.Context, items []BetTaskConfig) ([]BetTaskConfig, error) {
+	if len(items) == 0 {
+		return nil, errors.New("at least one task config is required")
+	}
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	keep := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.ThresholdMinor <= 0 || item.RewardMinor <= 0 {
+			return nil, errors.New("task threshold and reward must be positive")
+		}
+		if item.ID == "" {
+			item.ID = uuid.NewString()
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO bet_task_configs(id,threshold_minor,reward_minor,enabled)
+				VALUES($1,$2,$3,$4)`,
+				item.ID, item.ThresholdMinor, item.RewardMinor, item.Enabled); err != nil {
+				return nil, err
+			}
+		} else {
+			if _, err := tx.Exec(ctx, `
+				UPDATE bet_task_configs
+				SET threshold_minor=$2,reward_minor=$3,enabled=$4
+				WHERE id=$1`,
+				item.ID, item.ThresholdMinor, item.RewardMinor, item.Enabled); err != nil {
+				return nil, err
+			}
+		}
+		keep = append(keep, item.ID)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE bet_task_configs SET enabled=false WHERE NOT (id::text = ANY($1))`, keep); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return service.BetTaskConfigs(ctx)
+}
+
+func (service *Service) BetTasks(ctx context.Context, userID string) ([]BetTask, error) {
+	today := service.now().UTC().Format("2006-01-02")
+	rows, err := service.pool.Query(ctx, `
+		SELECT c.id::text,c.threshold_minor,c.reward_minor,
+			COALESCE(p.total_stake_minor,0),
+			COALESCE(p.total_stake_minor,0) >= c.threshold_minor,
+			EXISTS(
+				SELECT 1 FROM bet_task_reward_records r
+				WHERE r.user_id=$1 AND r.bet_date=$2 AND r.config_id=c.id
+			)
+		FROM bet_task_configs c
+		LEFT JOIN user_daily_bet_progress p
+			ON p.user_id=$1 AND p.bet_date=$2
+		WHERE c.enabled
+		ORDER BY c.threshold_minor`, userID, today)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]BetTask, 0)
+	for rows.Next() {
+		var item BetTask
+		if err := rows.Scan(
+			&item.ID, &item.ThresholdMinor, &item.RewardMinor,
+			&item.ProgressMinor, &item.Completed, &item.Rewarded,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // Checkin 每日签到：按 (user_id, checkin_date) 幂等，首次签到发放体力奖励。
 func (service *Service) Checkin(ctx context.Context, userID string) (CheckinResult, error) {
 	today := service.now().UTC().Format("2006-01-02")

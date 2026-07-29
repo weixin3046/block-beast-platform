@@ -22,6 +22,7 @@ type CreditService interface {
 	RequestPointWithdrawal(ctx context.Context, userID, requestID string, amount int64, remark string) (credit.PointWithdrawal, error)
 	ReviewPointWithdrawal(ctx context.Context, id, reviewerID string, approved bool) error
 	ListPointWithdrawals(ctx context.Context, userID, status string, limit int) ([]credit.PointWithdrawal, error)
+	LuckySpin(ctx context.Context, userID, requestID string) (credit.SpinResult, error)
 }
 
 func (server *Server) pointWithdrawals(writer http.ResponseWriter, request *http.Request) {
@@ -119,6 +120,9 @@ func (server *Server) reviewPointWithdrawal(writer http.ResponseWriter, request 
 // TaskService 定义每日签到能力。
 type TaskService interface {
 	Checkin(ctx context.Context, userID string) (task.CheckinResult, error)
+	BetTasks(ctx context.Context, userID string) ([]task.BetTask, error)
+	BetTaskConfigs(ctx context.Context) ([]task.BetTaskConfig, error)
+	ReplaceBetTaskConfigs(ctx context.Context, items []task.BetTaskConfig) ([]task.BetTaskConfig, error)
 }
 
 func WithCredits(credits CreditService) Option {
