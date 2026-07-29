@@ -1,0 +1,25 @@
+[Unit]
+Description=NATS Server with JetStream
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nats
+Group=nats
+EnvironmentFile=/etc/nats/nats.env
+ExecStart=/usr/bin/nats-server --config /etc/nats/nats-server.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=65536
+MemoryHigh=384M
+MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nats
+
+[Install]
+WantedBy=multi-user.target

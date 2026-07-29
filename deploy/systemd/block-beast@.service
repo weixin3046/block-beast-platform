@@ -1,0 +1,27 @@
+[Unit]
+Description=Block Beast %i service
+After=network-online.target postgresql.service nats-server.service
+Wants=network-online.target
+Requires=postgresql.service nats-server.service
+
+[Service]
+Type=simple
+User=blockbeast
+Group=blockbeast
+WorkingDirectory=/opt/block-beast/current
+EnvironmentFile=/etc/block-beast/block-beast.env
+ExecStart=/opt/block-beast/current/bin/%i
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+LimitNOFILE=65536
+MemoryHigh=512M
+MemoryMax=768M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/block-beast/uploads
+
+[Install]
+WantedBy=multi-user.target
