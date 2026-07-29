@@ -70,10 +70,17 @@ Realtime 网关健康检查：`http://localhost:8081/healthz`，认证 WebSocket
 空数据库不会创建默认账号。数据库迁移完成后，通过一次性命令创建首个管理员：
 
 ```bash
+sudo -u blockbeast bash -c '
+set -a
+source /etc/block-beast/block-beast.env
+set +a
 read -rsp "管理员密码: " BOOTSTRAP_ADMIN_PASSWORD
+printf "\n"
 export BOOTSTRAP_ADMIN_PASSWORD
-./bin/bootstrap-admin --login-name first-admin --display-name "平台管理员"
-unset BOOTSTRAP_ADMIN_PASSWORD
+exec /opt/block-beast/current/bin/bootstrap-admin \
+  --login-name first-admin \
+  --display-name "平台管理员"
+'
 ```
 
 密码不会作为命令行参数出现，必须至少包含 12 个字符。命令使用事务锁检查管理员
