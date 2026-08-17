@@ -10,158 +10,75 @@ import (
 	"time"
 
 	"github.com/block-beast/platform/internal/domain/game"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-func TestTronHashOutcome(t *testing.T) {
-	// 模拟 QuickNode JSON-RPC 返回区块哈希
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req jsonRPCRequest
-		json.NewDecoder(r.Body).Decode(&req)
-		if req.Method != "eth_getBlockByNumber" {
-			t.Errorf("unexpected method: %s", req.Method)
+func tronTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, TronHashResultSource) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	return server, newTronHashResultSourceForEndpoint(server.URL, "test-key")
+}
+
+func TestTronHashOutcomeUsesOfficialBlockEndpoint(t *testing.T) {
+	server, source := tronTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/wallet/getblockbynum" || request.Header.Get("TRON-PRO-API-KEY") != "test-key" {
+			t.Fatalf("request = %s, api key = %q", request.URL.Path, request.Header.Get("TRON-PRO-API-KEY"))
 		}
-		// 轮次序号直接保存目标区块高度。
-		if req.Params[0] != "0x50c3bc2" {
-			t.Errorf("unexpected height param: %v", req.Params[0])
+		var body map[string]int64
+		_ = json.NewDecoder(request.Body).Decode(&body)
+		if body["num"] != 84687810 {
+			t.Fatalf("height = %d", body["num"])
 		}
-		result := json.RawMessage(`{"hash":"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567895"}`)
-		response := jsonRPCResponse{JSONRPC: "2.0", ID: 1, Result: result}
-		json.NewEncoder(w).Encode(response)
-	}))
+		_, _ = writer.Write([]byte(`{"blockID":"abcdef5"}`))
+	})
 	defer server.Close()
 
-	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 84687810, BetClosesAt: time.Now()}
-	rules := game.Rules{
-		Outcomes:         []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
-		PayoutMultiplier: 194,
-		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"block_interval":5}`),
-	}
-
-	outcome, err := source.Outcome(context.Background(), round, rules)
-	if err != nil {
-		t.Fatalf("Outcome: %v", err)
-	}
-	if len(outcome) != 1 || outcome[0] != "5" {
-		t.Fatalf("outcome = %v, want [\"5\"]", outcome)
+	outcome, err := source.Outcome(context.Background(), game.Round{Sequence: 84687810, BetClosesAt: time.Now()}, game.Rules{Outcomes: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"}, Source: "tron_hash"})
+	if err != nil || len(outcome) != 1 || outcome[0] != "5" {
+		t.Fatalf("outcome = %v, err = %v", outcome, err)
 	}
 }
 
-func TestTronHashOutcomeBigSmall(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		result := json.RawMessage(`{"hash":"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567895"}`)
-		response := jsonRPCResponse{JSONRPC: "2.0", ID: 1, Result: result}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+func TestTronGRPCBlockDecodesOfficialBlockExtentionWireFields(t *testing.T) {
+	raw := dynamicpb.NewMessage(tronGRPCDescriptors.rawBlockHeader)
+	raw.Set(tronGRPCDescriptors.rawBlockHeader.Fields().ByNumber(1), protoreflect.ValueOfInt64(1700000000123))
+	raw.Set(tronGRPCDescriptors.rawBlockHeader.Fields().ByNumber(7), protoreflect.ValueOfInt64(84687810))
+	header := dynamicpb.NewMessage(tronGRPCDescriptors.blockHeader)
+	header.Set(tronGRPCDescriptors.blockHeader.Fields().ByNumber(1), protoreflect.ValueOfMessage(raw))
+	response := dynamicpb.NewMessage(tronGRPCDescriptors.blockExtension)
+	response.Set(tronGRPCDescriptors.blockExtension.Fields().ByNumber(2), protoreflect.ValueOfMessage(header))
+	response.Set(tronGRPCDescriptors.blockExtension.Fields().ByNumber(3), protoreflect.ValueOfBytes([]byte{0xab, 0xcd, 0xef, 0x05}))
 
-	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_bigsmall_194", Sequence: 84687810, BetClosesAt: time.Now()}
-	rules := game.Rules{
-		Outcomes:         []string{"small", "big", "odd", "even"},
-		PayoutMultiplier: 194,
-		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"block_interval":5}`),
-	}
-
-	outcome, err := source.Outcome(context.Background(), round, rules)
+	block, err := tronBlockFromGRPC(response)
 	if err != nil {
-		t.Fatalf("Outcome: %v", err)
+		t.Fatal(err)
 	}
-	// 尾数 5 → big + odd
-	if len(outcome) != 2 || outcome[0] != "big" || outcome[1] != "odd" {
-		t.Fatalf("outcome = %v, want [\"big\",\"odd\"]", outcome)
+	if block.Hash != "abcdef05" || block.Number() != 84687810 || block.Timestamp() != 1700000000123 {
+		t.Fatalf("block = %#v", block)
 	}
 }
 
-func TestTronHashOutcomeDodge(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		result := json.RawMessage(`{"hash":"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567895"}`)
-		response := jsonRPCResponse{JSONRPC: "2.0", ID: 1, Result: result}
-		json.NewEncoder(w).Encode(response)
-	}))
+func TestCurrentTronBlockUsesOfficialEndpoint(t *testing.T) {
+	server, source := tronTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/wallet/getnowblock" {
+			t.Fatalf("path = %s", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{"blockID":"abc","block_header":{"raw_data":{"number":84687810,"timestamp":1700000000123}}}`))
+	})
 	defer server.Close()
 
-	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_dodge_194", Sequence: 84687810, BetClosesAt: time.Now()}
-	rules := game.Rules{
-		Outcomes:         []string{"dodge_0", "dodge_1", "dodge_2", "dodge_3", "dodge_4", "dodge_5", "dodge_6", "dodge_7", "dodge_8", "dodge_9"},
-		PayoutMultiplier: 194,
-		Source:           "tron_hash",
-		DodgeMode:        true,
-		Extras:           json.RawMessage(`{"block_interval":5}`),
-	}
-
-	outcome, err := source.Outcome(context.Background(), round, rules)
-	if err != nil {
-		t.Fatalf("Outcome: %v", err)
-	}
-	if len(outcome) != 1 || outcome[0] != "dodge_5" {
-		t.Fatalf("outcome = %v, want [\"dodge_5\"]", outcome)
+	height, blockAt, err := source.CurrentBlock(context.Background())
+	if err != nil || height != 84687810 || blockAt.UnixMilli() != 1700000000123 {
+		t.Fatalf("height = %d, time = %s, err = %v", height, blockAt, err)
 	}
 }
 
 func TestTronHashBlockNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := jsonRPCResponse{JSONRPC: "2.0", ID: 1, Result: json.RawMessage(`null`)}
-		json.NewEncoder(w).Encode(response)
-	}))
+	server, source := tronTestServer(t, func(writer http.ResponseWriter, request *http.Request) { _, _ = writer.Write([]byte(`{}`)) })
 	defer server.Close()
-
-	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "tronhash_hash5_guess_194", Sequence: 84687810, BetClosesAt: time.Now()}
-	rules := game.Rules{
-		Outcomes:         []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
-		PayoutMultiplier: 194,
-		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"block_interval":5}`),
-	}
-
-	_, err := source.Outcome(context.Background(), round, rules)
+	_, err := source.Outcome(context.Background(), game.Round{Sequence: 1}, game.Rules{Source: "tron_hash"})
 	if !errors.Is(err, ErrBlockNotFound) {
-		t.Fatalf("err = %v, want ErrBlockNotFound", err)
-	}
-}
-
-func TestTronHashMissingTargetHeight(t *testing.T) {
-	source := NewTronHashResultSource("http://unused")
-	round := game.Round{RoundID: "r1", GameType: "test", Sequence: 0, BetClosesAt: time.Now()}
-	rules := game.Rules{
-		Outcomes:         []string{"0", "1"},
-		PayoutMultiplier: 194,
-		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{}`),
-	}
-
-	_, err := source.Outcome(context.Background(), round, rules)
-	if err == nil {
-		t.Fatal("should fail when target block height is missing")
-	}
-}
-
-func TestTronHashRPCError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      1,
-			Error:   &jsonRPCError{Code: -32000, Message: "server error"},
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	source := NewTronHashResultSource(server.URL)
-	round := game.Round{RoundID: "r1", GameType: "test", Sequence: 1, BetClosesAt: time.Now()}
-	rules := game.Rules{
-		Outcomes:         []string{"0", "1"},
-		PayoutMultiplier: 194,
-		Source:           "tron_hash",
-		Extras:           json.RawMessage(`{"block_interval":5}`),
-	}
-
-	_, err := source.Outcome(context.Background(), round, rules)
-	if err == nil || err.Error() != "tron rpc error -32000: server error" {
-		t.Fatalf("err = %v, want tron rpc error", err)
+		t.Fatalf("err = %v", err)
 	}
 }

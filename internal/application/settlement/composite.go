@@ -2,6 +2,7 @@ package settlement
 
 import (
 	"context"
+	"time"
 
 	"github.com/block-beast/platform/internal/domain/game"
 )
@@ -16,18 +17,18 @@ type CompositeResultSource struct {
 }
 
 // NewCompositeResultSource 创建复合结果源，注入外部数据源配置。
-func NewCompositeResultSource(tronRPCURL, okxRESTURL string) CompositeResultSource {
+func NewCompositeResultSource(tronGridAPIKey, okxRESTURL string) CompositeResultSource {
 	return CompositeResultSource{
-		tronHash: NewTronHashResultSource(tronRPCURL),
+		tronHash: NewTronHashResultSource(tronGridAPIKey),
 		okxKline: NewOkxKlineResultSource(okxRESTURL),
 		fallback: NewHashResultSource(),
 	}
 }
 
-func NewCompositeResultSourceWithWebSocket(tronRPCURL, okxRESTURL, okxWebSocketURL string) *CompositeResultSource {
+func NewCompositeResultSourceWithWebSocket(tronGridAPIKey, tronGridGRPCEndpoint, okxRESTURL, okxWebSocketURL string) *CompositeResultSource {
 	stream := NewOkxKlineStream(okxWebSocketURL)
 	return &CompositeResultSource{
-		tronHash:  NewTronHashResultSource(tronRPCURL),
+		tronHash:  NewTronHashResultSourceWithGRPC(tronGridAPIKey, tronGridGRPCEndpoint),
 		okxKline:  NewOkxKlineResultSourceWithStream(okxRESTURL, stream),
 		fallback:  NewHashResultSource(),
 		okxStream: stream,
@@ -38,10 +39,13 @@ func (composite *CompositeResultSource) Close() {
 	if composite != nil && composite.okxStream != nil {
 		composite.okxStream.Close()
 	}
+	if composite != nil {
+		_ = composite.tronHash.Close()
+	}
 }
 
-func (composite CompositeResultSource) CurrentTronBlockHeight(ctx context.Context) (int64, error) {
-	return composite.tronHash.CurrentBlockHeight(ctx)
+func (composite CompositeResultSource) CurrentTronBlock(ctx context.Context) (int64, time.Time, error) {
+	return composite.tronHash.CurrentBlock(ctx)
 }
 
 // Outcome 实现 ResultSource 接口，按 rules.Source 路由到对应的子源。

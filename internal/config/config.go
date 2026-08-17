@@ -24,7 +24,8 @@ type Config struct {
 	AccessTokenTTL         time.Duration
 	RefreshTokenTTL        time.Duration
 	ChainWebhookSkew       time.Duration
-	TronRPCURL             string
+	TronGridAPIKey         string
+	TronGridGRPCEndpoint   string
 	OkxRESTURL             string
 	OkxWebSocketURL        string
 	PQPAAPIURL             string
@@ -66,7 +67,8 @@ func Load() Config {
 		AccessTokenTTL:         durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:        durationOrDefault("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		ChainWebhookSkew:       durationOrDefault("CHAIN_WEBHOOK_ALLOWED_SKEW", 5*time.Minute),
-		TronRPCURL:             firstNonEmpty(os.Getenv("QUICKNODE_TRON_URL"), os.Getenv("TRON_RPC_URL")),
+		TronGridAPIKey:         strings.TrimSpace(os.Getenv("TRON_GRID_API_KEY")),
+		TronGridGRPCEndpoint:   valueOrDefault("TRON_GRID_GRPC_ENDPOINT", "grpc.trongrid.io:50051"),
 		OkxRESTURL:             valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
 		OkxWebSocketURL:        valueOrDefault("OKX_WEBSOCKET_URL", "wss://ws.okx.com:8443/ws/v5/business"),
 		PQPAAPIURL:             os.Getenv("PQPA_API_URL"),

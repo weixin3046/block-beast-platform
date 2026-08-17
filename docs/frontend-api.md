@@ -23,7 +23,8 @@
 1. 玩家端调用 `POST /v1/auth/register` 注册账号（或 `POST /v1/auth/login` 登录），并使用 `POST /v1/auth/refresh` 续期；管理后台必须调用 `POST /v1/admin/auth/login`，并使用 `POST /v1/admin/auth/refresh` 续期。两类刷新令牌绑定所属端，不能交叉使用，续期时还会重新检查当前角色。退出时调用 `POST /v1/auth/logout` 撤销刷新令牌。登录返回 `429` 表示该登录名因连续失败被临时锁定，前端应停止自动重试并遵循 `Retry-After`。
 2. 调用 `GET /v1/rounds?game_type={code}` 获取仍可下注的轮次。
    游戏页同时调用 `GET /v1/rounds/state?game_type={code}` 展示当前轮次封盘倒计时
-   与最近一期已结算结果；倒计时始终以响应中的 `bet_closes_at` 为准。
+   与最近一期已结算结果；倒计时始终以响应中的 `bet_closes_at` 为准。使用同一响应的
+   `server_time` 与收到响应时的本地时间计算时差，避免设备时钟快慢造成 1–2 秒误差。
 3. 调用 `POST /v1/bets` 创建投注，`currency` 传 `USDT` 或 `POINTS`。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
 4. 使用 `GET /v1/bets/{betID}` 轮询投注状态；当前状态有 `accepted`、`won`、`lost` 与 `refunded`。
 5. 使用 `GET /v1/wallets/{accountID}?currency=USDT` 查询单币种余额，或 `GET /v1/wallets/{accountID}/all` 一次拉取全部币种。
@@ -32,8 +33,19 @@
 8. 大厅调用 `GET /v1/announcements` 获取当前时间窗口内启用的公告；该接口无需登录。
 
 轮次响应同时包含 `bet_closes_at` 和 `result_at`。前者是停止接受投注的时刻，
-后者固定晚 3 秒并用于开奖；倒计时必须以服务端字段为准。封盘后到开奖前不得
+后者是目标区块结果可用后的开奖时刻；倒计时必须以服务端字段为准。封盘后到开奖前不得
 继续提交投注，也不得把本地时间或行情提前当作开奖结果。
+
+前端校准示例：
+
+```ts
+const state = await api.get(`/v1/rounds/state?game_type=${code}`)
+const serverOffsetMs = Date.parse(state.server_time) - Date.now()
+const remainingMs = () => Math.max(
+  0,
+  Date.parse(state.current.bet_closes_at) - (Date.now() + serverOffsetMs),
+)
+```
 
 管理后台可用 `GET/POST /v1/admin/announcements` 和 `PUT /v1/admin/announcements/{id}` 管理公告。`operator` 与 `admin` 均可管理公告；不可变审计日志 `GET /v1/admin/audit-logs?action={action}&actor_user_id={id}` 仅 `admin` 可查看。
 
@@ -253,4 +265,4 @@ Worker 默认每分钟重建当日快照，因此结算完成到榜单变化可�
 
 创建时总金额立即从发送者可用余额扣除并进入红包托管。金额必须至少等于份数，最多 100 份；发送者不能领取自己的红包。每次领取至少一个最小货币单位，最后一份获得全部剩余金额。默认 24 小时过期，Worker 将未领取余额退回发送者原币种钱包。创建、领取、退款均在同一事务中更新钱包、写不可变账本和 outbox 事件。
 
-游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用 QuickNode JSON-RPC。前端不得自行计算或替代开奖结果。
+游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用官方 TronGrid FullNode HTTP API。前端不得自行计算或替代开奖结果。

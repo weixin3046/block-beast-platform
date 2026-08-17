@@ -24,7 +24,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 // room game. A TRON round sequence is its immutable target block height, selected
 // from the next block_interval multiple after tronHeight. K-line games settle on
 // minute boundaries.
-func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context, now time.Time, tronHeight int64) (int, error) {
+func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context, now time.Time, tronHeight int64, tronBlockAt time.Time) (int, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -94,7 +94,11 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 				nextSequence = lastSequence + interval
 			}
 			blockDistance := nextSequence - tronHeight
-			nextResult = now.UTC().Add(time.Duration(blockDistance*3) * time.Second)
+			referenceTime := now.UTC()
+			if !tronBlockAt.IsZero() {
+				referenceTime = tronBlockAt.UTC()
+			}
+			nextResult = referenceTime.Add(time.Duration(blockDistance*3) * time.Second)
 			if !nextResult.Add(-item.closeBefore).After(now.UTC()) {
 				nextSequence += interval
 				nextResult = nextResult.Add(cycle)
@@ -124,10 +128,10 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		for futureCount < 3 {
 			betClosesAt := nextResult.Add(-item.closeBefore)
 			command, err := tx.Exec(ctx, `
-				INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at)
-				VALUES($1,$2,$3,'open',$4)
+				INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at)
+				VALUES($1,$2,$3,'open',$4,$5)
 				ON CONFLICT(game_type_id,sequence) DO NOTHING`,
-				uuid.NewString(), item.id, nextSequence, betClosesAt)
+				uuid.NewString(), item.id, nextSequence, betClosesAt, nextResult)
 			if err != nil {
 				return created, err
 			}

@@ -75,7 +75,7 @@ func main() {
 	leaderboardService := leaderboard.NewService(pool)
 	leaderboardTicker := time.NewTicker(cfg.LeaderboardRefresh)
 	defer leaderboardTicker.Stop()
-	resultSource := settlement.NewCompositeResultSourceWithWebSocket(cfg.TronRPCURL, cfg.OkxRESTURL, cfg.OkxWebSocketURL)
+	resultSource := settlement.NewCompositeResultSourceWithWebSocket(cfg.TronGridAPIKey, cfg.TronGridGRPCEndpoint, cfg.OkxRESTURL, cfg.OkxWebSocketURL)
 	defer resultSource.Close()
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
 	defer ticker.Stop()
@@ -122,11 +122,11 @@ func main() {
 }
 
 func ensureScheduledRounds(ctx context.Context, logger *slog.Logger, repository *game.PostgresRepository, source *settlement.CompositeResultSource) {
-	tronHeight, err := source.CurrentTronBlockHeight(ctx)
+	tronHeight, tronBlockAt, err := source.CurrentTronBlock(ctx)
 	if err != nil {
 		logger.Error("TRON block height query failed; hash scheduling skipped", "error", err)
 	}
-	created, err := repository.EnsureScheduledRounds(ctx, time.Now().UTC(), tronHeight)
+	created, err := repository.EnsureScheduledRounds(ctx, time.Now().UTC(), tronHeight, tronBlockAt)
 	if err != nil {
 		logger.Error("automatic round scheduling failed", "error", err)
 		return

@@ -228,12 +228,18 @@ func (server *Server) Handler() http.Handler {
 
 func (server *Server) withCORS(next http.Handler) http.Handler {
 	allowed := make(map[string]struct{}, len(server.config.APIAllowedOrigins))
+	allowAnyOrigin := false
 	for _, origin := range server.config.APIAllowedOrigins {
+		if origin == "*" {
+			allowAnyOrigin = true
+			continue
+		}
 		allowed[origin] = struct{}{}
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		origin := request.Header.Get("Origin")
-		if _, ok := allowed[origin]; ok {
+		_, originAllowed := allowed[origin]
+		if allowAnyOrigin || originAllowed {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Add("Vary", "Origin")
 			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -242,7 +248,7 @@ func (server *Server) withCORS(next http.Handler) http.Handler {
 		}
 		if request.Method == http.MethodOptions {
 			if origin != "" {
-				if _, ok := allowed[origin]; !ok {
+				if !allowAnyOrigin && !originAllowed {
 					writeJSON(writer, http.StatusForbidden, map[string]string{"error": "origin is not allowed"})
 					return
 				}
@@ -561,7 +567,15 @@ func (server *Server) roundState(writer http.ResponseWriter, request *http.Reque
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to load round state"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, state)
+	// Return the server clock with the state so clients can compensate for local
+	// device clock skew while rendering the betting countdown.
+	writeJSON(writer, http.StatusOK, struct {
+		game.RoundState
+		ServerTime time.Time `json:"server_time"`
+	}{
+		RoundState: state,
+		ServerTime: time.Now().UTC(),
+	})
 }
 
 func (server *Server) round(writer http.ResponseWriter, request *http.Request) {

@@ -6,28 +6,43 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/block-beast/platform/internal/domain/game"
 )
 
-// TronHashResultSource 从 TRON 区块哈希提取尾数作为开奖结果。
+const tronGridFullNodeURL = "https://api.trongrid.io"
+
+// TronHashResultSource 从 TRON 官方 FullNode HTTP API 的区块哈希提取尾数作为开奖结果。
 // 哈希轮次的 sequence 就是创建轮次时锁定的目标区块高度。
 type TronHashResultSource struct {
 	baseURL string
+	apiKey  string
 	client  *http.Client
+	grpc    *tronGRPCBlockClient
 }
 
-// NewTronHashResultSource 创建 TRON 哈希结果源。baseURL 必须通过环境变量注入。
-func NewTronHashResultSource(baseURL string) TronHashResultSource {
-	return TronHashResultSource{
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 10 * time.Second},
+// NewTronHashResultSource 创建使用 TRON 官方 TronGrid FullNode API 的哈希结果源。
+func NewTronHashResultSource(apiKey string) TronHashResultSource {
+	return NewTronHashResultSourceWithGRPC(apiKey, tronGridGRPCFullNodeEndpoint)
+}
+
+func NewTronHashResultSourceWithGRPC(apiKey, grpcEndpoint string) TronHashResultSource {
+	if strings.HasPrefix(apiKey, "http://") || strings.HasPrefix(apiKey, "https://") {
+		return newTronHashResultSourceForEndpoint(apiKey, "")
 	}
+	return TronHashResultSource{
+		baseURL: tronGridFullNodeURL,
+		apiKey:  strings.TrimSpace(apiKey),
+		client:  &http.Client{Timeout: 10 * time.Second},
+		grpc:    newTronGRPCBlockClient(strings.TrimSpace(grpcEndpoint), strings.TrimSpace(apiKey)),
+	}
+}
+
+func newTronHashResultSourceForEndpoint(endpoint string, apiKey string) TronHashResultSource {
+	return TronHashResultSource{baseURL: strings.TrimRight(endpoint, "/"), apiKey: strings.TrimSpace(apiKey), client: &http.Client{Timeout: 10 * time.Second}}
 }
 
 // tronExtras 解析 rules.extras 中的 TRON 数据源参数。
@@ -95,104 +110,94 @@ func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round
 
 // CurrentBlockHeight 返回 TRON 最新已生成区块高度，供轮次调度器选择下一个
 // interval 整倍数区块。目标高度一旦写入 round.sequence，后续重试不会漂移。
-func (source TronHashResultSource) CurrentBlockHeight(ctx context.Context) (int64, error) {
-	if source.baseURL == "" {
-		return 0, errors.New("tron_hash: QUICKNODE_TRON_URL is required")
-	}
-	requestBody, err := json.Marshal(jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      1,
-		Method:  "eth_blockNumber",
-		Params:  []any{},
-	})
+func (source TronHashResultSource) CurrentBlock(ctx context.Context) (int64, time.Time, error) {
+	block, err := source.fetchCurrentBlock(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("marshal jsonrpc request: %w", err)
+		return 0, time.Time{}, err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, source.baseURL, bytes.NewReader(requestBody))
-	if err != nil {
-		return 0, fmt.Errorf("create block height request: %w", err)
+	if block.Number() <= 0 || block.Timestamp() <= 0 {
+		return 0, time.Time{}, errors.New("tron full node returned invalid block metadata")
 	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-	httpResponse, err := source.client.Do(httpRequest)
-	if err != nil {
-		return 0, fmt.Errorf("call tron block height rpc: %w", err)
-	}
-	defer httpResponse.Body.Close()
-	body, err := io.ReadAll(httpResponse.Body)
-	if err != nil {
-		return 0, fmt.Errorf("read block height response: %w", err)
-	}
-	var rpcResponse jsonRPCResponse
-	if err := json.Unmarshal(body, &rpcResponse); err != nil {
-		return 0, fmt.Errorf("unmarshal block height response: %w", err)
-	}
-	if rpcResponse.Error != nil {
-		return 0, fmt.Errorf("tron rpc error %d: %s", rpcResponse.Error.Code, rpcResponse.Error.Message)
-	}
-	var heightHex string
-	if err := json.Unmarshal(rpcResponse.Result, &heightHex); err != nil {
-		return 0, fmt.Errorf("decode block height: %w", err)
-	}
-	height, err := strconv.ParseInt(strings.TrimPrefix(heightHex, "0x"), 16, 64)
-	if err != nil || height <= 0 {
-		return 0, errors.New("tron rpc returned invalid block height")
-	}
-	return height, nil
+	return block.Number(), time.UnixMilli(block.Timestamp()).UTC(), nil
 }
 
 // fetchBlockHash 调用兼容的 JSON-RPC eth_getBlockByNumber 获取区块哈希。
 // 区块未产出（result 为 null）时返回 ErrBlockNotFound，调用方应等待下轮重试。
 func (source TronHashResultSource) fetchBlockHash(ctx context.Context, height int64) (string, error) {
-	if source.baseURL == "" {
-		return "", errors.New("tron_hash: QUICKNODE_TRON_URL is required")
-	}
-	heightHex := "0x" + strconv.FormatInt(height, 16)
-	requestBody, err := json.Marshal(jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      1,
-		Method:  "eth_getBlockByNumber",
-		Params:  []any{heightHex, false},
-	})
+	block, err := source.fetchBlockByHeight(ctx, height)
 	if err != nil {
-		return "", fmt.Errorf("marshal jsonrpc request: %w", err)
-	}
-
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, source.baseURL, bytes.NewReader(requestBody))
-	if err != nil {
-		return "", fmt.Errorf("create http request: %w", err)
-	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-
-	httpResponse, err := source.client.Do(httpRequest)
-	if err != nil {
-		return "", fmt.Errorf("call tron rpc: %w", err)
-	}
-	defer httpResponse.Body.Close()
-
-	body, err := io.ReadAll(httpResponse.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response body: %w", err)
-	}
-
-	var rpcResponse jsonRPCResponse
-	if err := json.Unmarshal(body, &rpcResponse); err != nil {
-		return "", fmt.Errorf("unmarshal jsonrpc response: %w", err)
-	}
-	if rpcResponse.Error != nil {
-		return "", fmt.Errorf("tron rpc error %d: %s", rpcResponse.Error.Code, rpcResponse.Error.Message)
-	}
-
-	// result 为 null 表示区块未产出。
-	if string(rpcResponse.Result) == "null" {
-		return "", ErrBlockNotFound
-	}
-
-	var block blockResult
-	if err := json.Unmarshal(rpcResponse.Result, &block); err != nil {
-		return "", fmt.Errorf("unmarshal block result: %w", err)
+		return "", err
 	}
 	if block.Hash == "" {
-		return "", errors.New("block hash is empty")
+		return "", ErrBlockNotFound
 	}
 	return block.Hash, nil
+}
+
+func (source TronHashResultSource) Close() error {
+	if source.grpc == nil {
+		return nil
+	}
+	return source.grpc.Close()
+}
+
+func (source TronHashResultSource) fetchCurrentBlock(ctx context.Context) (tronBlock, error) {
+	if source.grpc != nil && source.grpc.endpoint != "" {
+		block, err := tronGRPCNowBlock(ctx, source.grpc)
+		if err == nil {
+			return block, nil
+		}
+	}
+	return source.fetchBlock(ctx, "/wallet/getnowblock", map[string]any{})
+}
+
+func (source TronHashResultSource) fetchBlockByHeight(ctx context.Context, height int64) (tronBlock, error) {
+	if source.grpc != nil && source.grpc.endpoint != "" {
+		block, err := tronGRPCBlockByNumber(ctx, source.grpc, height)
+		if err == nil {
+			return block, nil
+		}
+	}
+	return source.fetchBlock(ctx, "/wallet/getblockbynum", map[string]any{"num": height})
+}
+
+type tronBlock struct {
+	Hash   string `json:"blockID"`
+	Header struct {
+		RawData struct {
+			Number    int64 `json:"number"`
+			Timestamp int64 `json:"timestamp"`
+		} `json:"raw_data"`
+	} `json:"block_header"`
+}
+
+func (block tronBlock) Number() int64    { return block.Header.RawData.Number }
+func (block tronBlock) Timestamp() int64 { return block.Header.RawData.Timestamp }
+
+func (source TronHashResultSource) fetchBlock(ctx context.Context, path string, payload map[string]any) (tronBlock, error) {
+	requestBody, err := json.Marshal(payload)
+	if err != nil {
+		return tronBlock{}, errors.New("marshal TRON full node request")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, source.baseURL+path, bytes.NewReader(requestBody))
+	if err != nil {
+		return tronBlock{}, errors.New("create TRON full node request")
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if source.apiKey != "" {
+		request.Header.Set("TRON-PRO-API-KEY", source.apiKey)
+	}
+	response, err := source.client.Do(request)
+	if err != nil {
+		return tronBlock{}, errors.New("call TRON full node")
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return tronBlock{}, fmt.Errorf("TRON full node returned HTTP %d", response.StatusCode)
+	}
+	var block tronBlock
+	if err := json.NewDecoder(response.Body).Decode(&block); err != nil {
+		return tronBlock{}, errors.New("decode TRON full node response")
+	}
+	return block, nil
 }

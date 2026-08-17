@@ -11,7 +11,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build -o /out/worker ./cmd/worker && \
     CGO_ENABLED=0 GOOS=linux go build -o /out/realtime ./cmd/realtime
 
-FROM gcr.io/distroless/static-debian12
+FROM alpine:3.22
 WORKDIR /app
 COPY --from=build /out/ ./
-USER nonroot:nonroot
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+USER 65532:65532

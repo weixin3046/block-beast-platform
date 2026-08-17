@@ -25,25 +25,30 @@ func TestPasswordPolicyIsControlledByExplicitSetting(t *testing.T) {
 }
 
 func TestSensitiveRPCAndWithdrawalRiskConfiguration(t *testing.T) {
-	t.Setenv("TRON_RPC_URL", "")
-	t.Setenv("QUICKNODE_TRON_URL", "")
+	t.Setenv("TRON_GRID_API_KEY", "")
 	t.Setenv("WITHDRAWAL_MIN_MINOR", "2000000")
 	t.Setenv("WITHDRAWAL_MAX_MINOR", "9000000")
 	t.Setenv("WITHDRAWAL_DAILY_LIMIT_MINOR", "15000000")
 	config := Load()
-	if config.TronRPCURL != "" {
-		t.Fatal("TRON RPC URL must not have a credential-bearing default")
+	if config.TronGridAPIKey != "" {
+		t.Fatal("TRON Grid API key must not have a credential-bearing default")
 	}
 	if config.WithdrawalMinMinor != 2_000_000 || config.WithdrawalMaxMinor != 9_000_000 || config.WithdrawalDailyMinor != 15_000_000 {
 		t.Fatalf("withdrawal limits = %d/%d/%d", config.WithdrawalMinMinor, config.WithdrawalMaxMinor, config.WithdrawalDailyMinor)
 	}
 }
 
-func TestQuickNodeURLTakesPrecedenceOverLegacyName(t *testing.T) {
-	t.Setenv("TRON_RPC_URL", "https://legacy.invalid/jsonrpc")
-	t.Setenv("QUICKNODE_TRON_URL", "https://quicknode.invalid/jsonrpc")
-	if got := Load().TronRPCURL; got != "https://quicknode.invalid/jsonrpc" {
-		t.Fatalf("TRON RPC URL = %q", got)
+func TestTronGridAPIKeyLoads(t *testing.T) {
+	t.Setenv("TRON_GRID_API_KEY", "test-key")
+	if got := Load().TronGridAPIKey; got != "test-key" {
+		t.Fatalf("TRON Grid API key = %q", got)
+	}
+}
+
+func TestTronGridGRPCEndpointLoads(t *testing.T) {
+	t.Setenv("TRON_GRID_GRPC_ENDPOINT", "grpc.example.test:50051")
+	if got := Load().TronGridGRPCEndpoint; got != "grpc.example.test:50051" {
+		t.Fatalf("grpc endpoint = %q", got)
 	}
 }
 

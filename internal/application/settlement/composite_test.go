@@ -13,9 +13,7 @@ import (
 
 func TestCompositeRoutesTronHash(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		result := json.RawMessage(`{"hash":"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567895"}`)
-		response := jsonRPCResponse{JSONRPC: "2.0", ID: 1, Result: result}
-		json.NewEncoder(w).Encode(response)
+		json.NewEncoder(w).Encode(map[string]string{"blockID": "abcdef5"})
 	}))
 	defer server.Close()
 

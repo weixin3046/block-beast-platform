@@ -53,7 +53,7 @@ Copy-Item .env.example .env
 
 ```bash
 cp .env.production.example .env.production
-# 填写生产数据库、NATS、JWT、PQPA、QuickNode 及域名配置
+# 填写生产数据库、NATS、JWT、PQPA、TronGrid 及域名配置
 ./scripts/deploy-production.sh
 ```
 
@@ -83,7 +83,7 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 '
 ```
 
-密码不会作为命令行参数出现，必须至少包含 12 个字符。命令使用事务锁检查管理员
+密码不会作为命令行参数出现。命令使用事务锁检查管理员
 角色；只要平台已经存在任意管理员，就会拒绝再次执行，也不会修改或覆盖已有账号。
 创建成功后使用 `POST /v1/admin/auth/login` 登录。
 
@@ -174,7 +174,7 @@ docker compose down --volumes
 
 ## 下一步实现顺序
 
-已实现轮次结算与 Worker 接入：房间按 `game_kind` 分为哈希和 K 线两类。房间和玩法代码均由后端自动生成。TRON 平均 3 秒出块，哈希 N 使用当前高度 H 的下一个 N 整倍数 `(floor(H/N)+1)×N` 作为目标区块，并把该高度直接保存为轮次号，不需要基准区块；K 线房间内可选择 BTC 或 ETH，每分钟使用刚闭合的上一根 1 分钟 K 线开奖。每个房内玩法独立配置赔率、投注限额和提前封盘秒数。Worker 为每个启用玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。玩法赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 使用 QuickNode TRON JSON-RPC 查询区块高度与哈希。
+已实现轮次结算与 Worker 接入：房间按 `game_kind` 分为哈希和 K 线两类。房间和玩法代码均由后端自动生成。TRON 平均 3 秒出块，哈希 N 使用当前高度 H 的下一个 N 整倍数 `(floor(H/N)+1)×N` 作为目标区块，并把该高度直接保存为轮次号，不需要基准区块；K 线房间内可选择 BTC 或 ETH，每分钟使用刚闭合的上一根 1 分钟 K 线开奖。每个房内玩法独立配置赔率、投注限额和提前封盘秒数。Worker 为每个启用玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。玩法赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 优先使用官方 TronGrid FullNode gRPC 查询区块高度与哈希，并在 gRPC 暂时不可用时回退到官方 HTTP FullNode API。
 
 玩法规则示例：
 
@@ -198,3 +198,17 @@ docker compose down --volumes
 5. ~~实时 WebSocket 协议、订阅和通知。~~（已完成：v1 协议握手、全局游戏/指定轮次订阅、用户定向资金通知、心跳和慢连接背压保护）
 
 不在仓库中保存私钥、数据库密码、第三方 API 密钥或生产环境配置。
+
+
+cd /Users/chasinga/Documents/yongxin/block-beast-platform
+
+rsync -az \
+  --exclude '.git/' \
+  --exclude '.env.production' \
+  --exclude '.DS_Store' \
+  ./ root@58.87.64.208:/opt/block-beast/
+
+ssh root@58.87.64.208 '
+  cd /opt/block-beast &&
+  ./scripts/deploy-production.sh .env.production
+'

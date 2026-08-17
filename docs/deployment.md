@@ -31,7 +31,7 @@ chmod 600 .env.production
 - `NATS_PASSWORD` 和对应的 `NATS_URL`
 - `AUTH_TOKEN_SECRET`
 - 玩家端、管理后台的 Origin
-- PQPA 与 QuickNode 凭据
+- PQPA 与 TronGrid API Key
 
 如果服务器访问 Go 官方模块代理较慢，可将 `BUILD_GOPROXY` 改为部署区域可用
 的可信代理；中国大陆常用 `https://goproxy.cn,direct`。
@@ -131,7 +131,7 @@ docker compose --env-file .env.production -f compose.production.yaml down
 不要在生产环境使用 `down --volumes`。上线前必须建立 PostgreSQL 和
 `uploads-data` 的定时异地备份，
 并实际验证恢复流程；同时监控容器健康、磁盘空间、Worker 错误、NATS
-JetStream 积压以及 PQPA/OKX/QuickNode 调用失败。
+JetStream 积压以及 PQPA/OKX/TronGrid 调用失败。
 
 本地上传卷可以在不停机只读归档，但要获得与数据库引用完全一致的恢复点，
 建议短暂停止 API 后与数据库备份成组执行。例如：

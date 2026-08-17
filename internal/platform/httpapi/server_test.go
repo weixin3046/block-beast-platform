@@ -64,6 +64,18 @@ func TestCORSAllowsConfiguredOriginAndRejectsUnknownPreflight(t *testing.T) {
 	}
 }
 
+func TestCORSAllowsAnyOriginWhenConfigured(t *testing.T) {
+	server := New(config.Config{APIAllowedOrigins: []string{"*"}}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodOptions, "/v1/platform", nil)
+	request.Header.Set("Origin", "http://frontend.example")
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || response.Header().Get("Access-Control-Allow-Origin") != "http://frontend.example" {
+		t.Fatalf("wildcard preflight = %d, origin %q", response.Code, response.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
 func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -154,6 +166,9 @@ func TestRoundStateReturnsCurrentAndPrevious(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"outcome":["5"]`) {
 		t.Fatalf("response = %s, want previous outcome", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"server_time":`) {
+		t.Fatalf("response = %s, want server_time", response.Body.String())
 	}
 }
 

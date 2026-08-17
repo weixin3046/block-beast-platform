@@ -28,23 +28,20 @@ func TestBootstrapValidatesInput(t *testing.T) {
 	if _, err := service.Bootstrap(context.Background(), "ab", "", "valid-password-12"); !errors.Is(err, ErrInvalidLoginName) {
 		t.Fatalf("invalid login name error = %v", err)
 	}
-	if _, err := service.Bootstrap(context.Background(), "first-admin", "", "short"); !errors.Is(err, ErrInvalidPassword) {
-		t.Fatalf("invalid password error = %v", err)
-	}
 }
 
 func TestBootstrapHashesPasswordAndDefaultsDisplayName(t *testing.T) {
 	creator := &stubCreator{userID: "admin-id"}
 	service := NewService(creator)
 
-	userID, err := service.Bootstrap(context.Background(), "first-admin", "", "valid-password-12")
+	userID, err := service.Bootstrap(context.Background(), "first-admin", "", "short")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if userID != "admin-id" || creator.loginName != "first-admin" || creator.displayName != "first-admin" {
 		t.Fatalf("created admin = %q, %q, %q", userID, creator.loginName, creator.displayName)
 	}
-	if creator.passwordHash == "valid-password-12" || !identity.VerifyPassword(creator.passwordHash, "valid-password-12") {
+	if creator.passwordHash == "short" || !identity.VerifyPassword(creator.passwordHash, "short") {
 		t.Fatal("password was not hashed with the identity password hasher")
 	}
 }

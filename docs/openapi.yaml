@@ -530,12 +530,12 @@ paths:
             type: string
       responses:
         '200':
-          description: 当前最早开放轮次和最近已结算轮次；尚不存在时对应字段为 null。
+          description: 当前最早开放轮次、最近已结算轮次和服务端 UTC 时间；尚不存在时对应轮次字段为 null。客户端应用 server_time 校准本地时钟后计算倒计时。
           content:
             application/json:
               schema:
                 type: object
-                required: [current, previous]
+                required: [current, previous, server_time]
                 properties:
                   current:
                     oneOf:
@@ -545,6 +545,10 @@ paths:
                     oneOf:
                       - $ref: '#/components/schemas/Round'
                       - type: 'null'
+                  server_time:
+                    type: string
+                    format: date-time
+                    description: 服务端当前 UTC 时间，用于校准客户端倒计时。
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':

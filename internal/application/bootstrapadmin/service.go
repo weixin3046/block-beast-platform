@@ -9,7 +9,6 @@ import (
 )
 
 var ErrInvalidLoginName = errors.New("login name must be 3-32 chars of letters, digits, '-' or '_'")
-var ErrInvalidPassword = errors.New("password must contain at least 12 characters")
 
 var loginNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)
 
@@ -28,9 +27,6 @@ func NewService(creator AdminCreator) *Service {
 func (service *Service) Bootstrap(ctx context.Context, loginName string, displayName string, password string) (string, error) {
 	if !loginNamePattern.MatchString(loginName) {
 		return "", ErrInvalidLoginName
-	}
-	if len(password) < 12 {
-		return "", ErrInvalidPassword
 	}
 	if displayName == "" {
 		displayName = loginName
