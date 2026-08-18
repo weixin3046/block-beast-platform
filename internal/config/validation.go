@@ -25,6 +25,9 @@ func (config Config) ValidateRealtime() error {
 	if strings.TrimSpace(config.NATSURL) == "" {
 		return errors.New("NATS_URL is required")
 	}
+	if strings.TrimSpace(config.PostgresDSN) == "" {
+		return errors.New("POSTGRES_DSN is required")
+	}
 	return nil
 }
 

@@ -46,11 +46,17 @@ func TestDecodeCommandValidatesVersionAndTopics(t *testing.T) {
 	if command.RequestID != "r1" || len(command.Topics) != 2 {
 		t.Fatalf("command = %#v", command)
 	}
+	chatCommand, err := decodeCommand([]byte(`{"v":1,"type":"chat.send","room_id":"` + roundID + `","body":"hello","request_id":"chat-1"}`))
+	if err != nil || chatCommand.Type != "chat.send" || chatCommand.RoomID != roundID {
+		t.Fatalf("chat command = %#v, error = %v", chatCommand, err)
+	}
 	for _, payload := range [][]byte{
 		[]byte(`{"v":2,"type":"ping"}`),
 		[]byte(`{"v":1,"type":"subscribe","topics":[]}`),
 		[]byte(`{"v":1,"type":"subscribe","topics":["wallet"]}`),
 		[]byte(`{"v":1,"type":"subscribe","topics":["round:not-a-uuid"]}`),
+		[]byte(`{"v":1,"type":"chat.send","room_id":"not-a-uuid","request_id":"chat-1"}`),
+		[]byte(`{"v":1,"type":"chat.send","room_id":"` + roundID + `"}`),
 	} {
 		if _, err := decodeCommand(payload); !errors.Is(err, errInvalidCommand) {
 			t.Fatalf("payload %s error = %v, want errInvalidCommand", payload, err)

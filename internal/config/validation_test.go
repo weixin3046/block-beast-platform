@@ -22,6 +22,7 @@ func TestValidateRealtimeAlwaysRequiresAuthentication(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInsecureAuthentication", err)
 	}
 	config.AuthTokenSecret = "0123456789abcdef0123456789abcdef"
+	config.PostgresDSN = "postgres://database"
 	if err := config.ValidateRealtime(); err != nil {
 		t.Fatalf("realtime configuration: %v", err)
 	}

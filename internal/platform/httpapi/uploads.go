@@ -43,7 +43,8 @@ func (server *Server) publicAvatar(writer http.ResponseWriter, request *http.Req
 	}
 	defer content.Close()
 	writer.Header().Set("Content-Type", info.ContentType)
-	writer.Header().Set("Cache-Control", "public, max-age=3600")
+	// 地址按用户 ID 固定，头像更换后必须避免浏览器继续展示旧缓存。
+	writer.Header().Set("Cache-Control", "no-cache, max-age=0, must-revalidate")
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(writer, request, request.PathValue("userID"), time.Time{}, content)
 }

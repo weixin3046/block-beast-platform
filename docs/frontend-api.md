@@ -207,7 +207,7 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 
 ## 实时连接
 
-浏览器通过子协议连接：`new WebSocket("ws://localhost:8081/v1/ws", ["bearer." + accessToken])`。生产环境必须使用 `wss://`，并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。连接建立后服务端发送版本化握手：
+浏览器通过子协议连接：`new WebSocket("ws://58.87.64.208/v1/ws", ["bearer." + accessToken])`。如果之后配置 HTTPS，请改为 `wss://`；并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。连接建立后服务端发送版本化握手：
 
 ```json
 {"v":1,"type":"hello","topics":["game"],"occurred_at":"2026-07-26T12:00:00Z"}
@@ -223,14 +223,28 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 服务端以 `type=subscribed` 返回当前完整订阅列表。客户端也可以发送
 `{"v":1,"type":"ping","request_id":"p-1"}`，服务端返回对应 `pong`。版本、消息类型或 topic 无效时返回 `type=error`。
 
+客服和全局聊天室消息均通过 WebSocket 发送，不再提供 HTTP 发送接口。发送命令如下，`request_id` 是幂等键；网络重连后重发必须使用同一个值：
+
+```json
+{"v":1,"type":"chat.send","room_id":"客服房间 UUID","body":"我要上分","request_id":"chat-001"}
+```
+
+成功后当前连接会先收到确认：
+
+```json
+{"v":1,"type":"chat_message_sent","request_id":"chat-001","payload":{"message":{"id":"消息 UUID","room_id":"客服房间 UUID","body":"我要上分","status":"visible","created_at":"..."},"created":true}}
+```
+
+重复发送同一个 `request_id` 时 `created` 为 `false`，且返回第一次创建的消息。校验失败、没有房间权限或房间不存在时，服务端返回同一 `request_id` 的 `type=error`。客服的新消息仍会以 `type=event`、`subject=chat.message.created` 定向推送；前端应按消息 `id` 去重，避免收到自己的确认和事件后重复显示。
+
 事件统一为 `{"v":1,"type":"event","subject":"game.round.settled","payload":{...},"occurred_at":"..."}`。`game.*` 按 `game` 或 `round:{round_id}` 订阅投递；订阅 `chat` 可接收公共房间消息。客服消息、`wallet.*` 和 `chain.*` 无需客户端订阅，只发送给对应玩家。客户端消费过慢导致 128 条发送队列写满时，网关会主动断开连接，客户端应退避重连并重新建立订阅。
 
 ## 聊天与客服
 
-- `POST /v1/chat/customer-service`：幂等获取玩家自己的客服房间。
-- `GET /v1/chat/rooms`：玩家查询公共房间和自己的客服房间；后台角色可查询全部客服房间。
+- `POST /v1/chat/customer-service`：幂等获取或创建玩家自己的两间独立客服房间。响应中的 `deposit` 是上分（充值）客服，`withdrawal` 是下分（提现）客服；前端首次进入客服页调用一次并分别保存两个 `id`。
+- `GET /v1/chat/rooms`：玩家查询全局聊天室和自己的两间客服房间；后台角色可查询全部客服房间。客服房间会返回 `service_type`：`deposit` 为上分客服，`withdrawal` 为下分客服。
 - `GET /v1/chat/rooms/{roomID}/messages`：查询可访问房间的最近消息。
-- `POST /v1/chat/rooms/{roomID}/messages`：发送消息，必须提供稳定且唯一的 `client_request_id`，网络重试复用原值。
+- 发送消息：使用 WebSocket `chat.send` 命令，不能再调用 HTTP `POST /v1/chat/rooms/{roomID}/messages`。
 
 消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服房间只有所属玩家和后台角色可读写，公共消息通过 WebSocket 的 `chat` topic 广播。
 

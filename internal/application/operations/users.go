@@ -63,7 +63,7 @@ func (service *Service) CurrentUser(ctx context.Context, userID string) (User, e
 	var user User
 	err := service.pool.QueryRow(ctx, `
 		SELECT u.public_id, COALESCE(u.login_name,''), u.display_name, u.status, u.created_at,
-			CASE WHEN u.avatar_url LIKE 'uploads/%' THEN '/v1/avatars/' || u.public_id::text ELSE COALESCE(u.avatar_url,'') END,
+			CASE WHEN u.avatar_url LIKE 'uploads/%' THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '') ELSE COALESCE(u.avatar_url,'') END,
 			u.invitation_code, COALESCE(u.agent_level,0), COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}')
 		FROM users u
 		LEFT JOIN user_roles ur ON ur.user_id=u.id

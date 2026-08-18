@@ -102,7 +102,7 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 | `POST /v1/auth/refresh` | 轮换玩家端刷新令牌并复核 player 角色。 |
 | `POST /v1/admin/auth/refresh` | 轮换管理后台刷新令牌并复核 admin/operator 角色。 |
 | `POST /v1/auth/logout` | 撤销刷新令牌并退出当前会话。 |
-| `POST /v1/chat/customer-service` | 获取或创建当前玩家的专属客服房间。 |
+| `POST /v1/chat/customer-service` | 获取或创建当前玩家独立的上分、下分两个客服房间。 |
 | `GET/POST /v1/chat/rooms/{room_id}/messages` | 查询或幂等发送有权限访问的聊天消息。 |
 | `POST /v1/uploads/authorize` | 获取本地存储或 S3 上传授权。 |
 | `PUT/GET /v1/uploads/{upload_id}/content` | 鉴权上传或下载本人的本地文件。 |

@@ -18,10 +18,21 @@ var ErrRoomAccessDenied = errors.New("chat room access denied")
 var ErrInvalidMessage = errors.New("message must contain 1-2000 characters")
 var ErrInvalidRequestID = errors.New("client_request_id is required")
 
+const (
+	ServiceTypeDeposit    = "deposit"
+	ServiceTypeWithdrawal = "withdrawal"
+)
+
 type Room struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	ServiceType string    `json:"service_type,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type CustomerServiceRooms struct {
+	Deposit    Room `json:"deposit"`
+	Withdrawal Room `json:"withdrawal"`
 }
 
 type Message struct {
@@ -42,50 +53,47 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-func (service *Service) OpenCustomerServiceRoom(ctx context.Context, userID string) (Room, error) {
-	var room Room
-	err := service.pool.QueryRow(ctx, `
-		SELECT r.id::text,r.room_type,r.created_at
-		FROM chat_rooms r JOIN chat_room_members m ON m.room_id=r.id
-		WHERE r.room_type='customer_service' AND m.user_id=$1
-		ORDER BY r.created_at DESC LIMIT 1`, userID).Scan(&room.ID, &room.Type, &room.CreatedAt)
-	if err == nil {
-		return room, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return Room{}, err
-	}
+func (service *Service) OpenCustomerServiceRooms(ctx context.Context, userID string) (CustomerServiceRooms, error) {
 	tx, err := service.pool.Begin(ctx)
 	if err != nil {
-		return Room{}, err
+		return CustomerServiceRooms{}, err
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "customer-service:"+userID); err != nil {
-		return Room{}, err
+		return CustomerServiceRooms{}, err
 	}
-	err = tx.QueryRow(ctx, `
-		SELECT r.id::text,r.room_type,r.created_at
-		FROM chat_rooms r JOIN chat_room_members m ON m.room_id=r.id
-		WHERE r.room_type='customer_service' AND m.user_id=$1
-		ORDER BY r.created_at DESC LIMIT 1`, userID).Scan(&room.ID, &room.Type, &room.CreatedAt)
-	if err == nil {
-		return room, tx.Commit(ctx)
+
+	rooms := CustomerServiceRooms{}
+	for _, serviceType := range []string{ServiceTypeDeposit, ServiceTypeWithdrawal} {
+		var room Room
+		err := tx.QueryRow(ctx, `
+			SELECT id::text,room_type,service_type,created_at
+			FROM chat_rooms
+			WHERE room_type='customer_service' AND customer_user_id=$1 AND service_type=$2`, userID, serviceType).
+			Scan(&room.ID, &room.Type, &room.ServiceType, &room.CreatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			room = Room{ID: uuid.NewString(), Type: "customer_service", ServiceType: serviceType}
+			err = tx.QueryRow(ctx, `
+				INSERT INTO chat_rooms (id,room_type,customer_user_id,service_type)
+				VALUES ($1,'customer_service',$2,$3)
+				RETURNING created_at`, room.ID, userID, serviceType).Scan(&room.CreatedAt)
+			if err == nil {
+				_, err = tx.Exec(ctx, `INSERT INTO chat_room_members (room_id,user_id,member_role) VALUES ($1,$2,'owner')`, room.ID, userID)
+			}
+		}
+		if err != nil {
+			return CustomerServiceRooms{}, err
+		}
+		if serviceType == ServiceTypeDeposit {
+			rooms.Deposit = room
+		} else {
+			rooms.Withdrawal = room
+		}
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return Room{}, err
+	if err := tx.Commit(ctx); err != nil {
+		return CustomerServiceRooms{}, err
 	}
-	room.ID = uuid.NewString()
-	room.Type = "customer_service"
-	err = tx.QueryRow(ctx, `
-		INSERT INTO chat_rooms (id,room_type) VALUES ($1,'customer_service')
-		RETURNING created_at`, room.ID).Scan(&room.CreatedAt)
-	if err == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO chat_room_members (room_id,user_id,member_role) VALUES ($1,$2,'owner')`, room.ID, userID)
-	}
-	if err != nil {
-		return Room{}, err
-	}
-	return room, tx.Commit(ctx)
+	return rooms, nil
 }
 
 func (service *Service) ListRooms(ctx context.Context, userID string, staff bool, limit int) ([]Room, error) {
@@ -93,7 +101,7 @@ func (service *Service) ListRooms(ctx context.Context, userID string, staff bool
 		limit = 50
 	}
 	rows, err := service.pool.Query(ctx, `
-		SELECT DISTINCT r.id::text,r.room_type,r.created_at
+		SELECT DISTINCT r.id::text,r.room_type,COALESCE(r.service_type,''),r.created_at
 		FROM chat_rooms r
 		LEFT JOIN chat_room_members m ON m.room_id=r.id AND m.user_id=$1
 		WHERE r.room_type IN ('global','game') OR m.user_id IS NOT NULL OR ($2 AND r.room_type='customer_service')
@@ -105,7 +113,7 @@ func (service *Service) ListRooms(ctx context.Context, userID string, staff bool
 	items := make([]Room, 0)
 	for rows.Next() {
 		var item Room
-		if err := rows.Scan(&item.ID, &item.Type, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Type, &item.ServiceType, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

@@ -18,6 +18,8 @@ type clientCommand struct {
 	Type      string   `json:"type"`
 	Topics    []string `json:"topics,omitempty"`
 	RequestID string   `json:"request_id,omitempty"`
+	RoomID    string   `json:"room_id,omitempty"`
+	Body      string   `json:"body,omitempty"`
 }
 
 type serverMessage struct {
@@ -36,8 +38,14 @@ func decodeCommand(payload []byte) (clientCommand, error) {
 	if err := json.Unmarshal(payload, &command); err != nil {
 		return clientCommand{}, errInvalidCommand
 	}
-	if command.Version != ProtocolVersion || (command.Type != "subscribe" && command.Type != "unsubscribe" && command.Type != "ping") {
+	if command.Version != ProtocolVersion || (command.Type != "subscribe" && command.Type != "unsubscribe" && command.Type != "ping" && command.Type != "chat.send") {
 		return clientCommand{}, errInvalidCommand
+	}
+	if command.Type == "chat.send" {
+		if _, err := uuid.Parse(command.RoomID); err != nil || strings.TrimSpace(command.RequestID) == "" {
+			return clientCommand{}, errInvalidCommand
+		}
+		return command, nil
 	}
 	if command.Type != "ping" && len(command.Topics) == 0 {
 		return clientCommand{}, errInvalidCommand

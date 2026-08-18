@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -11,10 +10,9 @@ import (
 )
 
 type ChatService interface {
-	OpenCustomerServiceRoom(ctx context.Context, userID string) (chat.Room, error)
+	OpenCustomerServiceRooms(ctx context.Context, userID string) (chat.CustomerServiceRooms, error)
 	ListRooms(ctx context.Context, userID string, staff bool, limit int) ([]chat.Room, error)
 	ListMessages(ctx context.Context, roomID, userID string, staff bool, limit int) ([]chat.Message, error)
-	SendMessage(ctx context.Context, roomID, senderUserID, clientRequestID, body string, staff bool) (chat.Message, bool, error)
 }
 
 func WithChat(service ChatService) Option {
@@ -27,12 +25,12 @@ func (server *Server) openCustomerServiceRoom(writer http.ResponseWriter, reques
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
-	room, err := server.chat.OpenCustomerServiceRoom(request.Context(), claims.Subject)
+	rooms, err := server.chat.OpenCustomerServiceRooms(request.Context(), claims.Subject)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to open customer service room"})
 		return
 	}
-	server.writePublicJSON(writer, request, http.StatusOK, room)
+	server.writePublicJSON(writer, request, http.StatusOK, rooms)
 }
 
 func (server *Server) chatRooms(writer http.ResponseWriter, request *http.Request) {
@@ -57,37 +55,6 @@ func (server *Server) chatMessages(writer http.ResponseWriter, request *http.Req
 	claims, _ := ClaimsFromContext(request.Context())
 	items, err := server.chat.ListMessages(request.Context(), request.PathValue("roomID"), claims.Subject, isStaff(claims), queryLimit(request, 50))
 	server.writeChatResult(writer, request, items, err)
-}
-
-func (server *Server) sendChatMessage(writer http.ResponseWriter, request *http.Request) {
-	if server.chat == nil {
-		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "chat is unavailable"})
-		return
-	}
-	var input struct {
-		ClientRequestID string `json:"client_request_id"`
-		Body            string `json:"body"`
-	}
-	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 16<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid chat message"})
-		return
-	}
-	claims, _ := ClaimsFromContext(request.Context())
-	item, created, err := server.chat.SendMessage(
-		request.Context(), request.PathValue("roomID"), claims.Subject,
-		input.ClientRequestID, input.Body, isStaff(claims),
-	)
-	if err != nil {
-		server.writeChatResult(writer, request, nil, err)
-		return
-	}
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
-	writeJSON(writer, status, item)
 }
 
 func (server *Server) writeChatResult(writer http.ResponseWriter, request *http.Request, result any, err error) {

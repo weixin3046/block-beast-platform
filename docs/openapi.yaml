@@ -1311,14 +1311,14 @@ paths:
   /v1/chat/customer-service:
     post:
       tags: [Chat]
-      summary: 获取或创建当前玩家的客服会话
+      summary: 获取或创建当前玩家的上分、下分两个独立客服会话
       security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: 客服房间。
+          description: 上分与下分客服房间；重复调用返回同一组房间。
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ChatRoom' }
+              schema: { $ref: '#/components/schemas/CustomerServiceRooms' }
   /v1/chat/rooms:
     get:
       tags: [Chat]
@@ -1350,35 +1350,6 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ChatMessage' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    post:
-      tags: [Chat]
-      summary: 幂等发送聊天消息
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [client_request_id, body]
-              properties:
-                client_request_id: { type: string, maxLength: 128 }
-                body: { type: string, minLength: 1, maxLength: 2000 }
-      responses:
-        '201':
-          description: 新消息已创建。
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChatMessage' }
-        '200':
-          description: 幂等重试，返回原消息。
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChatMessage' }
-        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /v1/uploads/authorize:
@@ -2170,7 +2141,21 @@ components:
       properties:
         id: { type: string, format: uuid }
         type: { type: string, enum: [global, game, customer_service, direct] }
+        service_type:
+          type: string
+          enum: [deposit, withdrawal]
+          description: 仅 `customer_service` 房间存在；deposit 为上分客服，withdrawal 为下分客服。
         created_at: { type: string, format: date-time }
+    CustomerServiceRooms:
+      type: object
+      required: [deposit, withdrawal]
+      properties:
+        deposit:
+          allOf: [{ $ref: '#/components/schemas/ChatRoom' }]
+          description: 上分（充值）客服房间。
+        withdrawal:
+          allOf: [{ $ref: '#/components/schemas/ChatRoom' }]
+          description: 下分（提现）客服房间。
     ChatMessage:
       type: object
       required: [id, room_id, body, status, created_at]

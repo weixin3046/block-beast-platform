@@ -3,11 +3,13 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/chat"
 	"github.com/block-beast/platform/internal/domain/identity"
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats.go"
@@ -19,10 +21,20 @@ type Hub struct {
 	mu      sync.RWMutex
 	clients map[string]map[*client]struct{}
 	nats    *nats.Conn
+	chat    ChatSender
+}
+
+type ChatSender interface {
+	SendMessage(ctx context.Context, roomID, senderUserID, clientRequestID, body string, staff bool) (chat.Message, bool, error)
 }
 
 func NewHub(secret string, origins []string) *Hub {
 	return &Hub{secret: []byte(secret), origins: origins, clients: make(map[string]map[*client]struct{})}
+}
+
+func (hub *Hub) WithChatSender(sender ChatSender) *Hub {
+	hub.chat = sender
+	return hub
 }
 
 func (hub *Hub) ConnectNATS(url string) error {
@@ -87,7 +99,7 @@ func (hub *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			item.enqueue(encodeMessage(serverMessage{Type: "error", Error: "text messages are required"}))
 			continue
 		}
-		hub.handleCommand(item, payload)
+		hub.handleCommand(connectionCtx, item, claims, payload)
 	}
 }
 
@@ -116,7 +128,7 @@ func (hub *Hub) publish(message *nats.Msg) {
 	}
 }
 
-func (hub *Hub) handleCommand(item *client, payload []byte) {
+func (hub *Hub) handleCommand(ctx context.Context, item *client, claims identity.AccessTokenClaims, payload []byte) {
 	command, err := decodeCommand(payload)
 	if err != nil {
 		item.enqueue(encodeMessage(serverMessage{Type: "error", Error: err.Error()}))
@@ -130,8 +142,36 @@ func (hub *Hub) handleCommand(item *client, payload []byte) {
 	case "ping":
 		item.enqueue(encodeMessage(serverMessage{Type: "pong", RequestID: command.RequestID}))
 		return
+	case "chat.send":
+		hub.sendChatMessage(ctx, item, claims, command)
+		return
 	}
 	item.enqueue(encodeMessage(serverMessage{Type: "subscribed", RequestID: command.RequestID, Topics: item.topicList()}))
+}
+
+func (hub *Hub) sendChatMessage(ctx context.Context, item *client, claims identity.AccessTokenClaims, command clientCommand) {
+	if hub.chat == nil {
+		item.enqueue(encodeMessage(serverMessage{Type: "error", RequestID: command.RequestID, Error: "chat is unavailable"}))
+		return
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	message, created, err := hub.chat.SendMessage(requestCtx, command.RoomID, claims.Subject, command.RequestID, command.Body, claims.HasRole(identity.RoleAdmin, identity.RoleOperator))
+	if err != nil {
+		item.enqueue(encodeMessage(serverMessage{Type: "error", RequestID: command.RequestID, Error: chatCommandError(err)}))
+		return
+	}
+	result, _ := json.Marshal(map[string]any{"message": message, "created": created})
+	item.enqueue(encodeMessage(serverMessage{Type: "chat_message_sent", RequestID: command.RequestID, Payload: result}))
+}
+
+func chatCommandError(err error) string {
+	switch {
+	case errors.Is(err, chat.ErrInvalidMessage), errors.Is(err, chat.ErrInvalidRequestID), errors.Is(err, chat.ErrRoomAccessDenied), errors.Is(err, chat.ErrRoomNotFound):
+		return err.Error()
+	default:
+		return "unable to send chat message"
+	}
 }
 
 func eventTargets(subject string, data []byte) (userIDs []string, broadcast bool) {

@@ -50,18 +50,24 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	})
 
 	service := NewService(pool)
-	room, err := service.OpenCustomerServiceRoom(ctx, userID)
+	rooms, err := service.OpenCustomerServiceRooms(ctx, userID)
 	if err != nil {
-		t.Fatalf("open room: %v", err)
+		t.Fatalf("open rooms: %v", err)
+	}
+	room := rooms.Deposit
+	if room.ID == rooms.Withdrawal.ID || room.ServiceType != ServiceTypeDeposit || rooms.Withdrawal.ServiceType != ServiceTypeWithdrawal {
+		t.Fatalf("service rooms = %+v", rooms)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM outbox_events WHERE aggregate_id=$1`, room.ID)
-		_, _ = pool.Exec(ctx, `DELETE FROM chat_messages WHERE room_id=$1`, room.ID)
-		_, _ = pool.Exec(ctx, `DELETE FROM chat_rooms WHERE id=$1`, room.ID)
+		for _, room := range []Room{rooms.Deposit, rooms.Withdrawal} {
+			_, _ = pool.Exec(ctx, `DELETE FROM outbox_events WHERE aggregate_id=$1`, room.ID)
+			_, _ = pool.Exec(ctx, `DELETE FROM chat_messages WHERE room_id=$1`, room.ID)
+			_, _ = pool.Exec(ctx, `DELETE FROM chat_rooms WHERE id=$1`, room.ID)
+		}
 	})
-	sameRoom, err := service.OpenCustomerServiceRoom(ctx, userID)
-	if err != nil || sameRoom.ID != room.ID {
-		t.Fatalf("idempotent room = %+v, err = %v", sameRoom, err)
+	sameRooms, err := service.OpenCustomerServiceRooms(ctx, userID)
+	if err != nil || sameRooms.Deposit.ID != room.ID || sameRooms.Withdrawal.ID != rooms.Withdrawal.ID {
+		t.Fatalf("idempotent rooms = %+v, err = %v", sameRooms, err)
 	}
 	first, created, err := service.SendMessage(ctx, room.ID, userID, "request-1", "hello", false)
 	if err != nil || !created {

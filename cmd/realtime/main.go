@@ -10,8 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/chat"
 	"github.com/block-beast/platform/internal/config"
 	realtimeplatform "github.com/block-beast/platform/internal/platform/realtime"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -21,12 +23,18 @@ func main() {
 		logger.Error("invalid realtime configuration", "error", err)
 		return
 	}
+	pool, err := pgxpool.New(context.Background(), cfg.PostgresDSN)
+	if err != nil {
+		logger.Error("realtime failed to connect to PostgreSQL", "error", err)
+		return
+	}
+	defer pool.Close()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write([]byte("ok\n"))
 	})
-	hub := realtimeplatform.NewHub(cfg.AuthTokenSecret, cfg.RealtimeAllowedOrigins)
+	hub := realtimeplatform.NewHub(cfg.AuthTokenSecret, cfg.RealtimeAllowedOrigins).WithChatSender(chat.NewService(pool))
 	if err := hub.ConnectNATS(cfg.NATSURL); err != nil {
 		logger.Error("realtime gateway failed to connect to NATS", "error", err)
 		return
