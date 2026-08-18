@@ -13,9 +13,11 @@ import (
 
 // 平台内支持的三种可充值币种。
 const (
-	CurrencyPoints  = "POINTS"
-	CurrencyUSDT    = "USDT"
-	CurrencyStamina = "STAMINA"
+	CurrencyPoints      = "POINTS"
+	CurrencyUSDT        = "USDT"
+	CurrencyJade        = "JADE"
+	CurrencyOriginStone = "ORIGIN_STONE"
+	CurrencyStamina     = "STAMINA"
 )
 
 // 业务类型常量，用于幂等键与流水查询。
@@ -27,7 +29,7 @@ const (
 )
 
 var ErrInvalidAmount = errors.New("amount must be positive")
-var ErrInvalidCurrency = errors.New("currency must be one of POINTS, USDT, STAMINA")
+var ErrInvalidCurrency = errors.New("currency must be one of USDT, POINTS, JADE, ORIGIN_STONE, STAMINA")
 var ErrInsufficientStamina = errors.New("insufficient stamina balance")
 var ErrUserNotFound = errors.New("user not found")
 var ErrPointWithdrawalNotFound = errors.New("point withdrawal not found")
@@ -199,7 +201,7 @@ func (service *Service) AdminCredit(ctx context.Context, input AdminCreditInput)
 	if input.AmountMinor <= 0 {
 		return CreditResult{}, ErrInvalidAmount
 	}
-	if input.Currency != CurrencyPoints && input.Currency != CurrencyUSDT && input.Currency != CurrencyStamina {
+	if input.Currency != CurrencyPoints && input.Currency != CurrencyUSDT && input.Currency != CurrencyJade && input.Currency != CurrencyOriginStone && input.Currency != CurrencyStamina {
 		return CreditResult{}, ErrInvalidCurrency
 	}
 	if input.UserID == "" || input.RequestID == "" {

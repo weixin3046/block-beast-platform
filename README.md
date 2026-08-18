@@ -96,7 +96,7 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 | `GET /healthz` | API 存活检查。 |
 | `GET /readyz` | PostgreSQL 就绪检查。 |
 | `GET /v1/platform` | 查询当前环境与领域列表。 |
-| `POST /v1/auth/register` | 注册玩家账号（创建用户、player 角色和 USDT 零余额钱包），直接返回访问令牌。 |
+| `POST /v1/auth/register` | 使用有效邀请码注册玩家账号，原子创建直属推荐关系、player 角色和 USDT/宝石/玉石/源石/体力零余额钱包，直接返回访问令牌。 |
 | `POST /v1/auth/login` | 玩家端登录；拒绝 admin/operator 后台账号；连续失败达到阈值后返回 429。 |
 | `POST /v1/admin/auth/login` | 管理后台登录；仅允许 admin/operator；与玩家端共用持久化失败锁定。 |
 | `POST /v1/auth/refresh` | 轮换玩家端刷新令牌并复核 player 角色。 |

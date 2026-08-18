@@ -164,7 +164,7 @@ func (service *Service) ReverseCommission(ctx context.Context, commissionID stri
 }
 
 func (service *Service) GrantCommission(ctx context.Context, requestID, agentID, currency string, amount int64, remark, operatorID string) (string, error) {
-	if requestID == "" || agentID == "" || (currency != "POINTS" && currency != "USDT") || amount <= 0 || operatorID == "" {
+	if requestID == "" || agentID == "" || (currency != "POINTS" && currency != "USDT" && currency != "JADE" && currency != "ORIGIN_STONE") || amount <= 0 || operatorID == "" {
 		return "", ErrInvalidCommissionAdjustment
 	}
 	tx, err := service.pool.Begin(ctx)

@@ -10,22 +10,26 @@
 
 ## 账号与币种
 
-平台有三种账户币种，注册即自动创建三个零余额钱包：
+平台有五种账户币种，注册即自动创建五个零余额钱包：
 
 | 币种 | 用途 | 来源 |
 |---|---|---|
 | `USDT` | 投注、提现 | 链上充值回调自动入账，或管理员后台充值 |
-| `POINTS` | 投注 | 管理员后台充值 |
+| `POINTS`（宝石） | 投注、红包 | 管理员后台充值 |
+| `JADE`（玉石） | 投注、红包 | 管理员后台充值 |
+| `ORIGIN_STONE`（源石） | 投注、红包 | 管理员后台充值 |
 | `STAMINA` | 参加活动消耗 | 每日签到、投注任务奖励、管理员后台充值 |
 
 ## 调用顺序
 
-1. 玩家端调用 `POST /v1/auth/register` 注册账号（或 `POST /v1/auth/login` 登录），并使用 `POST /v1/auth/refresh` 续期；管理后台必须调用 `POST /v1/admin/auth/login`，并使用 `POST /v1/admin/auth/refresh` 续期。两类刷新令牌绑定所属端，不能交叉使用，续期时还会重新检查当前角色。退出时调用 `POST /v1/auth/logout` 撤销刷新令牌。登录返回 `429` 表示该登录名因连续失败被临时锁定，前端应停止自动重试并遵循 `Retry-After`。
+1. 玩家端调用 `POST /v1/auth/register` 注册时必须填写 `invitation_code`。邀请码从 `101` 起，且只有后台设置为 1–6 级代理的用户的邀请码可用；注册会原子建立直属推荐关系。登录后调用 `GET /v1/users/me` 获取玩家资料、邀请码和 `agent_level`（`0` 表示不可邀请）。已有账号调用 `POST /v1/auth/login` 登录，并使用 `POST /v1/auth/refresh` 续期；管理后台使用 `/v1/admin/auth/login` 和 `/v1/admin/auth/refresh`。
+   `user_id` 是从 `100000` 起连续分配的公开数字 ID；UUID 只在服务端内部使用。玩家可用 `PUT /v1/users/me` 修改昵称和头像 URL，用 `PUT /v1/users/me/password` 携带当前密码和新密码修改密码；改密后需重新登录。
+   二级密码通过 `PUT /v1/users/me/secondary-password` 设置或修改：首次设置只提交 `secondary_password`；修改时提交 `current_secondary_password` 与新的 `secondary_password`。用 `POST /v1/users/me/secondary-password/verify` 提交 `secondary_password` 验证。二级密码不会在任何响应中返回。
 2. 调用 `GET /v1/rounds?game_type={code}` 获取仍可下注的轮次。
    游戏页同时调用 `GET /v1/rounds/state?game_type={code}` 展示当前轮次封盘倒计时
    与最近一期已结算结果；倒计时始终以响应中的 `bet_closes_at` 为准。使用同一响应的
    `server_time` 与收到响应时的本地时间计算时差，避免设备时钟快慢造成 1–2 秒误差。
-3. 调用 `POST /v1/bets` 创建投注，`currency` 传 `USDT` 或 `POINTS`。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
+3. 调用 `POST /v1/bets` 创建投注，`currency` 可传 `USDT`、`POINTS`（宝石）、`JADE`（玉石）或 `ORIGIN_STONE`（源石）。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
 4. 使用 `GET /v1/bets/{betID}` 轮询投注状态；当前状态有 `accepted`、`won`、`lost` 与 `refunded`。
 5. 使用 `GET /v1/wallets/{accountID}?currency=USDT` 查询单币种余额，或 `GET /v1/wallets/{accountID}/all` 一次拉取全部币种。
 6. 每日首次进入时调用 `POST /v1/tasks/checkin` 签到领取体力；`checked_in=false` 表示今日已签过，不要重复提示。
@@ -91,7 +95,7 @@ const api = "http://localhost:8080";
 const auth = await fetch(`${api}/v1/auth/register`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ login_name: "player-001", password: "开发环境密码" }),
+  body: JSON.stringify({ login_name: "player-001", password: "开发环境密码", invitation_code: "101" }),
 }).then((r) => (r.ok ? r.json() : r.json().then(({ error }) => Promise.reject(new Error(error)))));
 
 let { access_token, refresh_token, user_id } = auth;

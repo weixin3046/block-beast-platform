@@ -10,6 +10,8 @@ info:
     name: UNLICENSED
 security: []
 servers:
+  - url: /
+    description: Current deployment (same origin)
   - url: http://localhost:8080
     description: Local development
 tags:
@@ -85,7 +87,7 @@ paths:
       tags: [Auth]
       operationId: register
       summary: 注册玩家账号并签发访问令牌
-      description: 在单个事务中创建用户、密码凭证、player 角色和 USDT/POINTS/STAMINA 三种零余额钱包，注册完成即返回访问令牌。开发环境可通过配置暂时关闭密码长度规则；production 强制至少 12 位。注册会写入审计日志。
+      description: 邀请码为必填项。在单个事务中创建用户、密码凭证、player 角色和 USDT/POINTS/JADE/ORIGIN_STONE/STAMINA 五种零余额钱包，并建立直属推荐关系；注册完成即返回访问令牌。注册会写入审计日志。
       requestBody:
         required: true
         content:
@@ -96,6 +98,7 @@ paths:
               login_name: player-001
               display_name: 玩家一号
               password: correct-horse-battery
+              invitation_code: "101"
       responses:
         '201':
           description: 注册成功，返回访问令牌。
@@ -109,6 +112,108 @@ paths:
           $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/users/me:
+    get:
+      tags: [Auth]
+      summary: 查询当前用户资料、邀请码和代理等级
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 当前用户资料。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer, format: int64, minimum: 100000, description: 公开数字用户 ID。 }
+                  login_name: { type: string }
+                  display_name: { type: string }
+                  status: { type: string }
+                  invitation_code: { type: integer, format: int64 }
+                  agent_level: { type: integer, description: '0 表示不可邀请用户。' }
+                  roles: { type: array, items: { type: string } }
+                  created_at: { type: string, format: date-time }
+                  avatar_url: { type: string }
+    put:
+      tags: [Auth]
+      summary: 修改当前用户头像和昵称
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [display_name, avatar_url]
+              properties:
+                display_name: { type: string, maxLength: 100 }
+                avatar_url: { type: string, maxLength: 2048 }
+      responses:
+        '200': { description: 修改成功 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /v1/users/me/password:
+    put:
+      tags: [Auth]
+      summary: 修改当前用户密码
+      description: 必须提交当前密码；成功后会撤销所有刷新令牌，需重新登录。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password, minLength: 1 }
+      responses:
+        '204': { description: 修改成功 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /v1/users/me/secondary-password:
+    put:
+      tags: [Auth]
+      summary: 设置或修改当前用户二级密码
+      description: 首次设置无需额外验证；已设置后修改只验证旧二级密码。二级密码只保存不可逆哈希。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [secondary_password]
+              properties:
+                current_secondary_password: { type: string, format: password, description: 修改时必填，用于验证旧二级密码。 }
+                secondary_password: { type: string, format: password, minLength: 1 }
+      responses:
+        '204': { description: 设置成功 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: 已设置二级密码但未提供旧二级密码。 }
+  /v1/users/me/secondary-password/verify:
+    post:
+      tags: [Auth]
+      summary: 验证当前用户二级密码
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [secondary_password]
+              properties:
+                secondary_password: { type: string, format: password }
+      responses:
+        '204': { description: 验证通过 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: 尚未设置二级密码 }
   /v1/auth/login:
     post:
       tags: [Auth]
@@ -1756,6 +1861,29 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/AdminUser' }
+  /v1/admin/users/{userID}/agent-level:
+    put:
+      tags: [Admin]
+      summary: 设置用户代理等级；设置后其邀请码才可用于注册邀请
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_level]
+              properties:
+                agent_level: { type: integer, minimum: 1, maximum: 6 }
+      responses:
+        '200': { description: 已更新 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /v1/admin/users/{userID}/status:
     put:
       tags: [Admin]
@@ -1923,9 +2051,10 @@ components:
       required: [id, login_name, display_name, status, created_at]
       properties:
         id:
-          type: string
-          format: uuid
-          description: 用户 ID。
+          type: integer
+          format: int64
+          minimum: 100000
+          description: 面向前端和后台的数字用户 ID；UUID 仅用于内部关联。
         login_name: { type: string }
         display_name: { type: string }
         status: { type: string, enum: [active, disabled, bet_banned] }
@@ -2137,7 +2266,7 @@ components:
     RegisterRequest:
       type: object
       additionalProperties: false
-      required: [login_name, password]
+      required: [login_name, password, invitation_code]
       properties:
         login_name:
           type: string
@@ -2149,7 +2278,11 @@ components:
         password:
           type: string
           format: password
-          description: development 可暂时不限制长度；production 强制至少 12 位。
+          description: 密码。
+        invitation_code:
+          type: string
+          pattern: '^[0-9]+$'
+          description: 必填。邀请人的数字邀请码，从 101 起分配。
     LoginRequest:
       type: object
       additionalProperties: false
@@ -2181,8 +2314,9 @@ components:
           description: 令牌有效期（秒）。
           example: 900
         user_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         roles:
           type: array
           items:

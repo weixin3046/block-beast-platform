@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 
 var ErrIdentityNotFound = errors.New("identity not found")
 var ErrLoginNameTaken = errors.New("login name is already taken")
+var ErrInvitationCodeNotFound = errors.New("invitation code is invalid")
 var ErrAdminAlreadyExists = errors.New("an administrator already exists")
 
 // PasswordCredentials 是 password 提供方下的登录凭证与账号状态。
@@ -88,14 +90,90 @@ func (repository *PostgresRepository) FindPasswordCredentials(ctx context.Contex
 	return credentials, nil
 }
 
+// PublicUserID 返回面向客户端展示的连续数字用户 ID；UUID 仅用于内部关联。
+func (repository *PostgresRepository) PublicUserID(ctx context.Context, userID string) (int64, error) {
+	var publicID int64
+	err := repository.pool.QueryRow(ctx, `SELECT public_id FROM users WHERE id=$1`, userID).Scan(&publicID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrIdentityNotFound
+	}
+	return publicID, err
+}
+
+func (repository *PostgresRepository) PasswordHashByUserID(ctx context.Context, userID string) (string, error) {
+	var passwordHash string
+	err := repository.pool.QueryRow(ctx, `SELECT password_hash FROM auth_identities WHERE user_id=$1 AND provider='password'`, userID).Scan(&passwordHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrIdentityNotFound
+	}
+	return passwordHash, err
+}
+
+// UpdatePasswordHash 使所有既有刷新令牌立即失效。
+func (repository *PostgresRepository) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	result, err := tx.Exec(ctx, `UPDATE auth_identities SET password_hash=$2 WHERE user_id=$1 AND provider='password'`, userID, passwordHash)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrIdentityNotFound
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (repository *PostgresRepository) SecondaryPasswordHashByUserID(ctx context.Context, userID string) (string, error) {
+	var passwordHash *string
+	err := repository.pool.QueryRow(ctx, `SELECT secondary_password_hash FROM users WHERE id=$1`, userID).Scan(&passwordHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrIdentityNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if passwordHash == nil || *passwordHash == "" {
+		return "", ErrIdentityNotFound
+	}
+	return *passwordHash, nil
+}
+
+func (repository *PostgresRepository) UpdateSecondaryPasswordHash(ctx context.Context, userID, passwordHash string) error {
+	result, err := repository.pool.Exec(ctx, `UPDATE users SET secondary_password_hash=$2,updated_at=now() WHERE id=$1`, userID, passwordHash)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrIdentityNotFound
+	}
+	return nil
+}
+
 // RegisterPasswordUser 在单个事务中创建用户、密码凭证、指定角色和一组货币的
 // 零余额钱包。登录名冲突时返回 ErrLoginNameTaken。
-func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currencies []string) (string, error) {
+func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currencies []string, invitationCode int64) (string, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	if invitationCode < 101 {
+		return "", ErrInvitationCodeNotFound
+	}
+	var parentUserID, parentPath string
+	err = tx.QueryRow(ctx, `SELECT id::text, COALESCE((SELECT path::text FROM agent_relations WHERE user_id=users.id),'') FROM users WHERE invitation_code=$1 AND agent_level IS NOT NULL`, invitationCode).Scan(&parentUserID, &parentPath)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrInvitationCodeNotFound
+	}
+	if err != nil {
+		return "", err
+	}
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO roles (id, code, description)
@@ -132,6 +210,15 @@ func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, 
 		if _, err := tx.Exec(ctx, `INSERT INTO wallets (id, user_id, currency) VALUES ($1, $2, $3)`, uuid.NewString(), userID, currency); err != nil {
 			return "", err
 		}
+	}
+	userLabel := strings.ReplaceAll(userID, "-", "_")
+	parentLabel := strings.ReplaceAll(parentUserID, "-", "_")
+	path := parentLabel + "." + userLabel
+	if parentPath != "" {
+		path = parentPath + "." + userLabel
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO agent_relations(user_id,parent_user_id,path) VALUES($1,$2,$3::ltree)`, userID, parentUserID, path); err != nil {
+		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err

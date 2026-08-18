@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/block-beast/platform/internal/domain/identity"
@@ -20,7 +21,7 @@ type Role struct {
 }
 
 type RoleAssignment struct {
-	UserID string   `json:"user_id"`
+	UserID int64    `json:"user_id"`
 	Roles  []string `json:"roles"`
 }
 
@@ -46,8 +47,9 @@ func (service *Service) SetUserRoles(ctx context.Context, actorUserID, userID st
 	if err != nil {
 		return RoleAssignment{}, err
 	}
-	if actorUserID == userID && !containsRole(roles, identity.RoleAdmin) {
-		return RoleAssignment{}, ErrCannotRemoveOwnAdmin
+	publicID, parseErr := strconv.ParseInt(userID, 10, 64)
+	if parseErr != nil || publicID < 100000 {
+		return RoleAssignment{}, ErrUserNotFound
 	}
 	tx, err := service.pool.Begin(ctx)
 	if err != nil {
@@ -57,13 +59,16 @@ func (service *Service) SetUserRoles(ctx context.Context, actorUserID, userID st
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('admin-role-management', 0))`); err != nil {
 		return RoleAssignment{}, err
 	}
-	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)`, userID).Scan(&exists); err != nil {
+	var targetUserID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM users WHERE public_id=$1`, publicID).Scan(&targetUserID); errors.Is(err, pgx.ErrNoRows) {
+		return RoleAssignment{}, ErrUserNotFound
+	} else if err != nil {
 		return RoleAssignment{}, err
 	}
-	if !exists {
-		return RoleAssignment{}, ErrUserNotFound
+	if actorUserID == targetUserID && !containsRole(roles, identity.RoleAdmin) {
+		return RoleAssignment{}, ErrCannotRemoveOwnAdmin
 	}
+	userID = targetUserID
 	var currentlyAdmin bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS(
@@ -102,7 +107,7 @@ func (service *Service) SetUserRoles(ctx context.Context, actorUserID, userID st
 	if err := tx.Commit(ctx); err != nil {
 		return RoleAssignment{}, err
 	}
-	return RoleAssignment{UserID: userID, Roles: roles}, nil
+	return RoleAssignment{UserID: publicID, Roles: roles}, nil
 }
 
 func normalizeRoles(requested []string) ([]string, error) {

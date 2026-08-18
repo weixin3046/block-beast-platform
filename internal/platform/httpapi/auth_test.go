@@ -225,7 +225,7 @@ func TestRefreshEndpointsUseSeparateAudiences(t *testing.T) {
 	}
 }
 
-func (stub stubRegisterService) Register(_ context.Context, _ string, _ string, _ string) (auth.LoginResult, error) {
+func (stub stubRegisterService) Register(_ context.Context, _ string, _ string, _ string, _ string) (auth.LoginResult, error) {
 	return stub.result, stub.err
 }
 
@@ -246,7 +246,7 @@ func TestRegisterEndpointMapsErrors(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"login_name":"new-player","password":"some-password-12"}`))
+			request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"login_name":"new-player","password":"some-password-12","invitation_code":"101"}`))
 			response := httptest.NewRecorder()
 			newServer(testCase.stub).Handler().ServeHTTP(response, request)
 			if response.Code != testCase.want {

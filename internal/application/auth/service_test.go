@@ -23,7 +23,7 @@ func TestLoginRejectsUnconfiguredService(t *testing.T) {
 
 type stubRegistrar struct{}
 
-func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ []string) (string, error) {
+func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ []string, _ int64) (string, error) {
 	return "user-1", nil
 }
 
@@ -39,6 +39,16 @@ func (credentials stubCredentials) UserRoles(context.Context, string) ([]string,
 	return credentials.roles, nil
 }
 
+func (stubCredentials) PublicUserID(context.Context, string) (int64, error) { return 100000, nil }
+func (stubCredentials) PasswordHashByUserID(context.Context, string) (string, error) {
+	return "", identity.ErrIdentityNotFound
+}
+func (stubCredentials) UpdatePasswordHash(context.Context, string, string) error { return nil }
+func (stubCredentials) SecondaryPasswordHashByUserID(context.Context, string) (string, error) {
+	return "", identity.ErrIdentityNotFound
+}
+func (stubCredentials) UpdateSecondaryPasswordHash(context.Context, string, string) error { return nil }
+
 type loginCredentials struct {
 	passwordHash string
 	roles        []string
@@ -50,6 +60,18 @@ func (credentials loginCredentials) FindPasswordCredentials(context.Context, str
 
 func (credentials loginCredentials) UserRoles(context.Context, string) ([]string, error) {
 	return credentials.roles, nil
+}
+
+func (loginCredentials) PublicUserID(context.Context, string) (int64, error) { return 100000, nil }
+func (loginCredentials) PasswordHashByUserID(context.Context, string) (string, error) {
+	return "", identity.ErrIdentityNotFound
+}
+func (loginCredentials) UpdatePasswordHash(context.Context, string, string) error { return nil }
+func (loginCredentials) SecondaryPasswordHashByUserID(context.Context, string) (string, error) {
+	return "", identity.ErrIdentityNotFound
+}
+func (loginCredentials) UpdateSecondaryPasswordHash(context.Context, string, string) error {
+	return nil
 }
 
 type memoryLoginAttempts struct {
@@ -275,28 +297,28 @@ func containsRole(roles []string, expected string) bool {
 
 func TestRegisterValidatesInput(t *testing.T) {
 	newService := func() *Service {
-		return NewService(nil, testSecret, time.Minute).WithRegistrar(stubRegistrar{})
+		return NewService(stubCredentials{}, testSecret, time.Minute).WithRegistrar(stubRegistrar{})
 	}
-	if _, err := newService().Register(context.Background(), "ab", "", "valid-password-12"); !errors.Is(err, ErrInvalidLoginName) {
+	if _, err := newService().Register(context.Background(), "ab", "", "valid-password-12", "101"); !errors.Is(err, ErrInvalidLoginName) {
 		t.Fatalf("short login name error = %v, want ErrInvalidLoginName", err)
 	}
-	if _, err := newService().Register(context.Background(), "bad name!", "", "valid-password-12"); !errors.Is(err, ErrInvalidLoginName) {
+	if _, err := newService().Register(context.Background(), "bad name!", "", "valid-password-12", "101"); !errors.Is(err, ErrInvalidLoginName) {
 		t.Fatalf("invalid chars error = %v, want ErrInvalidLoginName", err)
 	}
-	if _, err := newService().Register(context.Background(), "valid-name", "", "short"); !errors.Is(err, ErrInvalidPassword) {
+	if _, err := newService().Register(context.Background(), "valid-name", "", "short", "101"); !errors.Is(err, ErrInvalidPassword) {
 		t.Fatalf("short password error = %v, want ErrInvalidPassword", err)
 	}
 	service := NewService(nil, testSecret, time.Minute)
-	if _, err := service.Register(context.Background(), "valid-name", "", "valid-password-12"); !errors.Is(err, ErrAuthNotConfigured) {
+	if _, err := service.Register(context.Background(), "valid-name", "", "valid-password-12", "101"); !errors.Is(err, ErrAuthNotConfigured) {
 		t.Fatalf("missing registrar error = %v, want ErrAuthNotConfigured", err)
 	}
 }
 
 func TestDevelopmentCanDisablePasswordLengthPolicy(t *testing.T) {
-	service := NewService(nil, testSecret, time.Minute).
+	service := NewService(stubCredentials{}, testSecret, time.Minute).
 		WithStrictPasswordPolicy(false).
 		WithRegistrar(stubRegistrar{})
-	if _, err := service.Register(context.Background(), "dev-user", "", "123"); err != nil {
+	if _, err := service.Register(context.Background(), "dev-user", "", "123", "101"); err != nil {
 		t.Fatalf("development registration error = %v", err)
 	}
 }
@@ -318,7 +340,7 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 	repository := identity.NewPostgresRepository(pool)
 	service := NewService(repository, testSecret, 15*time.Minute).WithRegistrar(repository)
 
-	result, err := service.Register(ctx, loginName, "", password)
+	result, err := service.Register(ctx, loginName, "", password, "101")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -377,7 +399,7 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 	}
 
 	// 重复注册同一登录名必须冲突。
-	if _, err := service.Register(ctx, loginName, "", password); !errors.Is(err, identity.ErrLoginNameTaken) {
+	if _, err := service.Register(ctx, loginName, "", password, "101"); !errors.Is(err, identity.ErrLoginNameTaken) {
 		t.Fatalf("duplicate register error = %v, want ErrLoginNameTaken", err)
 	}
 }

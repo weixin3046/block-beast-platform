@@ -80,7 +80,7 @@ func main() {
 			WithRegistrar(identityRepository).
 			WithSessions(identityRepository, cfg.RefreshTokenTTL).
 			WithLoginProtection(identityRepository, loginPolicy)
-		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService), httpapi.WithSessions(authService))
+		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret)), httpapi.WithLogin(authService), httpapi.WithRegister(authService), httpapi.WithSessions(authService), httpapi.WithPasswordChange(authService), httpapi.WithSecondaryPasswords(authService))
 	}
 	withdrawalPolicy := chain.WithdrawalPolicy{
 		MinimumMinor:    cfg.WithdrawalMinMinor,

@@ -26,12 +26,22 @@ func (stubUserAdmin) SetUserStatus(context.Context, string, string, string) erro
 	return nil
 }
 
+func (stubUserAdmin) CurrentUser(context.Context, string) (operations.User, error) {
+	return operations.User{ID: 100000, LoginName: "player", InvitationCode: 101}, nil
+}
+
+func (stubUserAdmin) UpdateCurrentProfile(context.Context, string, string, string) (operations.User, error) {
+	return operations.User{ID: 100000}, nil
+}
+
+func (stubUserAdmin) SetAgentLevel(context.Context, string, int) error { return nil }
+
 func (stubUserAdmin) ListRoles(context.Context) ([]operations.Role, error) {
 	return []operations.Role{{Code: identity.RoleAdmin}}, nil
 }
 
 func (stub stubUserAdmin) SetUserRoles(context.Context, string, string, []string) (operations.RoleAssignment, error) {
-	return operations.RoleAssignment{UserID: "user-1", Roles: []string{identity.RoleOperator}}, stub.roleError
+	return operations.RoleAssignment{UserID: 100000, Roles: []string{identity.RoleOperator}}, stub.roleError
 }
 
 func TestRoleManagementRequiresAdminAndMapsSafetyErrors(t *testing.T) {

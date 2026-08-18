@@ -16,7 +16,7 @@ func (service *Service) Create(ctx context.Context, input CreateInput) (Packet, 
 	input.Greeting = strings.TrimSpace(input.Greeting)
 	input.ClientRequestID = strings.TrimSpace(input.ClientRequestID)
 	if input.SenderUserID == "" || input.RoomID == "" || input.ClientRequestID == "" || len(input.ClientRequestID) > 128 ||
-		(input.Currency != "USDT" && input.Currency != "POINTS") || input.TotalMinor <= 0 ||
+		(input.Currency != "USDT" && input.Currency != "POINTS" && input.Currency != "JADE" && input.Currency != "ORIGIN_STONE") || input.TotalMinor <= 0 ||
 		input.PacketCount <= 0 || input.PacketCount > 100 || input.TotalMinor < int64(input.PacketCount) ||
 		len([]rune(input.Greeting)) > 100 || service.ttl <= 0 {
 		return Packet{}, false, ErrInvalidPacket

@@ -20,35 +20,37 @@ import (
 )
 
 type Server struct {
-	config           config.Config
-	logger           *slog.Logger
-	betPlacer        BetPlacer
-	readiness        ReadinessChecker
-	wallets          WalletReader
-	rounds           RoundReader
-	bets             BetReader
-	canceller        RoundCanceller
-	auth             *Authenticator
-	logins           LoginService
-	registers        RegisterService
-	sessions         SessionService
-	auditor          AuditRecorder
-	chainWebhook     *chainWebhookConfig
-	withdrawals      WithdrawalService
-	depositHistory   DepositReader
-	depositAddresses DepositAddressService
-	credits          CreditService
-	tasks            TaskService
-	providerAssets   ProviderAssetReader
-	agents           AgentService
-	userAdmin        UserAdminService
-	operations       OperationsService
-	gameAdmin        GameAdminService
-	gameRoomAdmin    GameRoomService
-	chat             ChatService
-	uploads          UploadService
-	leaderboards     LeaderboardService
-	redPackets       RedPacketService
+	config             config.Config
+	logger             *slog.Logger
+	betPlacer          BetPlacer
+	readiness          ReadinessChecker
+	wallets            WalletReader
+	rounds             RoundReader
+	bets               BetReader
+	canceller          RoundCanceller
+	auth               *Authenticator
+	logins             LoginService
+	registers          RegisterService
+	sessions           SessionService
+	passwords          PasswordChangeService
+	secondaryPasswords SecondaryPasswordService
+	auditor            AuditRecorder
+	chainWebhook       *chainWebhookConfig
+	withdrawals        WithdrawalService
+	depositHistory     DepositReader
+	depositAddresses   DepositAddressService
+	credits            CreditService
+	tasks              TaskService
+	providerAssets     ProviderAssetReader
+	agents             AgentService
+	userAdmin          UserAdminService
+	operations         OperationsService
+	gameAdmin          GameAdminService
+	gameRoomAdmin      GameRoomService
+	chat               ChatService
+	uploads            UploadService
+	leaderboards       LeaderboardService
+	redPackets         RedPacketService
 }
 
 type LoginService interface {
@@ -57,13 +59,23 @@ type LoginService interface {
 }
 
 type RegisterService interface {
-	Register(ctx context.Context, loginName string, displayName string, password string) (auth.LoginResult, error)
+	Register(ctx context.Context, loginName string, displayName string, password string, invitationCode string) (auth.LoginResult, error)
 }
 
 type SessionService interface {
 	Refresh(ctx context.Context, refreshToken string) (auth.LoginResult, error)
 	RefreshAdmin(ctx context.Context, refreshToken string) (auth.LoginResult, error)
 	Logout(ctx context.Context, refreshToken string) error
+}
+
+type PasswordChangeService interface {
+	ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error
+}
+
+type SecondaryPasswordService interface {
+	SetSecondaryPassword(ctx context.Context, userID, ignored, secondaryPassword string) error
+	VerifySecondaryPassword(ctx context.Context, userID, secondaryPassword string) error
+	ChangeSecondaryPassword(ctx context.Context, userID, currentSecondaryPassword, newSecondaryPassword string) error
 }
 
 type AuditRecorder interface {
@@ -95,6 +107,14 @@ func WithRegister(registers RegisterService) Option {
 
 func WithSessions(sessions SessionService) Option {
 	return func(server *Server) { server.sessions = sessions }
+}
+
+func WithPasswordChange(passwords PasswordChangeService) Option {
+	return func(server *Server) { server.passwords = passwords }
+}
+
+func WithSecondaryPasswords(passwords SecondaryPasswordService) Option {
+	return func(server *Server) { server.secondaryPasswords = passwords }
 }
 
 func WithAudit(auditor AuditRecorder) Option {
@@ -151,6 +171,11 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/auth/refresh", server.refresh)
 	mux.HandleFunc("POST /v1/admin/auth/refresh", server.adminRefresh)
 	mux.HandleFunc("POST /v1/auth/logout", server.logout)
+	mux.HandleFunc("GET /v1/users/me", server.protect(server.currentUser))
+	mux.HandleFunc("PUT /v1/users/me", server.protect(server.updateCurrentProfile))
+	mux.HandleFunc("PUT /v1/users/me/password", server.protect(server.changePassword))
+	mux.HandleFunc("PUT /v1/users/me/secondary-password", server.protect(server.setSecondaryPassword))
+	mux.HandleFunc("POST /v1/users/me/secondary-password/verify", server.protect(server.verifySecondaryPassword))
 	mux.HandleFunc("POST /v1/chat/customer-service", server.protect(server.openCustomerServiceRoom))
 	mux.HandleFunc("GET /v1/chat/rooms", server.protect(server.chatRooms))
 	mux.HandleFunc("GET /v1/chat/rooms/{roomID}/messages", server.protect(server.chatMessages))
@@ -194,6 +219,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/users", server.protectRoles(server.adminUsers, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/status", server.protectRoles(server.setUserStatus, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/users/{userID}/agent-level", server.protectRoles(server.setAgentLevel, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/roles", server.protectRoles(server.adminRoles, identity.RoleAdmin))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/roles", server.protectRoles(server.setUserRoles, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/announcements", server.protectRoles(server.adminAnnouncements, identity.RoleAdmin, identity.RoleOperator))
@@ -291,19 +317,20 @@ func (server *Server) register(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	var input struct {
-		LoginName   string `json:"login_name"`
-		DisplayName string `json:"display_name"`
-		Password    string `json:"password"`
+		LoginName      string `json:"login_name"`
+		DisplayName    string `json:"display_name"`
+		Password       string `json:"password"`
+		InvitationCode string `json:"invitation_code"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || input.LoginName == "" || input.Password == "" {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "login_name and password are required"})
+	if err := decoder.Decode(&input); err != nil || input.LoginName == "" || input.Password == "" || input.InvitationCode == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "login_name, password and invitation_code are required"})
 		return
 	}
-	result, err := server.registers.Register(request.Context(), input.LoginName, input.DisplayName, input.Password)
+	result, err := server.registers.Register(request.Context(), input.LoginName, input.DisplayName, input.Password, input.InvitationCode)
 	switch {
-	case errors.Is(err, auth.ErrInvalidLoginName), errors.Is(err, auth.ErrInvalidPassword):
+	case errors.Is(err, auth.ErrInvalidLoginName), errors.Is(err, auth.ErrInvalidPassword), errors.Is(err, auth.ErrInvalidInvitationCode), errors.Is(err, identity.ErrInvitationCodeNotFound):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	case errors.Is(err, identity.ErrLoginNameTaken):

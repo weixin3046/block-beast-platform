@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,9 +22,12 @@ var ErrAuthNotConfigured = errors.New("authentication is not configured")
 var ErrInvalidLoginName = errors.New("login name must be 3-32 chars of letters, digits, '-' or '_'")
 var ErrInvalidPassword = errors.New("password must contain at least 12 characters")
 var ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
+var ErrInvalidInvitationCode = errors.New("invitation code is required and must be valid")
+var ErrSecondaryPasswordNotSet = errors.New("secondary password is not set")
+var ErrSecondaryPasswordAlreadySet = errors.New("secondary password is already set; verify the current secondary password to change it")
 
 // DefaultWalletCurrencies 是注册时创建的零余额钱包货币列表。
-var DefaultWalletCurrencies = []string{"USDT", "POINTS", "STAMINA"}
+var DefaultWalletCurrencies = []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA"}
 
 // loginNamePattern 约束登录名便于在 URL、日志与聊天中安全使用。
 var loginNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)
@@ -31,10 +35,15 @@ var loginNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)
 type CredentialsReader interface {
 	FindPasswordCredentials(ctx context.Context, loginName string) (identity.PasswordCredentials, error)
 	UserRoles(ctx context.Context, userID string) ([]string, error)
+	PublicUserID(ctx context.Context, userID string) (int64, error)
+	PasswordHashByUserID(ctx context.Context, userID string) (string, error)
+	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
+	SecondaryPasswordHashByUserID(ctx context.Context, userID string) (string, error)
+	UpdateSecondaryPasswordHash(ctx context.Context, userID, passwordHash string) error
 }
 
 type UserRegistrar interface {
-	RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currencies []string) (string, error)
+	RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currencies []string, invitationCode int64) (string, error)
 }
 
 type SessionStore interface {
@@ -88,7 +97,8 @@ type LoginResult struct {
 	RefreshToken string   `json:"refresh_token,omitempty"`
 	TokenType    string   `json:"token_type"`
 	ExpiresIn    int64    `json:"expires_in"`
-	UserID       string   `json:"user_id"`
+	UserID       string   `json:"-"`
+	PublicUserID int64    `json:"user_id"`
 	Roles        []string `json:"roles"`
 }
 
@@ -166,17 +176,22 @@ func (service *Service) login(ctx context.Context, loginName string, password st
 		// 不暴露账号是否存在、密码是否正确或具体角色。
 		return LoginResult{}, ErrInvalidCredentials
 	}
+	publicUserID, err := service.credentials.PublicUserID(ctx, credentials.UserID)
+	if err != nil {
+		return LoginResult{}, err
+	}
 	issuedAt := service.now().UTC()
 	token, err := identity.IssueAccessToken(service.secret, credentials.UserID, roles, issuedAt, service.ttl)
 	if err != nil {
 		return LoginResult{}, err
 	}
 	result := LoginResult{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(service.ttl / time.Second),
-		UserID:      credentials.UserID,
-		Roles:       roles,
+		AccessToken:  token,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(service.ttl / time.Second),
+		UserID:       credentials.UserID,
+		PublicUserID: publicUserID,
+		Roles:        roles,
 	}
 	return service.attachRefreshToken(ctx, result, audience)
 }
@@ -215,7 +230,7 @@ func adminLoginAllowed(roles []string) bool {
 
 // Register 创建新玩家账号（用户、密码凭证、player 角色、默认货币零余额钱包）
 // 并直接签发访问令牌，注册完成即可调用业务接口。
-func (service *Service) Register(ctx context.Context, loginName string, displayName string, password string) (LoginResult, error) {
+func (service *Service) Register(ctx context.Context, loginName string, displayName string, password string, invitationCode string) (LoginResult, error) {
 	if service.registrar == nil || len(service.secret) < 32 || service.ttl <= 0 {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
@@ -225,6 +240,10 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 	if service.strictPassword && len(password) < 12 {
 		return LoginResult{}, ErrInvalidPassword
 	}
+	invite, err := strconv.ParseInt(strings.TrimSpace(invitationCode), 10, 64)
+	if err != nil || invite < 101 {
+		return LoginResult{}, ErrInvalidInvitationCode
+	}
 	hash, err := identity.HashPassword(password)
 	if err != nil {
 		return LoginResult{}, ErrInvalidPassword
@@ -232,22 +251,27 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 	if displayName == "" {
 		displayName = loginName
 	}
-	userID, err := service.registrar.RegisterPasswordUser(ctx, loginName, displayName, hash, identity.RolePlayer, DefaultWalletCurrencies)
+	userID, err := service.registrar.RegisterPasswordUser(ctx, loginName, displayName, hash, identity.RolePlayer, DefaultWalletCurrencies, invite)
 	if err != nil {
 		return LoginResult{}, err
 	}
 	roles := []string{identity.RolePlayer}
+	publicUserID, err := service.credentials.PublicUserID(ctx, userID)
+	if err != nil {
+		return LoginResult{}, err
+	}
 	issuedAt := service.now().UTC()
 	token, err := identity.IssueAccessToken(service.secret, userID, roles, issuedAt, service.ttl)
 	if err != nil {
 		return LoginResult{}, err
 	}
 	result := LoginResult{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(service.ttl / time.Second),
-		UserID:      userID,
-		Roles:       roles,
+		AccessToken:  token,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(service.ttl / time.Second),
+		UserID:       userID,
+		PublicUserID: publicUserID,
+		Roles:        roles,
 	}
 	return service.attachRefreshToken(ctx, result, AudiencePlayer)
 }
@@ -282,6 +306,10 @@ func (service *Service) refresh(ctx context.Context, refreshToken string, audien
 		_ = service.sessions.RevokeSession(ctx, newTokenHash)
 		return LoginResult{}, ErrInvalidRefreshToken
 	}
+	publicUserID, err := service.credentials.PublicUserID(ctx, userID)
+	if err != nil {
+		return LoginResult{}, err
+	}
 	accessToken, err := identity.IssueAccessToken(service.secret, userID, roles, service.now().UTC(), service.ttl)
 	if err != nil {
 		return LoginResult{}, err
@@ -292,6 +320,7 @@ func (service *Service) refresh(ctx context.Context, refreshToken string, audien
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(service.ttl / time.Second),
 		UserID:       userID,
+		PublicUserID: publicUserID,
 		Roles:        roles,
 	}, nil
 }
@@ -307,6 +336,67 @@ func (service *Service) Logout(ctx context.Context, refreshToken string) error {
 		return ErrInvalidRefreshToken
 	}
 	return nil
+}
+
+func (service *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	if strings.TrimSpace(newPassword) == "" || (service.strictPassword && len(newPassword) < 12) {
+		return ErrInvalidPassword
+	}
+	currentHash, err := service.credentials.PasswordHashByUserID(ctx, userID)
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+	if !identity.VerifyPassword(currentHash, currentPassword) {
+		return ErrInvalidCredentials
+	}
+	newHash, err := identity.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	return service.credentials.UpdatePasswordHash(ctx, userID, newHash)
+}
+
+// SetSecondaryPassword 首次设置二级密码。认证令牌已证明用户身份，无需再次验证登录密码。
+func (service *Service) SetSecondaryPassword(ctx context.Context, userID, _ string, secondaryPassword string) error {
+	if strings.TrimSpace(secondaryPassword) == "" {
+		return ErrInvalidPassword
+	}
+	if _, err := service.credentials.SecondaryPasswordHashByUserID(ctx, userID); err == nil {
+		return ErrSecondaryPasswordAlreadySet
+	} else if !errors.Is(err, identity.ErrIdentityNotFound) {
+		return err
+	}
+	secondaryHash, err := identity.HashPassword(secondaryPassword)
+	if err != nil {
+		return err
+	}
+	return service.credentials.UpdateSecondaryPasswordHash(ctx, userID, secondaryHash)
+}
+
+func (service *Service) VerifySecondaryPassword(ctx context.Context, userID, secondaryPassword string) error {
+	passwordHash, err := service.credentials.SecondaryPasswordHashByUserID(ctx, userID)
+	if errors.Is(err, identity.ErrIdentityNotFound) {
+		return ErrSecondaryPasswordNotSet
+	}
+	if err != nil || !identity.VerifyPassword(passwordHash, secondaryPassword) {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
+// ChangeSecondaryPassword 仅在旧二级密码验证通过后修改二级密码。
+func (service *Service) ChangeSecondaryPassword(ctx context.Context, userID, currentSecondaryPassword, newSecondaryPassword string) error {
+	if strings.TrimSpace(newSecondaryPassword) == "" {
+		return ErrInvalidPassword
+	}
+	if err := service.VerifySecondaryPassword(ctx, userID, currentSecondaryPassword); err != nil {
+		return err
+	}
+	passwordHash, err := identity.HashPassword(newSecondaryPassword)
+	if err != nil {
+		return err
+	}
+	return service.credentials.UpdateSecondaryPasswordHash(ctx, userID, passwordHash)
 }
 
 func (service *Service) attachRefreshToken(ctx context.Context, result LoginResult, audience SessionAudience) (LoginResult, error) {

@@ -10,7 +10,7 @@ import (
 )
 
 var ErrInvalidMetric = errors.New("metric must be turnover, profit, or wins")
-var ErrInvalidCurrency = errors.New("currency must be USDT or POINTS")
+var ErrInvalidCurrency = errors.New("currency must be USDT, POINTS, JADE, or ORIGIN_STONE")
 
 type Entry struct {
 	Rank                int64  `json:"rank"`
@@ -67,7 +67,7 @@ func (service *Service) RefreshDaily(ctx context.Context, date time.Time) (int64
 
 func (service *Service) ListDaily(ctx context.Context, date time.Time, currency, metric string, limit int) ([]Entry, error) {
 	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if currency != "USDT" && currency != "POINTS" {
+	if currency != "USDT" && currency != "POINTS" && currency != "JADE" && currency != "ORIGIN_STONE" {
 		return nil, ErrInvalidCurrency
 	}
 	orderColumn := ""
