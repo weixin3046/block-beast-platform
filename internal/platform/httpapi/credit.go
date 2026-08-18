@@ -36,13 +36,21 @@ func (server *Server) pointWithdrawals(writer http.ResponseWriter, request *http
 	}
 	if userID == "" {
 		userID = request.URL.Query().Get("account_id")
+		if userID != "" {
+			internalID, err := server.resolvePublicUserID(request.Context(), userID)
+			if err != nil {
+				writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+				return
+			}
+			userID = internalID
+		}
 	}
 	items, err := server.credits.ListPointWithdrawals(request.Context(), userID, request.URL.Query().Get("status"), 50)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list point withdrawals"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) adminPointWithdrawals(writer http.ResponseWriter, request *http.Request) {
@@ -55,7 +63,7 @@ func (server *Server) adminPointWithdrawals(writer http.ResponseWriter, request 
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list point withdrawals"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) requestPointWithdrawal(writer http.ResponseWriter, request *http.Request) {
@@ -76,6 +84,13 @@ func (server *Server) requestPointWithdrawal(writer http.ResponseWriter, request
 	userID := input.AccountID
 	if claims, ok := ClaimsFromContext(request.Context()); ok {
 		userID = claims.Subject
+	} else if userID != "" {
+		internalID, err := server.resolvePublicUserID(request.Context(), userID)
+		if err != nil {
+			writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		userID = internalID
 	}
 	result, err := server.credits.RequestPointWithdrawal(request.Context(), userID, input.RequestID, input.AmountMinor, input.Remark)
 	switch {
@@ -86,7 +101,7 @@ func (server *Server) requestPointWithdrawal(writer http.ResponseWriter, request
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to request point withdrawal"})
 	default:
-		writeJSON(writer, http.StatusCreated, result)
+		server.writePublicJSON(writer, request, http.StatusCreated, result)
 	}
 }
 
@@ -152,6 +167,13 @@ func (server *Server) adminCredit(writer http.ResponseWriter, request *http.Requ
 	}
 	claims, _ := ClaimsFromContext(request.Context())
 	input.OperatorID = claims.Subject
+	publicUserID := input.UserID
+	internalUserID, err := server.resolvePublicUserID(request.Context(), publicUserID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	input.UserID = internalUserID
 
 	result, err := server.credits.AdminCredit(request.Context(), input)
 	switch {
@@ -169,10 +191,10 @@ func (server *Server) adminCredit(writer http.ResponseWriter, request *http.Requ
 		ActorUserID: claims.Subject,
 		Action:      "admin.credit",
 		TargetType:  "user",
-		TargetID:    input.UserID,
+		TargetID:    publicUserID,
 		Payload:     map[string]any{"currency": input.Currency, "amount_minor": input.AmountMinor, "credited": result.Credited},
 	})
-	writeJSON(writer, http.StatusOK, result)
+	server.writePublicJSON(writer, request, http.StatusOK, result)
 }
 
 // consumeStamina 处理参加活动消耗体力。
@@ -192,10 +214,16 @@ func (server *Server) consumeStamina(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "user_id, amount_minor, activity_id are required"})
 		return
 	}
-	if !authorizeAccount(request, input.UserID) {
+	internalUserID, err := server.resolvePublicUserID(request.Context(), input.UserID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	if !authorizeAccount(request, internalUserID) {
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "cannot consume stamina for another account"})
 		return
 	}
+	input.UserID = internalUserID
 	result, err := server.credits.ConsumeStamina(request.Context(), input)
 	switch {
 	case errors.Is(err, credit.ErrInvalidAmount):
@@ -211,7 +239,7 @@ func (server *Server) consumeStamina(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to consume stamina"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, result)
+	server.writePublicJSON(writer, request, http.StatusOK, result)
 }
 
 // checkin 处理每日签到。
@@ -230,7 +258,7 @@ func (server *Server) checkin(writer http.ResponseWriter, request *http.Request)
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to check in"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, result)
+	server.writePublicJSON(writer, request, http.StatusOK, result)
 }
 
 // allBalances 查询用户所有币种余额。
@@ -244,16 +272,21 @@ func (server *Server) allBalances(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account ID is required"})
 		return
 	}
-	if !authorizeAccount(request, accountID) {
+	internalID, err := server.resolvePublicUserID(request.Context(), accountID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	if !authorizeAccount(request, internalID) {
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "wallet belongs to another account"})
 		return
 	}
-	balances, err := server.credits.Balances(request.Context(), accountID)
+	balances, err := server.credits.Balances(request.Context(), internalID)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read balances"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, balances)
+	server.writePublicJSON(writer, request, http.StatusOK, balances)
 }
 
 // pointsLedger 查询用户积分流水。
@@ -267,17 +300,22 @@ func (server *Server) pointsLedger(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account ID is required"})
 		return
 	}
-	if !authorizeAccount(request, accountID) {
+	internalID, err := server.resolvePublicUserID(request.Context(), accountID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	if !authorizeAccount(request, internalID) {
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "ledger belongs to another account"})
 		return
 	}
 	limit, offset := parsePagination(request)
-	entries, err := server.credits.ListPointsLedger(request.Context(), accountID, limit, offset)
+	entries, err := server.credits.ListPointsLedger(request.Context(), internalID, limit, offset)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read points ledger"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, entries)
+	server.writePublicJSON(writer, request, http.StatusOK, entries)
 }
 
 // staminaLedger 查询用户体力流水。
@@ -291,17 +329,22 @@ func (server *Server) staminaLedger(writer http.ResponseWriter, request *http.Re
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account ID is required"})
 		return
 	}
-	if !authorizeAccount(request, accountID) {
+	internalID, err := server.resolvePublicUserID(request.Context(), accountID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	if !authorizeAccount(request, internalID) {
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "ledger belongs to another account"})
 		return
 	}
 	limit, offset := parsePagination(request)
-	entries, err := server.credits.ListStaminaLedger(request.Context(), accountID, limit, offset)
+	entries, err := server.credits.ListStaminaLedger(request.Context(), internalID, limit, offset)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read stamina ledger"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, entries)
+	server.writePublicJSON(writer, request, http.StatusOK, entries)
 }
 
 func parsePagination(request *http.Request) (int, int) {

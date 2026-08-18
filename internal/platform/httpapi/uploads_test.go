@@ -41,6 +41,10 @@ func (stub stubUploadService) OpenContent(context.Context, string, string) (obje
 	return nil, objectstorage.ObjectInfo{}, stub.err
 }
 
+func (stub stubUploadService) OpenPublicAvatar(context.Context, int64) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error) {
+	return nil, objectstorage.ObjectInfo{}, stub.err
+}
+
 func TestUploadAuthorizationRequiresIdentityAndMapsValidation(t *testing.T) {
 	newServer := func(stub stubUploadService) *Server {
 		return New(

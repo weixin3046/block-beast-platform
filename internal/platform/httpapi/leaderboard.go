@@ -41,6 +41,6 @@ func (server *Server) dailyLeaderboard(writer http.ResponseWriter, request *http
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list leaderboard"})
 	default:
-		writeJSON(writer, http.StatusOK, items)
+		server.writePublicJSON(writer, request, http.StatusOK, items)
 	}
 }

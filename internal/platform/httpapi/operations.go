@@ -35,7 +35,7 @@ func (server *Server) announcements(writer http.ResponseWriter, request *http.Re
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list announcements"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) adminAnnouncements(writer http.ResponseWriter, request *http.Request) {
@@ -48,7 +48,7 @@ func (server *Server) adminAnnouncements(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list announcements"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) createAnnouncement(writer http.ResponseWriter, request *http.Request) {
@@ -70,7 +70,7 @@ func (server *Server) createAnnouncement(writer http.ResponseWriter, request *ht
 		return
 	}
 	server.auditAnnouncement(request, "announcement.create", item.ID)
-	writeJSON(writer, http.StatusCreated, item)
+	server.writePublicJSON(writer, request, http.StatusCreated, item)
 }
 
 func (server *Server) updateAnnouncement(writer http.ResponseWriter, request *http.Request) {
@@ -92,7 +92,7 @@ func (server *Server) updateAnnouncement(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to update announcement"})
 	default:
 		server.auditAnnouncement(request, "announcement.update", item.ID)
-		writeJSON(writer, http.StatusOK, item)
+		server.writePublicJSON(writer, request, http.StatusOK, item)
 	}
 }
 
@@ -106,7 +106,7 @@ func (server *Server) auditLogs(writer http.ResponseWriter, request *http.Reques
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list audit logs"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func decodeAnnouncement(writer http.ResponseWriter, request *http.Request) (operations.AnnouncementInput, bool) {

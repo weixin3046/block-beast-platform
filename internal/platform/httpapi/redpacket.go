@@ -92,7 +92,7 @@ func (server *Server) redPacket(writer http.ResponseWriter, request *http.Reques
 	if writeRedPacketError(writer, err) {
 		return
 	}
-	writeJSON(writer, http.StatusOK, packet)
+	server.writePublicJSON(writer, request, http.StatusOK, packet)
 }
 
 func writeRedPacketError(writer http.ResponseWriter, err error) bool {

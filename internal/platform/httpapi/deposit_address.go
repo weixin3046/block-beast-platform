@@ -19,6 +19,14 @@ func (server *Server) depositAddress(writer http.ResponseWriter, request *http.R
 	}
 	if userID == "" {
 		userID = request.URL.Query().Get("account_id")
+		if userID != "" {
+			internalID, err := server.resolvePublicUserID(request.Context(), userID)
+			if err != nil {
+				writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+				return
+			}
+			userID = internalID
+		}
 	}
 	chainCode, tokenCode := request.URL.Query().Get("chain_code"), request.URL.Query().Get("token_code")
 	if userID == "" || chainCode == "" || tokenCode == "" {
@@ -38,7 +46,7 @@ func (server *Server) depositAddress(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "address belongs to another account"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, address)
+	server.writePublicJSON(writer, request, http.StatusOK, address)
 }
 
 func (server *Server) createDepositAddress(writer http.ResponseWriter, request *http.Request) {
@@ -58,6 +66,13 @@ func (server *Server) createDepositAddress(writer http.ResponseWriter, request *
 	userID := input.AccountID
 	if claims, ok := ClaimsFromContext(request.Context()); ok {
 		userID = claims.Subject
+	} else if userID != "" {
+		internalID, err := server.resolvePublicUserID(request.Context(), userID)
+		if err != nil {
+			writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		userID = internalID
 	}
 	address, err := server.depositAddresses.CreateDepositAddress(request.Context(), userID, input.ChainCode, input.TokenCode)
 	if errors.Is(err, chainapp.ErrMissingFields) || errors.Is(err, chainapp.ErrUnsupportedAsset) {
@@ -68,5 +83,5 @@ func (server *Server) createDepositAddress(writer http.ResponseWriter, request *
 		writeJSON(writer, http.StatusBadGateway, map[string]string{"error": "unable to create deposit address"})
 		return
 	}
-	writeJSON(writer, http.StatusCreated, address)
+	server.writePublicJSON(writer, request, http.StatusCreated, address)
 }

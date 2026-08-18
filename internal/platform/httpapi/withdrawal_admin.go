@@ -26,7 +26,7 @@ func (server *Server) withdrawal(writer http.ResponseWriter, request *http.Reque
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "withdrawal belongs to another account"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, withdrawal)
+	server.writePublicJSON(writer, request, http.StatusOK, withdrawal)
 }
 
 func (server *Server) approveWithdrawal(writer http.ResponseWriter, request *http.Request) {
@@ -51,6 +51,6 @@ func (server *Server) approveWithdrawal(writer http.ResponseWriter, request *htt
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to approve withdrawal"})
 	default:
 		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "withdrawal.approve", TargetType: "withdrawal", TargetID: withdrawal.WithdrawalID, Payload: map[string]any{"status": withdrawal.Status}})
-		writeJSON(writer, http.StatusOK, withdrawal)
+		server.writePublicJSON(writer, request, http.StatusOK, withdrawal)
 	}
 }

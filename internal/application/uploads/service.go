@@ -147,6 +147,23 @@ func (service *Service) OpenContent(ctx context.Context, uploadID, ownerUserID s
 	return store.Open(ctx, upload.StorageKey)
 }
 
+// OpenPublicAvatar opens only a confirmed upload explicitly selected as an avatar.
+func (service *Service) OpenPublicAvatar(ctx context.Context, publicUserID int64) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error) {
+	var storageKey string
+	err := service.pool.QueryRow(ctx, `SELECT uploads.storage_key FROM users JOIN uploads ON uploads.storage_key=users.avatar_url AND uploads.owner_user_id=users.id WHERE users.public_id=$1 AND uploads.status='confirmed'`, publicUserID).Scan(&storageKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, objectstorage.ObjectInfo{}, ErrUploadNotFound
+	}
+	if err != nil {
+		return nil, objectstorage.ObjectInfo{}, err
+	}
+	store, ok := service.store.(contentStore)
+	if !ok {
+		return nil, objectstorage.ObjectInfo{}, ErrContentOperationUnsupported
+	}
+	return store.Open(ctx, storageKey)
+}
+
 func (service *Service) Confirm(ctx context.Context, uploadID, ownerUserID string) (Upload, error) {
 	upload, err := service.find(ctx, uploadID, ownerUserID)
 	if err != nil {

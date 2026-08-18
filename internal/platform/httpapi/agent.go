@@ -33,7 +33,12 @@ func (server *Server) grantCommission(writer http.ResponseWriter, request *http.
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
-	id, err := server.agents.GrantCommission(request.Context(), input.RequestID, request.PathValue("agentID"), input.Currency, input.AmountMinor, input.Remark, claims.Subject)
+	agentID, err := server.resolvePublicUserID(request.Context(), request.PathValue("agentID"))
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "agent not found"})
+		return
+	}
+	id, err := server.agents.GrantCommission(request.Context(), input.RequestID, agentID, input.Currency, input.AmountMinor, input.Remark, claims.Subject)
 	if errors.Is(err, agentapp.ErrInvalidCommissionAdjustment) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -63,7 +68,7 @@ func (server *Server) teamSummary(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read team summary"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, summary)
+	server.writePublicJSON(writer, request, http.StatusOK, summary)
 }
 
 func (server *Server) adminCommissions(writer http.ResponseWriter, request *http.Request) {
@@ -72,7 +77,7 @@ func (server *Server) adminCommissions(writer http.ResponseWriter, request *http
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list commissions"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) reverseCommission(writer http.ResponseWriter, request *http.Request) {
@@ -107,7 +112,7 @@ func (server *Server) commissions(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list commissions"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) setAgentCommissionRate(writer http.ResponseWriter, request *http.Request) {
@@ -119,7 +124,12 @@ func (server *Server) setAgentCommissionRate(writer http.ResponseWriter, request
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
-	err := server.agents.SetCommissionRate(request.Context(), request.PathValue("agentID"), input.RateBasisPoints, claims.Subject)
+	agentID, err := server.resolvePublicUserID(request.Context(), request.PathValue("agentID"))
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "agent not found"})
+		return
+	}
+	err = server.agents.SetCommissionRate(request.Context(), agentID, input.RateBasisPoints, claims.Subject)
 	if errors.Is(err, agentapp.ErrInvalidCommissionRate) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -146,7 +156,7 @@ func (server *Server) agentRelation(writer http.ResponseWriter, request *http.Re
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read agent relation"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, relation)
+	server.writePublicJSON(writer, request, http.StatusOK, relation)
 }
 
 func WithAgents(service AgentService) Option { return func(server *Server) { server.agents = service } }
@@ -168,7 +178,12 @@ func (server *Server) bindAgent(writer http.ResponseWriter, request *http.Reques
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
-	err := server.agents.Bind(request.Context(), claims.Subject, input.ParentUserID)
+	parentUserID, err := server.resolvePublicUserID(request.Context(), input.ParentUserID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "parent user not found"})
+		return
+	}
+	err = server.agents.Bind(request.Context(), claims.Subject, parentUserID)
 	switch {
 	case errors.Is(err, agentapp.ErrInvalidRelation):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})

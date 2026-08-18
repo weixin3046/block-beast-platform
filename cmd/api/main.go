@@ -61,11 +61,11 @@ func main() {
 	taskService := task.NewService(pool, creditService)
 	bettingService := betting.NewService(pool).WithTaskHook(taskService)
 	cancellationService := settlement.NewService(pool)
+	identityRepository := identity.NewPostgresRepository(pool)
 	options := []httpapi.Option{httpapi.WithAudit(audit.NewService(pool))}
 	if cfg.AuthTokenSecret == "" {
 		logger.Warn("AUTH_TOKEN_SECRET is not set; business endpoints are unauthenticated")
 	} else {
-		identityRepository := identity.NewPostgresRepository(pool)
 		loginPolicy := auth.LoginProtectionPolicy{
 			MaxFailures: cfg.LoginMaxFailures,
 			Window:      cfg.LoginFailureWindow,
@@ -133,7 +133,7 @@ func main() {
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
 	operationsService := operations.NewService(pool)
-	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService))
+	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService), httpapi.WithPublicUserResolver(identityRepository))
 	if cfg.PQPAAPISecret == "" {
 		logger.Warn("PQPA_API_SECRET is not set; chain deposit webhook is disabled")
 	} else {

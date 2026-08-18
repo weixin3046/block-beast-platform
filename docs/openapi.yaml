@@ -152,6 +152,19 @@ paths:
       responses:
         '200': { description: 修改成功 }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /v1/avatars/{userID}:
+    get:
+      tags: [Auth]
+      summary: 获取用户公开头像
+      description: 仅返回用户已确认并设置为头像的图片，可直接作为 img 的 src。
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema: { type: integer, format: int64, minimum: 100000 }
+      responses:
+        '200': { description: 头像图片内容 }
+        '404': { $ref: '#/components/responses/NotFound' }
   /v1/users/me/password:
     put:
       tags: [Auth]
@@ -1975,8 +1988,10 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        format: uuid
+        type: integer
+        format: int64
+        minimum: 100000
+        description: 公开数字用户 ID。
     Limit:
       name: limit
       in: query
@@ -2079,7 +2094,7 @@ components:
       type: object
       required: [user_id, roles]
       properties:
-        user_id: { type: string, format: uuid }
+        user_id: { type: integer, format: int64, minimum: 100000 }
         roles:
           type: array
           items: { type: string, enum: [player, operator, admin] }
@@ -2089,7 +2104,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         room_id: { type: string, format: uuid }
-        sender_user_id: { type: string, format: uuid }
+        sender_user_id: { type: integer, format: int64, minimum: 100000 }
         client_request_id: { type: string }
         currency: { type: string, enum: [USDT, POINTS] }
         greeting: { type: string }
@@ -2106,7 +2121,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         red_packet_id: { type: string, format: uuid }
-        user_id: { type: string, format: uuid }
+        user_id: { type: integer, format: int64, minimum: 100000 }
         currency: { type: string, enum: [USDT, POINTS] }
         amount_minor: { type: integer, format: int64, minimum: 1 }
         claimed_at: { type: string, format: date-time }
@@ -2115,7 +2130,7 @@ components:
       required: [rank, user_id, display_name, currency, effective_stake_minor, payout_minor, net_profit_minor, bet_count, win_count]
       properties:
         rank: { type: integer, format: int64, minimum: 1 }
-        user_id: { type: string, format: uuid }
+        user_id: { type: integer, format: int64, minimum: 100000 }
         display_name: { type: string }
         currency: { type: string, enum: [USDT, POINTS] }
         effective_stake_minor: { type: integer, format: int64 }
@@ -2128,7 +2143,7 @@ components:
       required: [id, owner_user_id, storage_key, content_type, size_bytes, status, created_at]
       properties:
         id: { type: string, format: uuid }
-        owner_user_id: { type: string, format: uuid }
+        owner_user_id: { type: integer, format: int64, minimum: 100000 }
         storage_key: { type: string }
         content_type: { type: string }
         size_bytes: { type: integer, format: int64 }
@@ -2162,7 +2177,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         room_id: { type: string, format: uuid }
-        sender_user_id: { type: string, format: uuid }
+        sender_user_id: { type: integer, format: int64, minimum: 100000 }
         body: { type: string }
         status: { type: string, enum: [visible, hidden, deleted] }
         client_request_id: { type: string }
@@ -2527,8 +2542,9 @@ components:
           type: string
           format: uuid
         account_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         currency:
           type: string
           minLength: 1
@@ -2552,8 +2568,9 @@ components:
           type: string
           format: uuid
         account_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         currency:
           type: string
         selection: {}
@@ -2571,8 +2588,9 @@ components:
       required: [account_id, currency, available_minor, frozen_minor]
       properties:
         account_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         currency:
           type: string
         available_minor:
@@ -2599,9 +2617,10 @@ components:
       required: [user_id, currency, amount_minor, request_id]
       properties:
         user_id:
-          type: string
-          format: uuid
-          description: 目标用户 ID。
+          type: integer
+          format: int64
+          minimum: 100000
+          description: 目标公开用户 ID。
         currency:
           type: string
           enum: [POINTS, USDT, STAMINA]
@@ -2622,8 +2641,9 @@ components:
       required: [user_id, currency, amount_minor, balance_after_minor, credited, occurred_at]
       properties:
         user_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         currency:
           type: string
         amount_minor:
@@ -2644,8 +2664,9 @@ components:
       required: [user_id, amount_minor, activity_id]
       properties:
         user_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         amount_minor:
           type: integer
           format: int64
@@ -2661,8 +2682,9 @@ components:
       required: [user_id, amount_minor, balance_after_minor, consumed, occurred_at]
       properties:
         user_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         amount_minor:
           type: integer
           format: int64
@@ -2680,8 +2702,9 @@ components:
       required: [user_id, checkin_date, reward_minor, balance_after_minor, checked_in, occurred_at]
       properties:
         user_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         checkin_date:
           type: string
           format: date
@@ -2737,8 +2760,9 @@ components:
           type: string
           format: uuid
         user_id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
+          minimum: 100000
         business_type:
           type: string
           description: 业务类型，如 admin_credit / checkin_reward / bet_task_reward / activity_consume。

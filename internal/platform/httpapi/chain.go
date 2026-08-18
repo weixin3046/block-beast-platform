@@ -46,6 +46,13 @@ func (server *Server) userDeposits(writer http.ResponseWriter, request *http.Req
 	userID := request.URL.Query().Get("account_id")
 	if ok {
 		userID = claims.Subject
+	} else if userID != "" {
+		internalID, err := server.resolvePublicUserID(request.Context(), userID)
+		if err != nil {
+			writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		userID = internalID
 	}
 	if userID == "" {
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
@@ -56,7 +63,7 @@ func (server *Server) userDeposits(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list deposits"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) userWithdrawals(writer http.ResponseWriter, request *http.Request) {
@@ -64,6 +71,13 @@ func (server *Server) userWithdrawals(writer http.ResponseWriter, request *http.
 	userID := request.URL.Query().Get("account_id")
 	if ok {
 		userID = claims.Subject
+	} else if userID != "" {
+		internalID, err := server.resolvePublicUserID(request.Context(), userID)
+		if err != nil {
+			writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		userID = internalID
 	}
 	if userID == "" {
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
@@ -74,7 +88,7 @@ func (server *Server) userWithdrawals(writer http.ResponseWriter, request *http.
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list withdrawals"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) adminWithdrawals(writer http.ResponseWriter, request *http.Request) {
@@ -83,7 +97,7 @@ func (server *Server) adminWithdrawals(writer http.ResponseWriter, request *http
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list withdrawals"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) rejectWithdrawal(writer http.ResponseWriter, request *http.Request) {
@@ -102,7 +116,7 @@ func (server *Server) rejectWithdrawal(writer http.ResponseWriter, request *http
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to reject withdrawal"})
 	default:
 		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "withdrawal.reject", TargetType: "withdrawal", TargetID: withdrawal.WithdrawalID, Payload: map[string]any{"reason": input.Reason}})
-		writeJSON(writer, http.StatusOK, withdrawal)
+		server.writePublicJSON(writer, request, http.StatusOK, withdrawal)
 	}
 }
 

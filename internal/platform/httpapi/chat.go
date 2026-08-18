@@ -32,7 +32,7 @@ func (server *Server) openCustomerServiceRoom(writer http.ResponseWriter, reques
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to open customer service room"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, room)
+	server.writePublicJSON(writer, request, http.StatusOK, room)
 }
 
 func (server *Server) chatRooms(writer http.ResponseWriter, request *http.Request) {
@@ -46,7 +46,7 @@ func (server *Server) chatRooms(writer http.ResponseWriter, request *http.Reques
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list chat rooms"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) chatMessages(writer http.ResponseWriter, request *http.Request) {
@@ -56,7 +56,7 @@ func (server *Server) chatMessages(writer http.ResponseWriter, request *http.Req
 	}
 	claims, _ := ClaimsFromContext(request.Context())
 	items, err := server.chat.ListMessages(request.Context(), request.PathValue("roomID"), claims.Subject, isStaff(claims), queryLimit(request, 50))
-	writeChatResult(writer, items, err)
+	server.writeChatResult(writer, request, items, err)
 }
 
 func (server *Server) sendChatMessage(writer http.ResponseWriter, request *http.Request) {
@@ -80,7 +80,7 @@ func (server *Server) sendChatMessage(writer http.ResponseWriter, request *http.
 		input.ClientRequestID, input.Body, isStaff(claims),
 	)
 	if err != nil {
-		writeChatResult(writer, nil, err)
+		server.writeChatResult(writer, request, nil, err)
 		return
 	}
 	status := http.StatusOK
@@ -90,7 +90,7 @@ func (server *Server) sendChatMessage(writer http.ResponseWriter, request *http.
 	writeJSON(writer, status, item)
 }
 
-func writeChatResult(writer http.ResponseWriter, result any, err error) {
+func (server *Server) writeChatResult(writer http.ResponseWriter, request *http.Request, result any, err error) {
 	switch {
 	case errors.Is(err, chat.ErrInvalidMessage), errors.Is(err, chat.ErrInvalidRequestID):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -101,7 +101,7 @@ func writeChatResult(writer http.ResponseWriter, result any, err error) {
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to process chat request"})
 	default:
-		writeJSON(writer, http.StatusOK, result)
+		server.writePublicJSON(writer, request, http.StatusOK, result)
 	}
 }
 

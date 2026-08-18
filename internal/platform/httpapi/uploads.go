@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/block-beast/platform/internal/application/uploads"
@@ -18,6 +19,33 @@ type UploadService interface {
 	Find(ctx context.Context, uploadID, ownerUserID string) (uploads.Upload, error)
 	PutContent(ctx context.Context, uploadID, ownerUserID, contentType string, source io.Reader) (uploads.Upload, error)
 	OpenContent(ctx context.Context, uploadID, ownerUserID string) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error)
+	OpenPublicAvatar(ctx context.Context, publicUserID int64) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error)
+}
+
+func (server *Server) publicAvatar(writer http.ResponseWriter, request *http.Request) {
+	if server.uploads == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "uploads are unavailable"})
+		return
+	}
+	userID, err := strconv.ParseInt(request.PathValue("userID"), 10, 64)
+	if err != nil || userID < 100000 {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "avatar not found"})
+		return
+	}
+	content, info, err := server.uploads.OpenPublicAvatar(request.Context(), userID)
+	if errors.Is(err, uploads.ErrUploadNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "avatar not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read avatar"})
+		return
+	}
+	defer content.Close()
+	writer.Header().Set("Content-Type", info.ContentType)
+	writer.Header().Set("Cache-Control", "public, max-age=3600")
+	writer.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(writer, request, request.PathValue("userID"), time.Time{}, content)
 }
 
 func (server *Server) putUploadContent(writer http.ResponseWriter, request *http.Request) {
@@ -49,7 +77,7 @@ func (server *Server) putUploadContent(writer http.ResponseWriter, request *http
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to store upload"})
 	default:
-		writeJSON(writer, http.StatusOK, result)
+		server.writePublicJSON(writer, request, http.StatusOK, result)
 	}
 }
 
@@ -115,7 +143,7 @@ func (server *Server) authorizeUpload(writer http.ResponseWriter, request *http.
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to authorize upload"})
 		return
 	}
-	writeJSON(writer, http.StatusCreated, result)
+	server.writePublicJSON(writer, request, http.StatusCreated, result)
 }
 
 func (server *Server) confirmUpload(writer http.ResponseWriter, request *http.Request) {
@@ -151,6 +179,6 @@ func (server *Server) handleUpload(writer http.ResponseWriter, request *http.Req
 	case err != nil:
 		writeJSON(writer, http.StatusBadGateway, map[string]string{"error": "unable to verify upload"})
 	default:
-		writeJSON(writer, http.StatusOK, result)
+		server.writePublicJSON(writer, request, http.StatusOK, result)
 	}
 }

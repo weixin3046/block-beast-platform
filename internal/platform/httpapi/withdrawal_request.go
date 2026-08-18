@@ -35,6 +35,13 @@ func (server *Server) requestWithdrawal(writer http.ResponseWriter, request *htt
 	accountID := input.AccountID
 	if claims, ok := ClaimsFromContext(request.Context()); ok {
 		accountID = claims.Subject
+	} else if accountID != "" {
+		internalID, err := server.resolvePublicUserID(request.Context(), accountID)
+		if err != nil {
+			writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		accountID = internalID
 	}
 	if accountID == "" {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account is required"})
@@ -78,5 +85,5 @@ func (server *Server) requestWithdrawal(writer http.ResponseWriter, request *htt
 		TargetID:    withdrawal.WithdrawalID,
 		Payload:     map[string]any{"currency": withdrawal.Currency, "amount_minor": withdrawal.AmountMinor, "status": withdrawal.Status},
 	})
-	writeJSON(writer, http.StatusCreated, withdrawal)
+	server.writePublicJSON(writer, request, http.StatusCreated, withdrawal)
 }

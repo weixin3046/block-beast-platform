@@ -51,6 +51,7 @@ type Server struct {
 	uploads            UploadService
 	leaderboards       LeaderboardService
 	redPackets         RedPacketService
+	publicUsers        PublicUserResolver
 }
 
 type LoginService interface {
@@ -70,6 +71,11 @@ type SessionService interface {
 
 type PasswordChangeService interface {
 	ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error
+}
+
+type PublicUserResolver interface {
+	InternalUserIDByPublicID(ctx context.Context, publicID int64) (string, error)
+	PublicUserID(ctx context.Context, userID string) (int64, error)
 }
 
 type SecondaryPasswordService interface {
@@ -115,6 +121,10 @@ func WithPasswordChange(passwords PasswordChangeService) Option {
 
 func WithSecondaryPasswords(passwords SecondaryPasswordService) Option {
 	return func(server *Server) { server.secondaryPasswords = passwords }
+}
+
+func WithPublicUserResolver(resolver PublicUserResolver) Option {
+	return func(server *Server) { server.publicUsers = resolver }
 }
 
 func WithAudit(auditor AuditRecorder) Option {
@@ -172,6 +182,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/auth/refresh", server.adminRefresh)
 	mux.HandleFunc("POST /v1/auth/logout", server.logout)
 	mux.HandleFunc("GET /v1/users/me", server.protect(server.currentUser))
+	mux.HandleFunc("GET /v1/avatars/{userID}", server.publicAvatar)
 	mux.HandleFunc("PUT /v1/users/me", server.protect(server.updateCurrentProfile))
 	mux.HandleFunc("PUT /v1/users/me/password", server.protect(server.changePassword))
 	mux.HandleFunc("PUT /v1/users/me/secondary-password", server.protect(server.setSecondaryPassword))
@@ -527,7 +538,7 @@ func (server *Server) bet(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "bet belongs to another account"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, bet)
+	server.writePublicJSON(writer, request, http.StatusOK, bet)
 }
 
 func (server *Server) userBets(writer http.ResponseWriter, request *http.Request) {
@@ -539,6 +550,13 @@ func (server *Server) userBets(writer http.ResponseWriter, request *http.Request
 	userID := request.URL.Query().Get("account_id")
 	if ok {
 		userID = claims.Subject
+	} else if userID != "" {
+		internalID, err := server.resolvePublicUserID(request.Context(), userID)
+		if err != nil {
+			writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		userID = internalID
 	}
 	if userID == "" {
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
@@ -549,7 +567,7 @@ func (server *Server) userBets(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list bets"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, items)
+	server.writePublicJSON(writer, request, http.StatusOK, items)
 }
 
 func (server *Server) openRounds(writer http.ResponseWriter, request *http.Request) {
@@ -633,11 +651,16 @@ func (server *Server) balance(writer http.ResponseWriter, request *http.Request)
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "account ID and currency are required"})
 		return
 	}
-	if !authorizeAccount(request, accountID) {
+	internalID, err := server.resolvePublicUserID(request.Context(), accountID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	if !authorizeAccount(request, internalID) {
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "wallet belongs to another account"})
 		return
 	}
-	balance, err := server.wallets.Balance(request.Context(), accountID, currency)
+	balance, err := server.wallets.Balance(request.Context(), internalID, currency)
 	if errors.Is(err, wallet.ErrWalletNotFound) {
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -646,7 +669,7 @@ func (server *Server) balance(writer http.ResponseWriter, request *http.Request)
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read wallet balance"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, balance)
+	server.writePublicJSON(writer, request, http.StatusOK, balance)
 }
 
 func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request) {
@@ -665,17 +688,23 @@ func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "missing required bet fields"})
 		return
 	}
-	if !authorizeAccount(request, input.AccountID) {
+	internalID, err := server.resolvePublicUserID(request.Context(), input.AccountID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	if !authorizeAccount(request, internalID) {
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "cannot place bets for another account"})
 		return
 	}
+	input.AccountID = internalID
 
 	bet, err := server.betPlacer.PlaceBet(request.Context(), input)
 	if err != nil {
 		writeBetError(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusCreated, bet)
+	server.writePublicJSON(writer, request, http.StatusCreated, bet)
 }
 
 func writeBetError(writer http.ResponseWriter, err error) {

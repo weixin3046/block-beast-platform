@@ -100,6 +100,16 @@ func (repository *PostgresRepository) PublicUserID(ctx context.Context, userID s
 	return publicID, err
 }
 
+// InternalUserIDByPublicID 将公开数字用户 ID 映射到内部 UUID。
+func (repository *PostgresRepository) InternalUserIDByPublicID(ctx context.Context, publicID int64) (string, error) {
+	var userID string
+	err := repository.pool.QueryRow(ctx, `SELECT id::text FROM users WHERE public_id=$1`, publicID).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrIdentityNotFound
+	}
+	return userID, err
+}
+
 func (repository *PostgresRepository) PasswordHashByUserID(ctx context.Context, userID string) (string, error) {
 	var passwordHash string
 	err := repository.pool.QueryRow(ctx, `SELECT password_hash FROM auth_identities WHERE user_id=$1 AND provider='password'`, userID).Scan(&passwordHash)
