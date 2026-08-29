@@ -23,7 +23,6 @@ const (
 // 业务类型常量，用于幂等键与流水查询。
 const (
 	BizAdminCredit     = "admin_credit"
-	BizCheckinReward   = "checkin_reward"
 	BizBetTaskReward   = "bet_task_reward"
 	BizActivityConsume = "activity_consume"
 )
@@ -321,7 +320,7 @@ func (service *Service) ConsumeStamina(ctx context.Context, input ConsumeStamina
 	}, nil
 }
 
-// RewardStamina 发放体力奖励（签到、任务等），供 task service 调用。
+// RewardStamina 发放活动任务体力奖励，供 task service 调用。
 // 在同一事务中更新 wallets 余额并写 stamina_ledger；bizType 区分奖励来源。
 func (service *Service) RewardStamina(ctx context.Context, tx pgx.Tx, userID string, bizType string, bizID string, amountMinor int64, remark string) (int64, error) {
 	balanceAfter, err := addBalance(ctx, tx, userID, CurrencyStamina, amountMinor)

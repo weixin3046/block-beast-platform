@@ -134,9 +134,8 @@ func (server *Server) reviewPointWithdrawal(writer http.ResponseWriter, request 
 	}
 }
 
-// TaskService 定义每日签到能力。
+// TaskService 定义参与活动产生的投注任务能力。
 type TaskService interface {
-	Checkin(ctx context.Context, userID string) (task.CheckinResult, error)
 	BetTasks(ctx context.Context, userID string) ([]task.BetTask, error)
 	BetTaskConfigs(ctx context.Context) ([]task.BetTaskConfig, error)
 	ReplaceBetTaskConfigs(ctx context.Context, items []task.BetTaskConfig) ([]task.BetTaskConfig, error)
@@ -239,25 +238,6 @@ func (server *Server) consumeStamina(writer http.ResponseWriter, request *http.R
 		return
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to consume stamina"})
-		return
-	}
-	server.writePublicJSON(writer, request, http.StatusOK, result)
-}
-
-// checkin 处理每日签到。
-func (server *Server) checkin(writer http.ResponseWriter, request *http.Request) {
-	if server.tasks == nil {
-		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "task service is unavailable"})
-		return
-	}
-	claims, ok := ClaimsFromContext(request.Context())
-	if !ok || claims.Subject == "" {
-		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication is required"})
-		return
-	}
-	result, err := server.tasks.Checkin(request.Context(), claims.Subject)
-	if err != nil {
-		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to check in"})
 		return
 	}
 	server.writePublicJSON(writer, request, http.StatusOK, result)

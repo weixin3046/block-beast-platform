@@ -12,35 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrAlreadyCheckedIn = errors.New("already checked in today")
-
-// DefaultCheckinReward 是每日签到默认发放的体力值。
-const DefaultCheckinReward int64 = 10
-
 type Service struct {
 	pool          *pgxpool.Pool
 	creditService *credit.Service
-	checkinReward int64
 	now           func() time.Time
 }
 
 func NewService(pool *pgxpool.Pool, creditService *credit.Service) *Service {
-	return &Service{pool: pool, creditService: creditService, checkinReward: DefaultCheckinReward, now: time.Now}
-}
-
-// WithCheckinReward 覆盖默认签到奖励值，便于测试与运营调整。
-func (service *Service) WithCheckinReward(reward int64) *Service {
-	service.checkinReward = reward
-	return service
-}
-
-type CheckinResult struct {
-	UserID            string    `json:"user_id"`
-	CheckinDate       string    `json:"checkin_date"`
-	RewardMinor       int64     `json:"reward_minor"`
-	BalanceAfterMinor int64     `json:"balance_after_minor"`
-	CheckedIn         bool      `json:"checked_in"` // false 表示今日已签到
-	OccurredAt        time.Time `json:"occurred_at"`
+	return &Service{pool: pool, creditService: creditService, now: time.Now}
 }
 
 type BetTask struct {
@@ -152,57 +131,6 @@ func (service *Service) BetTasks(ctx context.Context, userID string) ([]BetTask,
 		items = append(items, item)
 	}
 	return items, rows.Err()
-}
-
-// Checkin 每日签到：按 (user_id, checkin_date) 幂等，首次签到发放体力奖励。
-func (service *Service) Checkin(ctx context.Context, userID string) (CheckinResult, error) {
-	today := service.now().UTC().Format("2006-01-02")
-
-	tx, err := service.pool.Begin(ctx)
-	if err != nil {
-		return CheckinResult{}, err
-	}
-	defer tx.Rollback(ctx)
-
-	// 幂等：今日已签到则直接返回。
-	var existing CheckinResult
-	err = tx.QueryRow(ctx, `
-		SELECT user_id, checkin_date::text, reward_minor, created_at
-		FROM checkin_records WHERE user_id = $1 AND checkin_date = $2`, userID, today).
-		Scan(&existing.UserID, &existing.CheckinDate, &existing.RewardMinor, &existing.OccurredAt)
-	if err == nil {
-		existing.CheckedIn = false
-		return existing, tx.Commit(ctx)
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return CheckinResult{}, err
-	}
-
-	// 创建签到记录。
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO checkin_records (id, user_id, checkin_date, reward_minor)
-		VALUES ($1, $2, $3, $4)`, uuid.NewString(), userID, today, service.checkinReward); err != nil {
-		return CheckinResult{}, err
-	}
-
-	// 发放体力奖励（同事务写 wallets + stamina_ledger）。
-	bizID := "checkin:" + today
-	balanceAfter, err := service.creditService.RewardStamina(ctx, tx, userID, credit.BizCheckinReward, bizID, service.checkinReward, "每日签到奖励")
-	if err != nil {
-		return CheckinResult{}, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return CheckinResult{}, err
-	}
-	return CheckinResult{
-		UserID:            userID,
-		CheckinDate:       today,
-		RewardMinor:       service.checkinReward,
-		BalanceAfterMinor: balanceAfter,
-		CheckedIn:         true,
-		OccurredAt:        time.Now().UTC(),
-	}, nil
 }
 
 // OnPointsBetPlaced 在积分投注成功后累计当日进度，并对新达标的档位发放体力奖励。

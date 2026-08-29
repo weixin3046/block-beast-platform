@@ -34,7 +34,7 @@ tags:
   - name: Stamina
     description: 体力消耗与流水。
   - name: Tasks
-    description: 每日任务（签到）。
+    description: 参与活动产生的投注任务。
   - name: Chat
     description: 公共聊天与客服会话。
   - name: Uploads
@@ -55,6 +55,41 @@ paths:
         - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
       responses:
         '200': { description: 当前接受中投注、各玩法当前轮次及服务端时间 }
+  /v1/admin/monitor/bets:
+    get:
+      tags: [Operations]
+      summary: 查询当前接受中的投注
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 当前投注列表与服务端时间 }
+  /v1/admin/monitor/rounds:
+    get:
+      tags: [Operations]
+      summary: 查询各玩法当前轮次与区块倒计时
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 各玩法轮次、封盘和开奖时间 }
+  /v1/admin/bets:
+    get:
+      tags: [Operations]
+      summary: 跨玩家查询全部投注
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 投注明细列表 }
+  /v1/admin/ledger:
+    get:
+      tags: [Operations]
+      summary: 跨玩家统一查询资金和体力流水
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: USDT、积分、玉石、源石和体力统一流水 }
+  /v1/admin/refunds-clearances:
+    get:
+      tags: [Operations]
+      summary: 查询投注退款和玩家清退/下分记录
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 投注退款、USDT 提现和积分下分明细 }
   /v1/admin/dashboard:
     get:
       tags: [Operations]
@@ -88,7 +123,7 @@ paths:
   /v1/admin/virtual-accounts:
     post:
       tags: [Operations]
-      summary: 创建不能登录和下分的虚拟账户
+      summary: 创建可登录但不能下分的虚拟账户
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -96,10 +131,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [login_name, display_name]
+              required: [login_name, display_name, password]
               properties:
                 login_name: { type: string }
                 display_name: { type: string }
+                password: { type: string, minLength: 12 }
                 initial_balances: { type: object, additionalProperties: { type: integer, format: int64 } }
       responses:
         '201': { description: 虚拟账户及默认挂机配置 }
@@ -1195,25 +1231,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/Unavailable'
-  /v1/tasks/checkin:
-    post:
-      tags: [Tasks]
-      operationId: checkin
-      summary: 每日签到领取体力
-      description: 按用户与日期幂等，当日重复签到返回首次记录不重复发放。奖励体力值由服务端配置。
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: 签到结果（checked_in=false 表示今日已签到）。
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CheckinResult'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Unavailable'
   /v1/tasks/bet-progress:
     get:
       tags: [Tasks]
@@ -1319,7 +1336,7 @@ paths:
       tags: [Stamina]
       operationId: listStaminaLedger
       summary: 查询体力流水
-      description: 按时间倒序返回体力变动流水（管理员充值、签到奖励、投注任务奖励、活动消耗），仅本人或 operator/admin 可查。
+      description: 按时间倒序返回体力变动流水（管理员充值、活动任务奖励、活动消耗），仅本人或 operator/admin 可查。
       security:
         - bearerAuth: []
       parameters:
@@ -2760,30 +2777,6 @@ components:
         consumed:
           type: boolean
           description: false 表示重复请求，未重复扣减。
-        occurred_at:
-          type: string
-          format: date-time
-    CheckinResult:
-      type: object
-      required: [user_id, checkin_date, reward_minor, balance_after_minor, checked_in, occurred_at]
-      properties:
-        user_id:
-          type: integer
-          format: int64
-          minimum: 100000
-        checkin_date:
-          type: string
-          format: date
-        reward_minor:
-          type: integer
-          format: int64
-          description: 本次签到发放的体力值。
-        balance_after_minor:
-          type: integer
-          format: int64
-        checked_in:
-          type: boolean
-          description: false 表示今日已签到。
         occurred_at:
           type: string
           format: date-time

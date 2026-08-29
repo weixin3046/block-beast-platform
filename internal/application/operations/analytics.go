@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/block-beast/platform/internal/domain/identity"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -40,10 +41,21 @@ type Monitor struct {
 }
 
 func (s *Service) Monitor(ctx context.Context, userQuery, gameType string, limit int) (Monitor, error) {
+	bets, err := s.CurrentBets(ctx, userQuery, gameType, limit)
+	if err != nil {
+		return Monitor{}, err
+	}
+	rounds, err := s.RoundCountdowns(ctx)
+	if err != nil {
+		return Monitor{}, err
+	}
+	return Monitor{ServerTime: time.Now().UTC(), Bets: bets, Rounds: rounds}, nil
+}
+func (s *Service) CurrentBets(ctx context.Context, userQuery, gameType string, limit int) ([]MonitorBet, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	result := Monitor{ServerTime: time.Now().UTC(), Bets: []MonitorBet{}, Rounds: []MonitorRound{}}
+	result := []MonitorBet{}
 	rows, err := s.pool.Query(ctx, `SELECT b.id::text,u.public_id,COALESCE(u.login_name,''),u.display_name,gt.code,r.sequence,w.currency,b.selection,b.stake_minor,b.status,b.created_at FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id WHERE b.status='accepted' AND ($1='' OR gt.code=$1) AND ($2='' OR u.public_id::text=$2 OR u.login_name ILIKE '%'||$2||'%') ORDER BY b.created_at DESC LIMIT $3`, gameType, userQuery, limit)
 	if err != nil {
 		return result, err
@@ -54,11 +66,12 @@ func (s *Service) Monitor(ctx context.Context, userQuery, gameType string, limit
 		if err := rows.Scan(&v.BetID, &v.UserID, &v.LoginName, &v.DisplayName, &v.GameType, &v.RoundSequence, &v.Currency, &v.Selection, &v.StakeMinor, &v.Status, &v.CreatedAt); err != nil {
 			return result, err
 		}
-		result.Bets = append(result.Bets, v)
+		result = append(result, v)
 	}
-	if err := rows.Err(); err != nil {
-		return result, err
-	}
+	return result, rows.Err()
+}
+func (s *Service) RoundCountdowns(ctx context.Context) ([]MonitorRound, error) {
+	result := []MonitorRound{}
 	rounds, err := s.pool.Query(ctx, `SELECT DISTINCT ON (gt.id) gt.code,gt.name,r.sequence,r.status,r.bet_closes_at,COALESCE(r.result_at,r.bet_closes_at) FROM rounds r JOIN game_types gt ON gt.id=r.game_type_id WHERE gt.enabled=true AND r.status IN ('open','closed') ORDER BY gt.id,r.sequence`)
 	if err != nil {
 		return result, err
@@ -69,7 +82,7 @@ func (s *Service) Monitor(ctx context.Context, userQuery, gameType string, limit
 		if err := rounds.Scan(&v.GameType, &v.Name, &v.Sequence, &v.Status, &v.BetClosesAt, &v.ResultAt); err != nil {
 			return result, err
 		}
-		result.Rounds = append(result.Rounds, v)
+		result = append(result, v)
 	}
 	return result, rounds.Err()
 }
@@ -226,6 +239,7 @@ type VirtualAccount struct {
 type VirtualAccountInput struct {
 	LoginName       string           `json:"login_name"`
 	DisplayName     string           `json:"display_name"`
+	Password        string           `json:"password"`
 	InitialBalances map[string]int64 `json:"initial_balances"`
 }
 type VirtualAutomationInput struct {
@@ -241,8 +255,12 @@ var ErrInvalidVirtualAccount = errors.New("invalid virtual account")
 func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInput) (VirtualAccount, error) {
 	in.LoginName = strings.TrimSpace(in.LoginName)
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
-	if in.LoginName == "" || in.DisplayName == "" {
+	if in.LoginName == "" || in.DisplayName == "" || len(in.Password) < 12 {
 		return VirtualAccount{}, ErrInvalidVirtualAccount
+	}
+	passwordHash, err := identity.HashPassword(in.Password)
+	if err != nil {
+		return VirtualAccount{}, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -251,6 +269,15 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	defer tx.Rollback(ctx)
 	id := uuid.NewString()
 	if _, err = tx.Exec(ctx, `INSERT INTO users(id,login_name,display_name,is_virtual) VALUES($1,$2,$3,true)`, id, in.LoginName, in.DisplayName); err != nil {
+		return VirtualAccount{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO auth_identities(id,user_id,provider,subject,password_hash) VALUES($1,$2,'password',$3,$4)`, uuid.NewString(), id, in.LoginName, passwordHash); err != nil {
+		return VirtualAccount{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO roles(id,code,description) VALUES($1,'player','player') ON CONFLICT(code) DO NOTHING`, uuid.NewString()); err != nil {
+		return VirtualAccount{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='player'`, id); err != nil {
 		return VirtualAccount{}, err
 	}
 	for _, currency := range []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA"} {

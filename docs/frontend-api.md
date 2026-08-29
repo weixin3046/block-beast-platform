@@ -18,7 +18,7 @@
 | `POINTS`（宝石） | 投注、红包 | 管理员后台充值 |
 | `JADE`（玉石） | 投注、红包 | 管理员后台充值 |
 | `ORIGIN_STONE`（源石） | 投注、红包 | 管理员后台充值 |
-| `STAMINA` | 参加活动消耗 | 每日签到、投注任务奖励、管理员后台充值 |
+| `STAMINA` | 参加活动消耗 | 参与活动任务奖励、管理员后台充值 |
 
 ## 调用顺序
 
@@ -32,9 +32,8 @@
 3. 调用 `POST /v1/bets` 创建投注，`currency` 可传 `USDT`、`POINTS`（宝石）、`JADE`（玉石）或 `ORIGIN_STONE`（源石）。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
 4. 使用 `GET /v1/bets/{betID}` 轮询投注状态；当前状态有 `accepted`、`won`、`lost` 与 `refunded`。
 5. 使用 `GET /v1/wallets/{accountID}?currency=USDT` 查询单币种余额，或 `GET /v1/wallets/{accountID}/all` 一次拉取全部币种。
-6. 每日首次进入时调用 `POST /v1/tasks/checkin` 签到领取体力；`checked_in=false` 表示今日已签过，不要重复提示。
-7. 参加活动时调用 `POST /v1/stamina/consume` 扣体力，`activity_id` 由活动方提供；体力不足返回 409。
-8. 大厅调用 `GET /v1/announcements` 获取当前时间窗口内启用的公告；该接口无需登录。
+6. 体力只通过参与平台活动任务获得，不再提供每日签到领取体力接口。参加活动时调用 `POST /v1/stamina/consume` 扣体力，`activity_id` 由活动方提供；体力不足返回 409。
+7. 大厅调用 `GET /v1/announcements` 获取当前时间窗口内启用的公告；该接口无需登录。
 
 轮次响应同时包含 `bet_closes_at` 和 `result_at`。前者是停止接受投注的时刻，
 后者是目标区块结果可用后的开奖时刻；倒计时必须以服务端字段为准。封盘后到开奖前不得
@@ -136,11 +135,6 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
   headers: { Authorization: `Bearer ${access_token}` },
 }).then((r) => r.json());
 
-// 4. 每日签到
-const checkin = await fetch(`${api}/v1/tasks/checkin`, {
-  method: "POST",
-  headers: { Authorization: `Bearer ${access_token}` },
-}).then((r) => r.json());
 ```
 
 ## 流水查询
@@ -151,7 +145,7 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 - USDT 提现记录：`GET /v1/withdrawals`
 - 投注与结算记录：`GET /v1/bets?status=won`
 
-流水按时间倒序返回，`amount_minor` 正数为入账、负数为出账；`business_type` 区分来源：`admin_credit`（管理员充值）、`checkin_reward`（签到）、`bet_task_reward`（投注达标奖励）、`activity_consume`（活动消耗）。
+流水按时间倒序返回，`amount_minor` 正数为入账、负数为出账；`business_type` 区分来源：`admin_credit`（管理员充值）、`bet_task_reward`（参与投注活动任务奖励）、`activity_consume`（活动消耗）。
 
 ## 链上充值
 
@@ -171,10 +165,11 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 后台监控和统计仅提供后端 JSON 契约，不依赖任何管理端前端项目：
 
-- `GET /v1/admin/monitor?user=&game_type=&limit=100` 返回当前接受中的投注、每个启用玩法当前轮次的 `bet_closes_at` / `result_at` 和 `server_time`，页面倒计时必须用服务端时间校准。
+- `GET /v1/admin/monitor/bets?user=&game_type=&limit=100` 返回当前接受中的投注；`GET /v1/admin/monitor/rounds` 单独返回每个启用玩法当前轮次的 `bet_closes_at` / `result_at` 和 `server_time`。兼容接口 `GET /v1/admin/monitor` 仍返回两者。
+- `GET /v1/admin/bets` 跨玩家查询投注；`GET /v1/admin/ledger` 查询统一流水；`GET /v1/admin/refunds-clearances` 查询投注退款和下分/清退明细。三个接口均支持时间、用户和分页筛选。
 - `GET /v1/admin/dashboard?user=&from=&to=` 返回玩家统计及按币种全局统计；全局数据自动排除虚拟账户。
 - `GET /v1/admin/users/{userID}/login-ips` 返回玩家用过的 IP，并在每个 IP 下嵌套该地址登录过的其他用户；也可用 `GET /v1/admin/login-ips/{ip}/users` 直接反查。
-- `POST /v1/admin/virtual-accounts` 创建无密码凭证的虚拟账户；`PUT /v1/admin/virtual-accounts/{userID}/automation` 保存挂机玩法、币种、单注和间隔配置。虚拟账户可投注并进入排行榜，但不计入看板全局充值、流水和余额统计，也禁止下分。
+- `POST /v1/admin/virtual-accounts` 使用登录名和密码创建可登录的虚拟账户；`PUT /v1/admin/virtual-accounts/{userID}/automation` 保存挂机玩法、币种、单注和间隔配置。虚拟账户可投注并进入排行榜，但不计入看板全局充值、流水和余额统计，也禁止下分。
 
 管理员（operator/admin 角色）可调用 `POST /v1/admin/credits` 为用户充值任意币种：
 
