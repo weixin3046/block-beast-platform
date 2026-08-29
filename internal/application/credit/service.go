@@ -33,6 +33,7 @@ var ErrInvalidCurrency = errors.New("currency must be one of USDT, POINTS, JADE,
 var ErrInsufficientStamina = errors.New("insufficient stamina balance")
 var ErrUserNotFound = errors.New("user not found")
 var ErrPointWithdrawalNotFound = errors.New("point withdrawal not found")
+var ErrVirtualAccountWithdrawal = errors.New("virtual accounts cannot withdraw")
 var ErrPointWithdrawalState = errors.New("point withdrawal cannot transition from its current status")
 
 type Service struct {
@@ -67,6 +68,13 @@ func (service *Service) RequestPointWithdrawal(ctx context.Context, userID, requ
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return PointWithdrawal{}, err
+	}
+	var isVirtual bool
+	if err := tx.QueryRow(ctx, `SELECT is_virtual FROM users WHERE id=$1`, userID).Scan(&isVirtual); err != nil {
+		return PointWithdrawal{}, err
+	}
+	if isVirtual {
+		return PointWithdrawal{}, ErrVirtualAccountWithdrawal
 	}
 	var walletID string
 	var available, frozen int64

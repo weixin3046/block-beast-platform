@@ -68,6 +68,9 @@ func (server *Server) requestWithdrawal(writer http.ResponseWriter, request *htt
 	case errors.Is(err, chainapp.ErrWithdrawalDailyLimit):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
+	case errors.Is(err, chainapp.ErrVirtualAccountWithdrawal):
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
 	case errors.Is(err, wallet.ErrWalletNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return

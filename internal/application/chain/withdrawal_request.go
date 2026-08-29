@@ -43,6 +43,13 @@ func (service *Service) RequestWithdrawal(ctx context.Context, input WithdrawalI
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Withdrawal{}, err
 	}
+	var isVirtual bool
+	if err := tx.QueryRow(ctx, `SELECT is_virtual FROM users WHERE id=$1`, input.UserID).Scan(&isVirtual); err != nil {
+		return Withdrawal{}, err
+	}
+	if isVirtual {
+		return Withdrawal{}, ErrVirtualAccountWithdrawal
+	}
 
 	var chainTokenID int64
 	var tokenDecimals int

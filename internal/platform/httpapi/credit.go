@@ -98,6 +98,8 @@ func (server *Server) requestPointWithdrawal(writer http.ResponseWriter, request
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, credit.ErrInsufficientStamina):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": "insufficient points balance"})
+	case errors.Is(err, credit.ErrVirtualAccountWithdrawal):
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to request point withdrawal"})
 	default:

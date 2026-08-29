@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/betting"
 	chainapp "github.com/block-beast/platform/internal/application/chain"
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/outbox"
@@ -19,6 +20,7 @@ import (
 	"github.com/block-beast/platform/internal/application/redpacket"
 	"github.com/block-beast/platform/internal/application/settlement"
 	"github.com/block-beast/platform/internal/application/uploads"
+	"github.com/block-beast/platform/internal/application/virtualbot"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
@@ -72,6 +74,7 @@ func main() {
 	settlementService := settlement.NewService(pool)
 	uploadMaintenance := uploads.NewService(pool, nil, cfg.UploadMaxBytes, cfg.UploadURLTTL)
 	redPacketService := redpacket.NewService(pool, cfg.RedPacketTTL)
+	virtualBotService := virtualbot.NewService(pool, betting.NewService(pool))
 	leaderboardService := leaderboard.NewService(pool)
 	leaderboardTicker := time.NewTicker(cfg.LeaderboardRefresh)
 	defer leaderboardTicker.Stop()
@@ -88,6 +91,7 @@ func main() {
 	expirePendingUploads(ctx, logger, uploadMaintenance)
 	refreshDailyLeaderboard(ctx, logger, leaderboardService)
 	refundExpiredRedPackets(ctx, logger, redPacketService)
+	runVirtualAccounts(ctx, logger, virtualBotService)
 	lastStats := natsjs.ConsumerStats{}
 	var assetSync *pqpaassets.Service
 	var assetTicker *time.Ticker
@@ -112,12 +116,24 @@ func main() {
 			reconcileWithdrawals(ctx, logger, withdrawalSender)
 			expirePendingUploads(ctx, logger, uploadMaintenance)
 			refundExpiredRedPackets(ctx, logger, redPacketService)
+			runVirtualAccounts(ctx, logger, virtualBotService)
 			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
 		case <-leaderboardTicker.C:
 			refreshDailyLeaderboard(ctx, logger, leaderboardService)
 		}
+	}
+}
+
+func runVirtualAccounts(ctx context.Context, logger *slog.Logger, service *virtualbot.Service) {
+	placed, err := service.RunDue(ctx, 100)
+	if err != nil {
+		logger.Error("virtual account automation failed", "error", err)
+		return
+	}
+	if placed > 0 {
+		logger.Info("virtual account bets placed", "count", placed)
 	}
 }
 

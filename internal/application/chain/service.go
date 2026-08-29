@@ -18,6 +18,7 @@ var ErrInvalidWithdrawalAddress = errors.New("invalid withdrawal address or memo
 var ErrWithdrawalBelowMinimum = errors.New("withdrawal amount is below the minimum")
 var ErrWithdrawalAboveMaximum = errors.New("withdrawal amount exceeds the per-request limit")
 var ErrWithdrawalDailyLimit = errors.New("withdrawal amount exceeds the daily limit")
+var ErrVirtualAccountWithdrawal = errors.New("virtual accounts cannot withdraw")
 
 type Service struct {
 	pool               *pgxpool.Pool

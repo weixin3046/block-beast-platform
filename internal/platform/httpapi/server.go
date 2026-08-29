@@ -45,6 +45,7 @@ type Server struct {
 	agents             AgentService
 	userAdmin          UserAdminService
 	operations         OperationsService
+	analytics          AnalyticsService
 	gameAdmin          GameAdminService
 	gameRoomAdmin      GameRoomService
 	chat               ChatService
@@ -236,6 +237,12 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/announcements", server.protectRoles(server.createAnnouncement, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/announcements/{announcementID}", server.protectRoles(server.updateAnnouncement, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/audit-logs", server.protectRoles(server.auditLogs, identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/admin/monitor", server.protectRoles(server.adminMonitor, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/dashboard", server.protectRoles(server.adminDashboard, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/users/{userID}/login-ips", server.protectRoles(server.adminUserLoginIPs, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/login-ips/{ip}/users", server.protectRoles(server.adminLoginIPUsers, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/virtual-accounts", server.protectRoles(server.createVirtualAccount, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/virtual-accounts/{userID}/automation", server.protectRoles(server.setVirtualAutomation, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/configs", server.protectRoles(server.adminConfigs, identity.RoleAdmin))
 	mux.HandleFunc("PUT /v1/admin/configs/{key}", server.protectRoles(server.putConfig, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/tasks/bet-configs", server.protectRoles(server.adminBetTaskConfigs, identity.RoleAdmin))
@@ -413,6 +420,15 @@ func (server *Server) loginForAudience(writer http.ResponseWriter, request *http
 		return
 	}
 	server.recordAudit(request.Context(), audit.Entry{ActorUserID: result.UserID, Action: auditAction, TargetType: "user", TargetID: result.UserID, Payload: map[string]string{"outcome": "success"}})
+	if server.analytics != nil {
+		audience := "player"
+		if admin {
+			audience = "admin"
+		}
+		if err := server.analytics.RecordLogin(request.Context(), result.UserID, clientIP(request), audience); err != nil {
+			server.logger.Warn("login IP history record failed", "user_id", result.UserID, "error", err)
+		}
+	}
 	writeJSON(writer, http.StatusOK, result)
 }
 

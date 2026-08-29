@@ -44,6 +44,87 @@ tags:
   - name: RedPackets
     description: 聊天室红包创建、领取和查询。
 paths:
+  /v1/admin/monitor:
+    get:
+      tags: [Operations]
+      summary: 后台实时投注与玩法轮次倒计时
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: user, in: query, schema: { type: string } }
+        - { name: game_type, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
+      responses:
+        '200': { description: 当前接受中投注、各玩法当前轮次及服务端时间 }
+  /v1/admin/dashboard:
+    get:
+      tags: [Operations]
+      summary: 玩家统计与排除虚拟账户的全局环境统计
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: user, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
+      responses:
+        '200': { description: 玩家和按币种汇总的投注、派奖、充值、赠分与余额统计 }
+  /v1/admin/users/{userID}/login-ips:
+    get:
+      tags: [Operations]
+      summary: 查询玩家登录 IP 以及每个 IP 下的关联用户
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { description: IP 使用历史及关联用户 }
+  /v1/admin/login-ips/{ip}/users:
+    get:
+      tags: [Operations]
+      summary: 查询指定 IP 登录过的全部用户
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: ip, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 关联用户列表 }
+  /v1/admin/virtual-accounts:
+    post:
+      tags: [Operations]
+      summary: 创建不能登录和下分的虚拟账户
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login_name, display_name]
+              properties:
+                login_name: { type: string }
+                display_name: { type: string }
+                initial_balances: { type: object, additionalProperties: { type: integer, format: int64 } }
+      responses:
+        '201': { description: 虚拟账户及默认挂机配置 }
+  /v1/admin/virtual-accounts/{userID}/automation:
+    put:
+      tags: [Operations]
+      summary: 配置虚拟账户自动挂机参数
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, currency, stake_minor, game_type_codes, interval_seconds]
+              properties:
+                enabled: { type: boolean }
+                currency: { type: string }
+                stake_minor: { type: integer, format: int64, minimum: 1 }
+                game_type_codes: { type: array, items: { type: string } }
+                interval_seconds: { type: integer, minimum: 3, maximum: 86400 }
+      responses:
+        '200': { description: 更新后的挂机配置 }
   /healthz:
     get:
       tags: [System]

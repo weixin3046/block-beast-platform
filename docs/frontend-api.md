@@ -169,6 +169,13 @@ const checkin = await fetch(`${api}/v1/tasks/checkin`, {
 
 ## 管理后台接口
 
+后台监控和统计仅提供后端 JSON 契约，不依赖任何管理端前端项目：
+
+- `GET /v1/admin/monitor?user=&game_type=&limit=100` 返回当前接受中的投注、每个启用玩法当前轮次的 `bet_closes_at` / `result_at` 和 `server_time`，页面倒计时必须用服务端时间校准。
+- `GET /v1/admin/dashboard?user=&from=&to=` 返回玩家统计及按币种全局统计；全局数据自动排除虚拟账户。
+- `GET /v1/admin/users/{userID}/login-ips` 返回玩家用过的 IP，并在每个 IP 下嵌套该地址登录过的其他用户；也可用 `GET /v1/admin/login-ips/{ip}/users` 直接反查。
+- `POST /v1/admin/virtual-accounts` 创建无密码凭证的虚拟账户；`PUT /v1/admin/virtual-accounts/{userID}/automation` 保存挂机玩法、币种、单注和间隔配置。虚拟账户可投注并进入排行榜，但不计入看板全局充值、流水和余额统计，也禁止下分。
+
 管理员（operator/admin 角色）可调用 `POST /v1/admin/credits` 为用户充值任意币种：
 
 ```json
