@@ -280,7 +280,7 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	if _, err = tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='player'`, id); err != nil {
 		return VirtualAccount{}, err
 	}
-	for _, currency := range []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA"} {
+	for _, currency := range []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA", "USDT_STAMINA", "JADE_STAMINA", "ORIGIN_STONE_STAMINA"} {
 		amount := in.InitialBalances[currency]
 		if amount < 0 {
 			return VirtualAccount{}, ErrInvalidVirtualAccount

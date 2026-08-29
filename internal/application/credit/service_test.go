@@ -19,7 +19,7 @@ func TestAdminCreditValidatesInput(t *testing.T) {
 	}
 
 	// 币种必须是三种之一。
-	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: "BTC", AmountMinor: 100, RequestID: "r1"}); !errors.Is(err, ErrInvalidCurrency) {
+	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: " ", AmountMinor: 100, RequestID: "r1"}); !errors.Is(err, ErrInvalidCurrency) {
 		t.Fatalf("invalid currency error = %v, want ErrInvalidCurrency", err)
 	}
 

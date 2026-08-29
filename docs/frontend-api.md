@@ -18,7 +18,10 @@
 | `POINTS`（宝石） | 投注、红包 | 管理员后台充值 |
 | `JADE`（玉石） | 投注、红包 | 管理员后台充值 |
 | `ORIGIN_STONE`（源石） | 投注、红包 | 管理员后台充值 |
-| `STAMINA` | 参加活动消耗 | 参与活动任务奖励、管理员后台充值 |
+| `STAMINA` | 宝石体力 | 宝石投注任务奖励，用于宝石转盘 |
+| `USDT_STAMINA` | USDT 体力 | USDT 投注任务奖励，用于 USDT 转盘 |
+| `JADE_STAMINA` | 玉石体力 | 玉石投注任务奖励，用于玉石转盘 |
+| `ORIGIN_STONE_STAMINA` | 源石体力 | 源石投注任务奖励，用于源石转盘 |
 
 ## 调用顺序
 
@@ -146,6 +149,19 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 - 投注与结算记录：`GET /v1/bets?status=won`
 
 流水按时间倒序返回，`amount_minor` 正数为入账、负数为出账；`business_type` 区分来源：`admin_credit`（管理员充值）、`bet_task_reward`（参与投注活动任务奖励）、`activity_consume`（活动消耗）。
+
+## 活动任务与多转盘
+
+活动任务通过 `GET/PUT /v1/admin/tasks/bet-configs` 配置。每个档位必须分别指定：
+
+- `accumulation_currency`：任意非空钱包币种代码；只有实际使用该币种产生的投注才会累计。
+- `threshold_minor`：该币种的累计投注门槛。
+- `reward_currency`：任意非空钱包币种代码，与累计投注币种独立配置。
+- `reward_minor`：奖励数量。
+
+玩家调用 `GET /v1/tasks/bet-progress` 时，每种累计币种拥有独立的当日进度。
+
+后台通过 `GET/PUT /v1/admin/spins` 管理多个转盘。每个转盘配置独立的 `code`、`cost_currency`、`cost_minor` 和 `prizes`；消耗币种和奖项奖励币种均接受任意非空钱包币种代码，不做白名单限制。玩家先调用 `GET /v1/activities/spins` 获取启用转盘，再调用 `POST /v1/activities/spins/{spinID}/play`。扣除参与消耗、发放奖品、写入两侧流水和抽奖记录在同一事务内完成。
 
 ## 链上充值
 

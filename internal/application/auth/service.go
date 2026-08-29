@@ -27,7 +27,7 @@ var ErrSecondaryPasswordNotSet = errors.New("secondary password is not set")
 var ErrSecondaryPasswordAlreadySet = errors.New("secondary password is already set; verify the current secondary password to change it")
 
 // DefaultWalletCurrencies 是注册时创建的零余额钱包货币列表。
-var DefaultWalletCurrencies = []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA"}
+var DefaultWalletCurrencies = []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA", "USDT_STAMINA", "JADE_STAMINA", "ORIGIN_STONE_STAMINA"}
 
 // loginNamePattern 约束登录名便于在 URL、日志与聊天中安全使用。
 var loginNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)

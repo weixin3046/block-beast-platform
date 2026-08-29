@@ -9,7 +9,11 @@ import (
 	"github.com/block-beast/platform/internal/application/task"
 )
 
-func (server *Server) luckySpin(writer http.ResponseWriter, request *http.Request) {
+func (server *Server) playConfiguredSpin(writer http.ResponseWriter, request *http.Request) {
+	server.playSpin(writer, request, request.PathValue("spinID"))
+}
+
+func (server *Server) playSpin(writer http.ResponseWriter, request *http.Request, spinID string) {
 	if server.credits == nil {
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "credit service is unavailable"})
 		return
@@ -24,7 +28,7 @@ func (server *Server) luckySpin(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
-	result, err := server.credits.LuckySpin(request.Context(), claims.Subject, input.RequestID)
+	result, err := server.credits.LuckySpin(request.Context(), claims.Subject, spinID, input.RequestID)
 	switch {
 	case errors.Is(err, credit.ErrActivityUnavailable):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -35,6 +39,40 @@ func (server *Server) luckySpin(writer http.ResponseWriter, request *http.Reques
 	default:
 		writeJSON(writer, http.StatusOK, result)
 	}
+}
+
+func (server *Server) spinConfigs(writer http.ResponseWriter, request *http.Request) {
+	items, err := server.credits.ListSpinConfigs(request.Context(), true)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list spins"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
+}
+func (server *Server) adminSpinConfigs(writer http.ResponseWriter, request *http.Request) {
+	items, err := server.credits.ListSpinConfigs(request.Context(), false)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list spins"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
+}
+func (server *Server) replaceSpinConfigs(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Items []credit.SpinConfig `json:"items"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 256<<10))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	items, err := server.credits.ReplaceSpinConfigs(request.Context(), input.Items)
+	if err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
 }
 
 func (server *Server) betTasks(writer http.ResponseWriter, request *http.Request) {

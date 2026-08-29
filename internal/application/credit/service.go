@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,12 +14,19 @@ import (
 
 // 平台内支持的三种可充值币种。
 const (
-	CurrencyPoints      = "POINTS"
-	CurrencyUSDT        = "USDT"
-	CurrencyJade        = "JADE"
-	CurrencyOriginStone = "ORIGIN_STONE"
-	CurrencyStamina     = "STAMINA"
+	CurrencyPoints             = "POINTS"
+	CurrencyUSDT               = "USDT"
+	CurrencyJade               = "JADE"
+	CurrencyOriginStone        = "ORIGIN_STONE"
+	CurrencyStamina            = "STAMINA"
+	CurrencyUSDTStamina        = "USDT_STAMINA"
+	CurrencyJadeStamina        = "JADE_STAMINA"
+	CurrencyOriginStoneStamina = "ORIGIN_STONE_STAMINA"
 )
+
+func validCurrency(v string) bool {
+	return strings.TrimSpace(v) != ""
+}
 
 // 业务类型常量，用于幂等键与流水查询。
 const (
@@ -28,8 +36,9 @@ const (
 )
 
 var ErrInvalidAmount = errors.New("amount must be positive")
-var ErrInvalidCurrency = errors.New("currency must be one of USDT, POINTS, JADE, ORIGIN_STONE, STAMINA")
-var ErrInsufficientStamina = errors.New("insufficient stamina balance")
+var ErrInvalidCurrency = errors.New("unsupported platform currency")
+var ErrInsufficientBalance = errors.New("insufficient balance")
+var ErrInsufficientStamina = ErrInsufficientBalance
 var ErrUserNotFound = errors.New("user not found")
 var ErrPointWithdrawalNotFound = errors.New("point withdrawal not found")
 var ErrVirtualAccountWithdrawal = errors.New("virtual accounts cannot withdraw")
@@ -186,7 +195,7 @@ func NewService(pool *pgxpool.Pool) *Service {
 // AdminCreditInput 是管理员手动充值的请求。
 type AdminCreditInput struct {
 	UserID      string `json:"user_id"`
-	Currency    string `json:"currency"`     // POINTS / USDT / STAMINA
+	Currency    string `json:"currency"`
 	AmountMinor int64  `json:"amount_minor"` // 正数
 	Remark      string `json:"remark"`
 	OperatorID  string `json:"-"`          // 从访问令牌注入，不信任请求体
@@ -205,10 +214,11 @@ type CreditResult struct {
 // AdminCredit 幂等处理管理员手动充值：锁钱包、加余额、写对应币种的流水表。
 // 积分流水写入 points_ledger，体力流水写入 stamina_ledger，USDT 流水写入 ledger_entries。
 func (service *Service) AdminCredit(ctx context.Context, input AdminCreditInput) (CreditResult, error) {
+	input.Currency = strings.ToUpper(strings.TrimSpace(input.Currency))
 	if input.AmountMinor <= 0 {
 		return CreditResult{}, ErrInvalidAmount
 	}
-	if input.Currency != CurrencyPoints && input.Currency != CurrencyUSDT && input.Currency != CurrencyJade && input.Currency != CurrencyOriginStone && input.Currency != CurrencyStamina {
+	if !validCurrency(input.Currency) {
 		return CreditResult{}, ErrInvalidCurrency
 	}
 	if input.UserID == "" || input.RequestID == "" {
@@ -323,11 +333,23 @@ func (service *Service) ConsumeStamina(ctx context.Context, input ConsumeStamina
 // RewardStamina 发放活动任务体力奖励，供 task service 调用。
 // 在同一事务中更新 wallets 余额并写 stamina_ledger；bizType 区分奖励来源。
 func (service *Service) RewardStamina(ctx context.Context, tx pgx.Tx, userID string, bizType string, bizID string, amountMinor int64, remark string) (int64, error) {
-	balanceAfter, err := addBalance(ctx, tx, userID, CurrencyStamina, amountMinor)
+	return service.RewardCurrency(ctx, tx, userID, CurrencyStamina, bizType, bizID, amountMinor, remark)
+}
+
+// RewardCurrency 在当前事务内向指定币种发奖并写对应流水。
+func (service *Service) RewardCurrency(ctx context.Context, tx pgx.Tx, userID, currency, bizType, bizID string, amountMinor int64, remark string) (int64, error) {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if !validCurrency(currency) {
+		return 0, ErrInvalidCurrency
+	}
+	if amountMinor <= 0 {
+		return 0, ErrInvalidAmount
+	}
+	balanceAfter, err := addBalance(ctx, tx, userID, currency, amountMinor)
 	if err != nil {
 		return 0, err
 	}
-	if err := writeLedger(ctx, tx, userID, CurrencyStamina, bizType, bizID, amountMinor, balanceAfter, remark, ""); err != nil {
+	if err := writeLedger(ctx, tx, userID, currency, bizType, bizID, amountMinor, balanceAfter, remark, ""); err != nil {
 		return 0, err
 	}
 	return balanceAfter, nil
@@ -454,7 +476,7 @@ func deductBalance(ctx context.Context, tx pgx.Tx, userID string, currency strin
 			return 0, checkErr
 		}
 		if !exists {
-			return 0, pgx.ErrNoRows
+			return 0, ErrInsufficientBalance
 		}
 		return 0, ErrInsufficientStamina
 	}

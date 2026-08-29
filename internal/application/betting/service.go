@@ -48,7 +48,7 @@ type PlacedBet struct {
 // BetTaskHook 在积分投注成交后累计任务进度（如投注达标送体力），可为 nil。
 // 在投注事务内调用，返回错误则整笔投注回滚。
 type BetTaskHook interface {
-	OnPointsBetPlaced(ctx context.Context, tx pgx.Tx, userID string, stakeMinor int64) error
+	OnBetPlaced(ctx context.Context, tx pgx.Tx, userID, currency string, stakeMinor int64) error
 }
 
 type Service struct {
@@ -250,9 +250,9 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		return PlacedBet{}, err
 	}
 
-	// 积分投注触发任务进度累计（如投注达标送体力）；重复请求已在上方返回，不会走到这里。
-	if service.taskHook != nil && request.Currency == "POINTS" {
-		if err := service.taskHook.OnPointsBetPlaced(ctx, tx, request.AccountID, request.StakeMinor); err != nil {
+	// 投注按任务配置的累计币种触发进度；重复请求已在上方返回，不会走到这里。
+	if service.taskHook != nil {
+		if err := service.taskHook.OnBetPlaced(ctx, tx, request.AccountID, request.Currency, request.StakeMinor); err != nil {
 			return PlacedBet{}, err
 		}
 	}

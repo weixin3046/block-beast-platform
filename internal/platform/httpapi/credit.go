@@ -22,7 +22,9 @@ type CreditService interface {
 	RequestPointWithdrawal(ctx context.Context, userID, requestID string, amount int64, remark string) (credit.PointWithdrawal, error)
 	ReviewPointWithdrawal(ctx context.Context, id, reviewerID string, approved bool) error
 	ListPointWithdrawals(ctx context.Context, userID, status string, limit int) ([]credit.PointWithdrawal, error)
-	LuckySpin(ctx context.Context, userID, requestID string) (credit.SpinResult, error)
+	LuckySpin(ctx context.Context, userID, spinID, requestID string) (credit.SpinResult, error)
+	ListSpinConfigs(ctx context.Context, enabledOnly bool) ([]credit.SpinConfig, error)
+	ReplaceSpinConfigs(ctx context.Context, items []credit.SpinConfig) ([]credit.SpinConfig, error)
 }
 
 func (server *Server) pointWithdrawals(writer http.ResponseWriter, request *http.Request) {
