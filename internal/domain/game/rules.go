@@ -19,9 +19,6 @@ type Rules struct {
 	// PayoutDivisor 将整数倍率换算为实际倍率。房间玩法使用 100，因此 194 表示 1.94 倍；
 	// 旧玩法省略时保持除数 1 的兼容行为。
 	PayoutDivisor int64 `json:"payout_divisor,omitempty"`
-	// WaterRate/WaterDivisor 定义当前玩法的返水比例。
-	WaterRate    int64 `json:"water_rate,omitempty"`
-	WaterDivisor int64 `json:"water_divisor,omitempty"`
 	// BetLimits 按币种定义当前玩法的最小、最大投注额。
 	BetLimits map[string]BetLimit `json:"bet_limits,omitempty"`
 	// MatchField 限定只比较 selection 中指定字段的值（支持点路径，如 "pick.color"）。
@@ -31,7 +28,7 @@ type Rules struct {
 	ResultCount int `json:"result_count,omitempty"`
 	// Source 标识外部数据源，如 "tron_hash"、"okx_kline"；为空时使用本地哈希回退。
 	Source string `json:"source,omitempty"`
-	// Extras 存储数据源参数，如 {"block_interval":5} 或 {"symbol":"BTC-USDT"}。
+	// Extras 存储数据源参数，如 {"block_interval":29} 或 {"symbol":"BTC-USDT"}。
 	Extras json.RawMessage `json:"extras,omitempty"`
 	// DodgeMode 为 true 时启用躲避玩法判定：选中值不在 outcome 中即赢。
 	DodgeMode bool `json:"dodge_mode,omitempty"`
@@ -74,9 +71,6 @@ func (rules Rules) Validate() error {
 	}
 	if rules.PayoutDivisor < 0 {
 		return fmt.Errorf("%w: payout_divisor must not be negative", ErrInvalidRules)
-	}
-	if rules.WaterRate < 0 || rules.WaterDivisor < 0 {
-		return fmt.Errorf("%w: water rate and divisor must not be negative", ErrInvalidRules)
 	}
 	for currency, limit := range rules.BetLimits {
 		if strings.TrimSpace(currency) == "" || limit.MinStakeMinor < 0 ||

@@ -137,16 +137,32 @@ func TestOpenRoundsListsBoundedGameTypeRounds(t *testing.T) {
 }
 
 func TestHashTrendsReturnsSharedResults(t *testing.T) {
-	rounds := &recordingRoundReader{trend: game.HashTrend{GameType: "hash_5", Items: []game.HashTrendItem{{Sequence: 105, Digit: 5, Size: "big", Parity: "odd"}}}}
+	rounds := &recordingRoundReader{trend: game.HashTrend{GameType: "hash_29", Items: []game.HashTrendItem{{Sequence: 116, Digit: 5, Size: "big", Parity: "odd"}}}}
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
-	request := httptest.NewRequest(http.MethodGet, "/v1/hash/trends?game_type=hash_5&limit=50", nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/hash/trends?game_type=hash_29&limit=50", nil)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || rounds.gameType != "hash_5" || rounds.limit != 50 {
+	if response.Code != http.StatusOK || rounds.gameType != "hash_29" || rounds.limit != 50 {
 		t.Fatalf("status=%d gameType=%q limit=%d body=%s", response.Code, rounds.gameType, rounds.limit, response.Body.String())
 	}
 	if !strings.Contains(response.Body.String(), `"digit":5`) {
 		t.Fatalf("response = %s", response.Body.String())
+	}
+}
+
+func TestFixedHashAdminWriteRoutesAreNotExposed(t *testing.T) {
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+	for _, target := range []string{
+		"/v1/admin/game-rooms",
+		"/v1/admin/game-types",
+		"/v1/admin/rounds",
+	} {
+		request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(`{}`))
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("POST %s status = %d, want 405", target, response.Code)
+		}
 	}
 }
 

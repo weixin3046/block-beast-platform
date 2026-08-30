@@ -14,6 +14,7 @@ import (
 var ErrInvalidGameRoom = errors.New("room name and game kind are required")
 var ErrGameRoomNotFound = errors.New("game room not found")
 var ErrGameRoomConflict = errors.New("game room code already exists")
+var ErrFixedHashStructure = errors.New("hash rooms, game types, and rounds have a fixed system-managed structure")
 
 type GameRoom struct {
 	ID        string     `json:"id"`
@@ -101,6 +102,9 @@ func (service *Service) CreateGameRoom(ctx context.Context, input GameRoomInput)
 	if err := validateGameRoom(input); err != nil {
 		return GameRoom{}, err
 	}
+	if normalizeGameKind(input.GameKind) == "hash" {
+		return GameRoom{}, ErrFixedHashStructure
+	}
 	var room GameRoom
 	roomCode := generatedCode("room")
 	err := service.pool.QueryRow(ctx, `
@@ -120,6 +124,15 @@ func (service *Service) CreateGameRoom(ctx context.Context, input GameRoomInput)
 func (service *Service) UpdateGameRoom(ctx context.Context, id string, input GameRoomInput) (GameRoom, error) {
 	if err := validateGameRoom(input); err != nil {
 		return GameRoom{}, err
+	}
+	var currentKind string
+	if err := service.pool.QueryRow(ctx, `SELECT game_kind FROM game_rooms WHERE id=$1`, id).Scan(&currentKind); errors.Is(err, pgx.ErrNoRows) {
+		return GameRoom{}, ErrGameRoomNotFound
+	} else if err != nil {
+		return GameRoom{}, err
+	}
+	if currentKind == "hash" || normalizeGameKind(input.GameKind) == "hash" {
+		return GameRoom{}, ErrFixedHashStructure
 	}
 	var room GameRoom
 	err := service.pool.QueryRow(ctx, `

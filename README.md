@@ -119,13 +119,12 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 | `GET /v1/admin/configs`、`PUT /v1/admin/configs/{key}` | 后台通过版本号安全管理平台配置。仅 admin。 |
 | `GET /v1/admin/audit-logs` | 按操作或管理员筛选不可变审计日志。仅 admin。 |
 | `GET /v1/game-rooms` | 查询启用的游戏房间及房内玩法。 |
-| `GET /v1/hash/menus` | 查询固定六个赔率房间、五个共享哈希区块及按币种配置的三类玩法参数。 |
-| `GET /v1/hash/trends?game_type=hash_5&limit=100` | 查询共享哈希玩法的尾数、大小、单双走势及当前遗漏/连开统计。 |
+| `GET /v1/hash/menus` | 查询固定六个赔率房间、六个共享哈希区块及按币种配置的三类玩法参数。 |
+| `GET /v1/hash/trends?game_type=hash_9&limit=100` | 查询共享哈希玩法的尾数、大小、单双走势及当前遗漏/连开统计。 |
 | `GET/PUT /v1/admin/hash/config` | 通过版本号原子查询或更新哈希房间名称、顺序、状态、倍率和累计投注上限。仅 operator/admin。 |
-| `GET/POST /v1/admin/game-rooms` | 管理房间数量、名称、分类、排序和状态；代码由后端生成。仅 operator/admin。 |
-| `GET/POST /v1/admin/game-types` | 查询或创建房内玩法与结算规则。仅 operator/admin。 |
-| `PUT /v1/admin/game-types/{game_type_id}` | 修改玩法规则或启停玩法。仅 operator/admin。 |
-| `GET/POST /v1/admin/rounds` | 查询轮次或创建固定封盘时间的新轮次。仅 operator/admin。 |
+| `GET /v1/admin/game-rooms` | 查询固定六个哈希房间。仅 operator/admin。 |
+| `GET /v1/admin/game-types` | 查询固定六个共享哈希玩法。仅 operator/admin。 |
+| `GET /v1/admin/rounds` | 查询系统根据 TRON 目标区块自动创建的轮次。仅 operator/admin。 |
 | `GET /v1/rounds?game_type={code}&limit={1-100}` | 查询指定游戏类型的开放轮次。 |
 | `GET /v1/rounds/{round_id}` | 查询单个轮次。 |
 | `POST /v1/rounds/{round_id}/cancel` | 取消开放或已封盘轮次，并退款全部接受中的投注。仅 operator/admin。 |

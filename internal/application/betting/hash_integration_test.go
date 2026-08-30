@@ -28,7 +28,7 @@ func TestHashBetUsesRoomConfigSnapshotAtSettlement(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	const (
-		gameTypeID = "05000000-0000-4000-8000-000000000001"
+		gameTypeID = "09000000-0000-4000-8000-000000000001"
 		room194ID  = "94000000-0000-4000-8000-000000000001"
 		room195ID  = "95000000-0000-4000-8000-000000000001"
 	)
@@ -37,14 +37,14 @@ func TestHashBetUsesRoomConfigSnapshotAtSettlement(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO users(id,login_name,display_name) VALUES($1,$2,'hash snapshot player')`, userID, "hash-"+uuid.NewString()[:8]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,'USDT',1000)`, walletID, userID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,'POINTS',1000)`, walletID, userID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at) VALUES($1,$2,$3,'open',now()+interval '1 hour',now()+interval '1 hour 5 seconds')`, roundID, gameTypeID, sequence); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `UPDATE hash_room_currency_configs SET guess_multiplier=9350 WHERE room_id=$1 AND currency='USDT'`, room194ID)
+		_, _ = pool.Exec(ctx, `UPDATE hash_room_currency_configs SET guess_multiplier=9350 WHERE room_id=$1 AND currency='POINTS'`, room194ID)
 		_, _ = pool.Exec(ctx, `DELETE FROM outbox_events WHERE aggregate_id=$1 OR payload->>'round_id'=$1`, roundID)
 		_, _ = pool.Exec(ctx, `DELETE FROM commission_entries WHERE source_bet_id IN(SELECT id FROM bets WHERE round_id=$1)`, roundID)
 		_, _ = pool.Exec(ctx, `DELETE FROM ledger_entries WHERE wallet_id=$1`, walletID)
@@ -57,7 +57,7 @@ func TestHashBetUsesRoomConfigSnapshotAtSettlement(t *testing.T) {
 	service := betting.NewService(pool)
 	placed, err := service.PlaceBet(ctx, betting.PlaceBetRequest{
 		ClientRequestID: "hash-snapshot-1", RoundID: roundID, AccountID: userID,
-		Currency: "USDT", GameRoomID: room194ID, PlayMode: "guess",
+		Currency: "POINTS", GameRoomID: room194ID, PlayMode: "guess",
 		Selection: json.RawMessage(`{"pick":"5"}`), StakeMinor: 10,
 	})
 	if err != nil {
@@ -69,14 +69,14 @@ func TestHashBetUsesRoomConfigSnapshotAtSettlement(t *testing.T) {
 
 	_, err = service.PlaceBet(ctx, betting.PlaceBetRequest{
 		ClientRequestID: "hash-other-room", RoundID: roundID, AccountID: userID,
-		Currency: "USDT", GameRoomID: room195ID, PlayMode: "guess",
+		Currency: "POINTS", GameRoomID: room195ID, PlayMode: "guess",
 		Selection: json.RawMessage(`{"pick":"5"}`), StakeMinor: 1,
 	})
 	if !errors.Is(err, betting.ErrHashRoomConflict) {
 		t.Fatalf("other room error = %v, want ErrHashRoomConflict", err)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE hash_room_currency_configs SET guess_multiplier=1000 WHERE room_id=$1 AND currency='USDT'`, room194ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE hash_room_currency_configs SET guess_multiplier=1000 WHERE room_id=$1 AND currency='POINTS'`, room194ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE rounds SET status='closed' WHERE id=$1`, roundID); err != nil {
@@ -104,7 +104,7 @@ func TestHashBetUsesRoomConfigSnapshotAtSettlement(t *testing.T) {
 	if balance != 1083 {
 		t.Fatalf("balance = %d, want 1083", balance)
 	}
-	trend, err := game.NewPostgresRepository(pool).HashTrend(ctx, "hash_5", 1)
+	trend, err := game.NewPostgresRepository(pool).HashTrend(ctx, "hash_9", 1)
 	if err != nil {
 		t.Fatalf("load hash trend: %v", err)
 	}

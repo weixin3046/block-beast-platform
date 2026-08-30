@@ -218,7 +218,7 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 }
 
 // HashTrend 返回共享哈希玩法的最近开奖结果。六个赔率房间共用同一期结果，
-// 因此走势图只按 hash_5/hash_9/hash_13/hash_17/hash_19 查询。
+// 因此走势图只按 hash_9/hash_13/hash_17/hash_19/hash_23/hash_29 查询。
 func (repository *PostgresRepository) HashTrend(ctx context.Context, gameType string, limit int) (HashTrend, error) {
 	if limit <= 0 || limit > 200 {
 		return HashTrend{}, ErrInvalidTrendLimit

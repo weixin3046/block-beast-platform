@@ -624,7 +624,7 @@ paths:
       tags: [Rounds]
       operationId: listHashMenus
       summary: 查询六个哈希赔率房间及共享区块菜单
-      description: 返回启用的固定赔率房间、每个房间共同关联的 5/9/13/17/19 区块玩法，以及按币种配置的竞猜、躲避和上下路倍率与累计上限。
+      description: 返回启用的固定赔率房间、每个房间共同关联的 9/13/17/19/23/29 区块玩法，以及按币种配置的竞猜、躲避和上下路倍率与累计上限。
       security:
         - bearerAuth: []
       responses:
@@ -639,7 +639,7 @@ paths:
       tags: [Rounds]
       operationId: getHashTrends
       summary: 查询共享哈希玩法的开奖结果走势
-      description: 六个赔率房间共享同一目标区块，因此只按 hash_5/hash_9/hash_13/hash_17/hash_19 查询。结果按期数倒序，summary 返回当前尾数遗漏和最新大小、单双连开次数。
+      description: 六个赔率房间共享同一目标区块，因此只按 hash_9/hash_13/hash_17/hash_19/hash_23/hash_29 查询。结果按期数倒序，summary 返回当前尾数遗漏和最新大小、单双连开次数。
       security:
         - bearerAuth: []
       parameters:
@@ -648,7 +648,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [hash_5, hash_9, hash_13, hash_17, hash_19]
+            enum: [hash_9, hash_13, hash_17, hash_19, hash_23, hash_29]
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
@@ -678,7 +678,7 @@ paths:
       tags: [Admin]
       operationId: adminUpdateHashConfig
       summary: 原子更新六个哈希房间的名称、顺序、状态与币种参数
-      description: 必须提交当前 expected_version；版本冲突返回 409。六个房间及其五个共享区块关系固定，接口不会新增或删除房间。
+      description: 必须提交当前 expected_version；版本冲突返回 409。六个房间及其六个共享区块关系固定，接口不会新增或删除房间。
       security:
         - bearerAuth: []
       requestBody:
@@ -708,50 +708,6 @@ paths:
       responses:
         '200':
           description: 房间列表。
-    post:
-      tags: [Admin]
-      operationId: createGameRoom
-      summary: 创建游戏房间
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GameRoomInput'
-      responses:
-        '201':
-          description: 创建成功。
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          $ref: '#/components/responses/Conflict'
-  /v1/admin/game-rooms/{roomID}:
-    put:
-      tags: [Admin]
-      operationId: updateGameRoom
-      summary: 修改房间名称、分类、顺序或启停状态
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: roomID
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GameRoomInput'
-      responses:
-        '200':
-          description: 更新成功。
-        '404':
-          $ref: '#/components/responses/NotFound'
   /v1/admin/game-types:
     get:
       tags: [Admin]
@@ -762,50 +718,6 @@ paths:
       responses:
         '200':
           description: 游戏玩法列表。
-    post:
-      tags: [Admin]
-      operationId: createGameType
-      summary: 创建游戏玩法
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GameTypeInput'
-      responses:
-        '201':
-          description: 创建成功。
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          $ref: '#/components/responses/Conflict'
-  /v1/admin/game-types/{gameTypeID}:
-    put:
-      tags: [Admin]
-      operationId: updateGameType
-      summary: 修改或启停游戏玩法
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: gameTypeID
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GameTypeInput'
-      responses:
-        '200':
-          description: 更新成功。
-        '404':
-          $ref: '#/components/responses/NotFound'
   /v1/admin/rounds:
     get:
       tags: [Admin]
@@ -816,31 +728,6 @@ paths:
       responses:
         '200':
           description: 轮次列表。
-    post:
-      tags: [Admin]
-      operationId: createRound
-      summary: 创建固定封盘时间的新轮次
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [game_type_id, bet_closes_at]
-              properties:
-                game_type_id:
-                  type: string
-                  format: uuid
-                bet_closes_at:
-                  type: string
-                  format: date-time
-      responses:
-        '201':
-          description: 轮次创建成功。
-        '400':
-          $ref: '#/components/responses/BadRequest'
   /v1/rounds:
     get:
       tags: [Rounds]
@@ -2622,12 +2509,6 @@ components:
               type: integer
               minimum: 1
               description: 房间玩法固定为 100，因此 194 表示 1.94 倍。
-            water_rate:
-              type: integer
-              minimum: 0
-            water_divisor:
-              type: integer
-              minimum: 1
             bet_limits:
               type: object
               additionalProperties:
@@ -2692,7 +2573,7 @@ components:
     HashCurrencyConfig:
       type: object
       additionalProperties: false
-      required: [currency, guess_multiplier, guess_divisor, dodge_multiplier, dodge_divisor, road_multiplier, road_divisor, guess_max_stake_minor, dodge_max_stake_minor, road_max_stake_minor, min_stake_minor, water_multiplier, water_divisor]
+      required: [currency, guess_multiplier, guess_divisor, dodge_multiplier, dodge_divisor, road_multiplier, road_divisor, guess_max_stake_minor, dodge_max_stake_minor, road_max_stake_minor, min_stake_minor]
       properties:
         currency: { type: string, minLength: 1 }
         guess_multiplier: { type: integer, format: int64, minimum: 1, description: 定点整数倍率，例如 9350/1000 = 9.35。 }
@@ -2701,12 +2582,10 @@ components:
         dodge_divisor: { type: integer, format: int64, minimum: 1 }
         road_multiplier: { type: integer, format: int64, minimum: 1 }
         road_divisor: { type: integer, format: int64, minimum: 1 }
-        guess_max_stake_minor: { type: integer, format: int64, minimum: 1 }
-        dodge_max_stake_minor: { type: integer, format: int64, minimum: 1 }
-        road_max_stake_minor: { type: integer, format: int64, minimum: 1 }
-        min_stake_minor: { type: integer, format: int64, minimum: 1 }
-        water_multiplier: { type: integer, format: int64, minimum: 0 }
-        water_divisor: { type: integer, format: int64, minimum: 1 }
+        guess_max_stake_minor: { type: integer, format: int64, minimum: 1, description: 竞猜累计上限，使用币种最小单位。 }
+        dodge_max_stake_minor: { type: integer, format: int64, minimum: 1, description: 躲避累计上限，使用币种最小单位。 }
+        road_max_stake_minor: { type: integer, format: int64, minimum: 1, description: 上下路累计上限，使用币种最小单位。 }
+        min_stake_minor: { type: integer, format: int64, minimum: 1, description: 单笔最低投注，且不得高于任一玩法累计上限。 }
     HashRoomConfig:
       type: object
       additionalProperties: false
@@ -2719,7 +2598,7 @@ components:
         sort_order: { type: integer }
         game_types:
           type: array
-          description: 固定包含相同的 5、9、13、17、19 区块玩法。
+          description: 固定包含相同的 9、13、17、19、23、29 区块玩法。
           items: { type: object }
         currency_configs:
           type: array
@@ -2751,7 +2630,7 @@ components:
       additionalProperties: false
       required: [game_type, server_time, items, summary]
       properties:
-        game_type: { type: string, enum: [hash_5, hash_9, hash_13, hash_17, hash_19] }
+        game_type: { type: string, enum: [hash_9, hash_13, hash_17, hash_19, hash_23, hash_29] }
         server_time: { type: string, format: date-time }
         items:
           type: array

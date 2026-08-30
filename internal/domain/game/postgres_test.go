@@ -42,10 +42,13 @@ func TestNextTronTargetUsesNextIntervalMultiple(t *testing.T) {
 		interval int64
 		want     int64
 	}{
-		{height: 1002, interval: 5, want: 1005},
 		{height: 1002, interval: 9, want: 1008},
+		{height: 1002, interval: 13, want: 1014},
 		{height: 1002, interval: 17, want: 1003},
-		{height: 1005, interval: 5, want: 1010},
+		{height: 1002, interval: 19, want: 1007},
+		{height: 1002, interval: 23, want: 1012},
+		{height: 1002, interval: 29, want: 1015},
+		{height: 1008, interval: 9, want: 1017},
 	}
 	for _, test := range tests {
 		if got := nextTronTarget(test.height, test.interval); got != test.want {

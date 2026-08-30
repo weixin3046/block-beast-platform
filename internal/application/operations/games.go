@@ -72,6 +72,9 @@ func (service *Service) ListGameTypes(ctx context.Context) ([]GameType, error) {
 }
 
 func (service *Service) CreateGameType(ctx context.Context, input GameTypeInput) (GameType, error) {
+	if tronHashRules(input.Rules) {
+		return GameType{}, ErrFixedHashStructure
+	}
 	var err error
 	input.Rules, err = service.applyRoomPayout(ctx, input.RoomID, input.Rules)
 	if err != nil {
@@ -96,6 +99,19 @@ func (service *Service) CreateGameType(ctx context.Context, input GameTypeInput)
 }
 
 func (service *Service) UpdateGameType(ctx context.Context, id string, input GameTypeInput) (GameType, error) {
+	var fixed bool
+	if err := service.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM game_types gt
+			WHERE gt.id=$1 AND (gt.rules->>'source'='tron_hash' OR EXISTS(
+				SELECT 1 FROM game_room_types grt WHERE grt.game_type_id=gt.id
+			))
+		)`, id).Scan(&fixed); err != nil {
+		return GameType{}, err
+	}
+	if fixed || tronHashRules(input.Rules) {
+		return GameType{}, ErrFixedHashStructure
+	}
 	var err error
 	input.Rules, err = service.applyRoomPayout(ctx, input.RoomID, input.Rules)
 	if err != nil {
@@ -180,11 +196,14 @@ func (service *Service) CreateRound(ctx context.Context, gameTypeID string, betC
 		return ManagedRound{}, err
 	}
 	defer tx.Rollback(ctx)
-	var code string
-	if err := tx.QueryRow(ctx, `SELECT code FROM game_types WHERE id=$1 AND enabled=true FOR UPDATE`, gameTypeID).Scan(&code); errors.Is(err, pgx.ErrNoRows) {
+	var code, source string
+	if err := tx.QueryRow(ctx, `SELECT code,COALESCE(rules->>'source','') FROM game_types WHERE id=$1 AND enabled=true FOR UPDATE`, gameTypeID).Scan(&code, &source); errors.Is(err, pgx.ErrNoRows) {
 		return ManagedRound{}, ErrGameTypeNotFound
 	} else if err != nil {
 		return ManagedRound{}, err
+	}
+	if source == "tron_hash" {
+		return ManagedRound{}, ErrFixedHashStructure
 	}
 	var sequence int64
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sequence),0)+1 FROM rounds WHERE game_type_id=$1`, gameTypeID).Scan(&sequence); err != nil {
@@ -218,6 +237,13 @@ func validateGameType(input GameTypeInput) error {
 		return ErrInvalidGameType
 	}
 	return nil
+}
+
+func tronHashRules(raw json.RawMessage) bool {
+	var value struct {
+		Source string `json:"source"`
+	}
+	return json.Unmarshal(raw, &value) == nil && value.Source == "tron_hash"
 }
 
 func normalizeGameCloseBeforeSecs(value int) int {

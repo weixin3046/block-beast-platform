@@ -20,3 +20,12 @@ func TestValidateGameType(t *testing.T) {
 		}
 	}
 }
+
+func TestTronHashRulesIdentifiesFixedGame(t *testing.T) {
+	if !tronHashRules(json.RawMessage(`{"source":"tron_hash"}`)) {
+		t.Fatal("tron_hash rules must be treated as fixed")
+	}
+	if tronHashRules(json.RawMessage(`{"source":"okx_kline"}`)) || tronHashRules(json.RawMessage(`invalid`)) {
+		t.Fatal("non-TRON or invalid rules must not be treated as fixed hash rules")
+	}
+}

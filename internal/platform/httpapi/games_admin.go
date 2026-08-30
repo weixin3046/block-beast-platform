@@ -121,6 +121,8 @@ func (server *Server) updateGameRoom(writer http.ResponseWriter, request *http.R
 
 func (server *Server) writeGameRoomResult(writer http.ResponseWriter, request *http.Request, item operations.GameRoom, err error, status int, action string) {
 	switch {
+	case errors.Is(err, operations.ErrFixedHashStructure):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, operations.ErrInvalidGameRoom):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, operations.ErrGameRoomNotFound):
@@ -182,6 +184,8 @@ func (server *Server) createRound(writer http.ResponseWriter, request *http.Requ
 	}
 	item, err := server.gameAdmin.CreateRound(request.Context(), input.GameTypeID, input.BetClosesAt)
 	switch {
+	case errors.Is(err, operations.ErrFixedHashStructure):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, operations.ErrInvalidRound):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, operations.ErrGameTypeNotFound):
@@ -209,6 +213,8 @@ func decodeStrictJSON(writer http.ResponseWriter, request *http.Request, target 
 
 func writeGameTypeResult(server *Server, writer http.ResponseWriter, request *http.Request, item operations.GameType, err error, successStatus int, action string) {
 	switch {
+	case errors.Is(err, operations.ErrFixedHashStructure):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, operations.ErrInvalidGameType):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, operations.ErrGameTypeNotFound):

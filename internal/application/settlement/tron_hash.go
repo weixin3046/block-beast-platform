@@ -88,7 +88,7 @@ func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round
 		}
 	}
 	if extras.BlockInterval <= 0 {
-		extras.BlockInterval = 5
+		return nil, errors.New("tron_hash: positive block_interval is required")
 	}
 	if round.Sequence <= 0 {
 		return nil, errors.New("tron_hash: target block height is required")

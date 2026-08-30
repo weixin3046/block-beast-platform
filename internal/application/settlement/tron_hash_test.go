@@ -34,7 +34,7 @@ func TestTronHashOutcomeUsesOfficialBlockEndpoint(t *testing.T) {
 	})
 	defer server.Close()
 
-	outcome, err := source.Outcome(context.Background(), game.Round{Sequence: 84687810, BetClosesAt: time.Now()}, game.Rules{Outcomes: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"}, Source: "tron_hash"})
+	outcome, err := source.Outcome(context.Background(), game.Round{Sequence: 84687810, BetClosesAt: time.Now()}, game.Rules{Outcomes: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"}, Source: "tron_hash", Extras: json.RawMessage(`{"block_interval":29}`)})
 	if err != nil || len(outcome) != 1 || outcome[0] != "5" {
 		t.Fatalf("outcome = %v, err = %v", outcome, err)
 	}
@@ -77,8 +77,16 @@ func TestCurrentTronBlockUsesOfficialEndpoint(t *testing.T) {
 func TestTronHashBlockNotFound(t *testing.T) {
 	server, source := tronTestServer(t, func(writer http.ResponseWriter, request *http.Request) { _, _ = writer.Write([]byte(`{}`)) })
 	defer server.Close()
-	_, err := source.Outcome(context.Background(), game.Round{Sequence: 1}, game.Rules{Source: "tron_hash"})
+	_, err := source.Outcome(context.Background(), game.Round{Sequence: 1}, game.Rules{Source: "tron_hash", Extras: json.RawMessage(`{"block_interval":9}`)})
 	if !errors.Is(err, ErrBlockNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestTronHashRejectsMissingBlockInterval(t *testing.T) {
+	source := newTronHashResultSourceForEndpoint("http://unused", "")
+	_, err := source.Outcome(context.Background(), game.Round{Sequence: 9}, game.Rules{Source: "tron_hash"})
+	if err == nil || err.Error() != "tron_hash: positive block_interval is required" {
+		t.Fatalf("err = %v, want missing block interval error", err)
 	}
 }

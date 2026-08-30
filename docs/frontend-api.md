@@ -79,12 +79,15 @@ const remainingMs = () => Math.max(
 API 密钥、密码和令牌必须继续使用环境变量或密钥管理系统。
 
 玩家通过 `GET /v1/hash/menus` 一次读取固定六个赔率房间、每个房间相同的
-5/9/13/17/19 区块菜单，以及当前币种的竞猜、躲避、上下路倍率和累计上限。
+9/13/17/19/23/29 区块菜单，以及当前币种的竞猜、躲避、上下路倍率和累计上限。
 运营后台使用 `GET /v1/admin/hash/config` 读取完整矩阵，并通过
-`PUT /v1/admin/hash/config` 携带 `expected_version` 原子保存。六个房间及五个共享
+`PUT /v1/admin/hash/config` 携带 `expected_version` 原子保存。六个房间及六个共享
 区块关系固定，只允许修改名称、排序、启停状态和各币种参数。
+倍率使用 `multiplier/divisor` 定点整数；投注上下限字段统一使用钱包最小单位。
+例如 USDT 按 6 位精度时，`100000` 表示 0.1 USDT，`50000000` 表示 50 USDT。
+后台不再提供创建房间、创建玩法或人工创建哈希轮次的接口。
 
-走势图调用 `GET /v1/hash/trends?game_type=hash_5&limit=100`。返回结果按目标区块
+走势图调用 `GET /v1/hash/trends?game_type=hash_9&limit=100`。返回结果按目标区块
 高度倒序排列，每条包含 `digit`、`size`、`parity` 和 `settled_at`；`summary`
 同时提供数字 0–9 的当前遗漏期数，以及最新大小、单双的连续出现次数。六个赔率
 房间共用走势图，切换赔率房间时不需要重新请求不同数据。
