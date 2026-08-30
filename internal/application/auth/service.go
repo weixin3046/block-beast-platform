@@ -241,7 +241,7 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 		return LoginResult{}, ErrInvalidPassword
 	}
 	invite, err := strconv.ParseInt(strings.TrimSpace(invitationCode), 10, 64)
-	if err != nil || invite < 101 {
+	if err != nil || invite < identity.MinimumInvitationCode {
 		return LoginResult{}, ErrInvalidInvitationCode
 	}
 	hash, err := identity.HashPassword(password)

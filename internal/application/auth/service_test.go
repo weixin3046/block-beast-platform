@@ -299,18 +299,21 @@ func TestRegisterValidatesInput(t *testing.T) {
 	newService := func() *Service {
 		return NewService(stubCredentials{}, testSecret, time.Minute).WithRegistrar(stubRegistrar{})
 	}
-	if _, err := newService().Register(context.Background(), "ab", "", "valid-password-12", "101"); !errors.Is(err, ErrInvalidLoginName) {
+	if _, err := newService().Register(context.Background(), "ab", "", "valid-password-12", "10001"); !errors.Is(err, ErrInvalidLoginName) {
 		t.Fatalf("short login name error = %v, want ErrInvalidLoginName", err)
 	}
-	if _, err := newService().Register(context.Background(), "bad name!", "", "valid-password-12", "101"); !errors.Is(err, ErrInvalidLoginName) {
+	if _, err := newService().Register(context.Background(), "bad name!", "", "valid-password-12", "10001"); !errors.Is(err, ErrInvalidLoginName) {
 		t.Fatalf("invalid chars error = %v, want ErrInvalidLoginName", err)
 	}
-	if _, err := newService().Register(context.Background(), "valid-name", "", "short", "101"); !errors.Is(err, ErrInvalidPassword) {
+	if _, err := newService().Register(context.Background(), "valid-name", "", "short", "10001"); !errors.Is(err, ErrInvalidPassword) {
 		t.Fatalf("short password error = %v, want ErrInvalidPassword", err)
 	}
 	service := NewService(nil, testSecret, time.Minute)
-	if _, err := service.Register(context.Background(), "valid-name", "", "valid-password-12", "101"); !errors.Is(err, ErrAuthNotConfigured) {
+	if _, err := service.Register(context.Background(), "valid-name", "", "valid-password-12", "10001"); !errors.Is(err, ErrAuthNotConfigured) {
 		t.Fatalf("missing registrar error = %v, want ErrAuthNotConfigured", err)
+	}
+	if _, err := newService().Register(context.Background(), "valid-name", "", "valid-password-12", "10000"); !errors.Is(err, ErrInvalidInvitationCode) {
+		t.Fatalf("invitation code below minimum error = %v, want ErrInvalidInvitationCode", err)
 	}
 }
 
@@ -318,7 +321,7 @@ func TestDevelopmentCanDisablePasswordLengthPolicy(t *testing.T) {
 	service := NewService(stubCredentials{}, testSecret, time.Minute).
 		WithStrictPasswordPolicy(false).
 		WithRegistrar(stubRegistrar{})
-	if _, err := service.Register(context.Background(), "dev-user", "", "123", "101"); err != nil {
+	if _, err := service.Register(context.Background(), "dev-user", "", "123", "10001"); err != nil {
 		t.Fatalf("development registration error = %v", err)
 	}
 }
@@ -340,7 +343,7 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 	repository := identity.NewPostgresRepository(pool)
 	service := NewService(repository, testSecret, 15*time.Minute).WithRegistrar(repository)
 
-	result, err := service.Register(ctx, loginName, "", password, "101")
+	result, err := service.Register(ctx, loginName, "", password, "10001")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -399,7 +402,7 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 	}
 
 	// 重复注册同一登录名必须冲突。
-	if _, err := service.Register(ctx, loginName, "", password, "101"); !errors.Is(err, identity.ErrLoginNameTaken) {
+	if _, err := service.Register(ctx, loginName, "", password, "10001"); !errors.Is(err, identity.ErrLoginNameTaken) {
 		t.Fatalf("duplicate register error = %v, want ErrLoginNameTaken", err)
 	}
 }

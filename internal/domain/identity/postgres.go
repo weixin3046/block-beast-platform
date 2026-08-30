@@ -15,6 +15,9 @@ import (
 var ErrIdentityNotFound = errors.New("identity not found")
 var ErrLoginNameTaken = errors.New("login name is already taken")
 var ErrInvitationCodeNotFound = errors.New("invitation code is invalid")
+
+const MinimumInvitationCode int64 = 10001
+
 var ErrAdminAlreadyExists = errors.New("an administrator already exists")
 
 // PasswordCredentials 是 password 提供方下的登录凭证与账号状态。
@@ -173,7 +176,7 @@ func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, 
 		return "", err
 	}
 	defer tx.Rollback(ctx)
-	if invitationCode < 101 {
+	if invitationCode < MinimumInvitationCode {
 		return "", ErrInvitationCodeNotFound
 	}
 	var parentUserID, parentPath string

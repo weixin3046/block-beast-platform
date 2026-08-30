@@ -246,7 +246,7 @@ func TestRegisterEndpointMapsErrors(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"login_name":"new-player","password":"some-password-12","invitation_code":"101"}`))
+			request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"login_name":"new-player","password":"some-password-12","invitation_code":"10001"}`))
 			response := httptest.NewRecorder()
 			newServer(testCase.stub).Handler().ServeHTTP(response, request)
 			if response.Code != testCase.want {

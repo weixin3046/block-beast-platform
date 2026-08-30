@@ -89,7 +89,7 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 
 ## 当前接口
 
-前端可直接使用的完整接口契约见 [OpenAPI 3.1 文档](docs/openapi.yaml)，接入顺序与 TypeScript 示例见 [前端接入说明](docs/frontend-api.md)。
+前端可直接使用的完整 HTTP 接口契约见 [OpenAPI 3.1 文档](docs/openapi.yaml)，接入顺序与 TypeScript 示例见 [前端接入说明](docs/frontend-api.md)，实时连接、事件 payload 和断线恢复见 [WebSocket v1 前端接口手册](docs/realtime-api.md)。
 
 | 方法与地址 | 用途 |
 | --- | --- |

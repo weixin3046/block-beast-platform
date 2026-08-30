@@ -25,7 +25,7 @@
 
 ## 调用顺序
 
-1. 玩家端调用 `POST /v1/auth/register` 注册时必须填写 `invitation_code`。邀请码从 `101` 起，且只有后台设置为 1–6 级代理的用户的邀请码可用；注册会原子建立直属推荐关系。登录后调用 `GET /v1/users/me` 获取玩家资料、邀请码和 `agent_level`（`0` 表示不可邀请）。已有账号调用 `POST /v1/auth/login` 登录，并使用 `POST /v1/auth/refresh` 续期；管理后台使用 `/v1/admin/auth/login` 和 `/v1/admin/auth/refresh`。
+1. 玩家端调用 `POST /v1/auth/register` 注册时必须填写 `invitation_code`。邀请码从 `10001` 起，且只有后台设置为 1–6 级代理的用户的邀请码可用；注册会原子建立直属推荐关系。登录后调用 `GET /v1/users/me` 获取玩家资料、邀请码和 `agent_level`（`0` 表示不可邀请）。已有账号调用 `POST /v1/auth/login` 登录，并使用 `POST /v1/auth/refresh` 续期；管理后台使用 `/v1/admin/auth/login` 和 `/v1/admin/auth/refresh`。
    `user_id` 是从 `100000` 起连续分配的公开数字 ID；UUID 只在服务端内部使用。玩家可用 `PUT /v1/users/me` 修改昵称和头像 URL，用 `PUT /v1/users/me/password` 携带当前密码和新密码修改密码；改密后需重新登录。
    二级密码通过 `PUT /v1/users/me/secondary-password` 设置或修改：首次设置只提交 `secondary_password`；修改时提交 `current_secondary_password` 与新的 `secondary_password`。用 `POST /v1/users/me/secondary-password/verify` 提交 `secondary_password` 验证。二级密码不会在任何响应中返回。
 2. 调用 `GET /v1/rounds?game_type={code}` 获取仍可下注的轮次。
@@ -97,7 +97,7 @@ const api = "http://localhost:8080";
 const auth = await fetch(`${api}/v1/auth/register`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ login_name: "player-001", password: "开发环境密码", invitation_code: "101" }),
+  body: JSON.stringify({ login_name: "player-001", password: "开发环境密码", invitation_code: "10001" }),
 }).then((r) => (r.ok ? r.json() : r.json().then(({ error }) => Promise.reject(new Error(error)))));
 
 let { access_token, refresh_token, user_id } = auth;
@@ -225,6 +225,9 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 
 ## 实时连接
 
+完整的连接认证、消息结构、事件 payload、错误处理、断线恢复和 TypeScript 客户端见
+[WebSocket v1 前端接口手册](realtime-api.md)。本节仅保留快速接入摘要。
+
 浏览器通过子协议连接：`new WebSocket("ws://58.87.64.208/v1/ws", ["bearer." + accessToken])`。如果之后配置 HTTPS，请改为 `wss://`；并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。连接建立后服务端发送版本化握手：
 
 ```json
@@ -264,7 +267,7 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 - `GET /v1/chat/rooms/{roomID}/messages`：查询可访问房间的最近消息。
 - 发送消息：使用 WebSocket `chat.send` 命令，不能再调用 HTTP `POST /v1/chat/rooms/{roomID}/messages`。
 
-消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服房间只有所属玩家和后台角色可读写，公共消息通过 WebSocket 的 `chat` topic 广播。
+消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服房间只有所属玩家和后台角色可读写，公共消息通过 WebSocket 的 `chat` topic 广播。当前后台角色不会自动成为客服房间 Socket 事件的定向接收者，后台客服页面仍需通过 HTTP 对账；具体边界见 WebSocket v1 手册。
 
 ## 文件上传
 

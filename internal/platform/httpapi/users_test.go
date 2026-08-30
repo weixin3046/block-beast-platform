@@ -27,7 +27,7 @@ func (stubUserAdmin) SetUserStatus(context.Context, string, string, string) erro
 }
 
 func (stubUserAdmin) CurrentUser(context.Context, string) (operations.User, error) {
-	return operations.User{ID: 100000, LoginName: "player", InvitationCode: 101}, nil
+	return operations.User{ID: 100000, LoginName: "player", InvitationCode: 10001}, nil
 }
 
 func (stubUserAdmin) UpdateCurrentProfile(context.Context, string, string, string) (operations.User, error) {
