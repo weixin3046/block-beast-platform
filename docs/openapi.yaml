@@ -619,6 +619,85 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/GameRoom'
+  /v1/hash/menus:
+    get:
+      tags: [Rounds]
+      operationId: listHashMenus
+      summary: 查询六个哈希赔率房间及共享区块菜单
+      description: 返回启用的固定赔率房间、每个房间共同关联的 5/9/13/17/19 区块玩法，以及按币种配置的竞猜、躲避和上下路倍率与累计上限。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 哈希菜单聚合配置。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashConfig'
+  /v1/hash/trends:
+    get:
+      tags: [Rounds]
+      operationId: getHashTrends
+      summary: 查询共享哈希玩法的开奖结果走势
+      description: 六个赔率房间共享同一目标区块，因此只按 hash_5/hash_9/hash_13/hash_17/hash_19 查询。结果按期数倒序，summary 返回当前尾数遗漏和最新大小、单双连开次数。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: game_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [hash_5, hash_9, hash_13, hash_17, hash_19]
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        '200':
+          description: 走势图结果。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HashTrend' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/admin/hash/config:
+    get:
+      tags: [Admin]
+      operationId: adminGetHashConfig
+      summary: 查询完整哈希菜单与参数矩阵
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 包含停用房间的完整配置。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashConfig'
+    put:
+      tags: [Admin]
+      operationId: adminUpdateHashConfig
+      summary: 原子更新六个哈希房间的名称、顺序、状态与币种参数
+      description: 必须提交当前 expected_version；版本冲突返回 409。六个房间及其五个共享区块关系固定，接口不会新增或删除房间。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HashConfigUpdate'
+      responses:
+        '200':
+          description: 更新后的完整配置。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashConfig'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/admin/game-rooms:
     get:
       tags: [Admin]
@@ -968,6 +1047,30 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/bets/{betID}/cancel:
+    post:
+      tags: [Bets]
+      operationId: cancelBet
+      summary: 封盘前取消本人的投注并原路退款
+      description: 仅 accepted 且当前时间早于 bet_closes_at 的投注可以取消；重复取消幂等返回既有 cancelled 记录。退款、账本与 outbox 事件在同一事务提交。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: betID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 投注已取消并退款。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bet' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '503':
           $ref: '#/components/responses/Unavailable'
   /v1/wallets/{accountID}:
@@ -2586,6 +2689,101 @@ components:
             updated_at:
               type: string
               format: date-time
+    HashCurrencyConfig:
+      type: object
+      additionalProperties: false
+      required: [currency, guess_multiplier, guess_divisor, dodge_multiplier, dodge_divisor, road_multiplier, road_divisor, guess_max_stake_minor, dodge_max_stake_minor, road_max_stake_minor, min_stake_minor, water_multiplier, water_divisor]
+      properties:
+        currency: { type: string, minLength: 1 }
+        guess_multiplier: { type: integer, format: int64, minimum: 1, description: 定点整数倍率，例如 9350/1000 = 9.35。 }
+        guess_divisor: { type: integer, format: int64, minimum: 1 }
+        dodge_multiplier: { type: integer, format: int64, minimum: 1 }
+        dodge_divisor: { type: integer, format: int64, minimum: 1 }
+        road_multiplier: { type: integer, format: int64, minimum: 1 }
+        road_divisor: { type: integer, format: int64, minimum: 1 }
+        guess_max_stake_minor: { type: integer, format: int64, minimum: 1 }
+        dodge_max_stake_minor: { type: integer, format: int64, minimum: 1 }
+        road_max_stake_minor: { type: integer, format: int64, minimum: 1 }
+        min_stake_minor: { type: integer, format: int64, minimum: 1 }
+        water_multiplier: { type: integer, format: int64, minimum: 0 }
+        water_divisor: { type: integer, format: int64, minimum: 1 }
+    HashRoomConfig:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, enabled, sort_order, game_types, currency_configs]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string, minLength: 1 }
+        enabled: { type: boolean }
+        sort_order: { type: integer }
+        game_types:
+          type: array
+          description: 固定包含相同的 5、9、13、17、19 区块玩法。
+          items: { type: object }
+        currency_configs:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/HashCurrencyConfig' }
+    HashConfig:
+      type: object
+      additionalProperties: false
+      required: [version, server_time, rooms]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        server_time: { type: string, format: date-time }
+        rooms:
+          type: array
+          items: { $ref: '#/components/schemas/HashRoomConfig' }
+    HashConfigUpdate:
+      type: object
+      additionalProperties: false
+      required: [expected_version, rooms]
+      properties:
+        expected_version: { type: integer, format: int64, minimum: 1 }
+        rooms:
+          type: array
+          minItems: 6
+          maxItems: 6
+          items: { $ref: '#/components/schemas/HashRoomConfig' }
+    HashTrend:
+      type: object
+      additionalProperties: false
+      required: [game_type, server_time, items, summary]
+      properties:
+        game_type: { type: string, enum: [hash_5, hash_9, hash_13, hash_17, hash_19] }
+        server_time: { type: string, format: date-time }
+        items:
+          type: array
+          description: 按目标区块高度倒序排列。
+          items:
+            type: object
+            additionalProperties: false
+            required: [sequence, digit, size, parity, settled_at]
+            properties:
+              sequence: { type: integer, format: int64, description: 目标区块高度，同时也是期号。 }
+              digit: { type: integer, minimum: 0, maximum: 9 }
+              size: { type: string, enum: [big, small] }
+              parity: { type: string, enum: [odd, even] }
+              settled_at: { type: string, format: date-time }
+        summary:
+          type: object
+          additionalProperties: false
+          required: [digit_omissions, size_streak, parity_streak]
+          properties:
+            digit_omissions:
+              type: object
+              description: 每个数字距离最近一次出现已经经过的期数；未在当前窗口出现时等于 items 数量。
+              additionalProperties: { type: integer, minimum: 0 }
+            size_streak: { $ref: '#/components/schemas/HashTrendStreak' }
+            parity_streak: { $ref: '#/components/schemas/HashTrendStreak' }
+    HashTrendStreak:
+      type: object
+      additionalProperties: false
+      required: [value, count]
+      properties:
+        value: { type: string }
+        count: { type: integer, minimum: 0 }
     Error:
       type: object
       required: [error]
@@ -2626,7 +2824,7 @@ components:
         result_at:
           type: string
           format: date-time
-          description: 固定比 bet_closes_at 晚 3 秒，即目标 TRON 区块前一个区块封盘。
+          description: 目标结果预计可用时间；哈希玩法比 bet_closes_at 晚 5 秒。目标区块实际到达后立即结算，不增加人为延迟。
         settled_at:
           type: string
           format: date-time
@@ -2654,6 +2852,14 @@ components:
           type: string
           minLength: 1
           example: USDT
+        game_room_id:
+          type: string
+          format: uuid
+          description: 共享哈希轮次必填，表示六个赔率房间中的一个；普通玩法省略。
+        play_mode:
+          type: string
+          enum: [guess, dodge, road]
+          description: 共享哈希轮次必填。guess/dodge 的 pick 为 0–9，road 的 pick 为 big/small/odd/even。
         selection:
           description: 玩法定义的有效 JSON 选择值。
         stake_minor:
@@ -2678,6 +2884,12 @@ components:
           minimum: 100000
         currency:
           type: string
+        game_room_id:
+          type: string
+          format: uuid
+        play_mode:
+          type: string
+          enum: [guess, dodge, road]
         selection: {}
         stake_minor:
           type: integer

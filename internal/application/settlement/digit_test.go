@@ -88,3 +88,24 @@ func TestMapOutcome(t *testing.T) {
 		})
 	}
 }
+
+func TestSharedHashOutcome(t *testing.T) {
+	for _, test := range []struct {
+		digit int
+		want  []string
+	}{
+		{digit: 0, want: []string{"0", "small", "even"}},
+		{digit: 5, want: []string{"5", "big", "odd"}},
+		{digit: 8, want: []string{"8", "big", "even"}},
+	} {
+		got := sharedHashOutcome(test.digit)
+		if len(got) != len(test.want) {
+			t.Fatalf("sharedHashOutcome(%d) = %v", test.digit, got)
+		}
+		for index := range got {
+			if got[index] != test.want[index] {
+				t.Fatalf("sharedHashOutcome(%d) = %v, want %v", test.digit, got, test.want)
+			}
+		}
+	}
+}

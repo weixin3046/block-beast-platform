@@ -1,8 +1,30 @@
 package settlement
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+func TestHashSelectionWins(t *testing.T) {
+	outcome := []string{"5", "big", "odd"}
+	for _, test := range []struct {
+		mode string
+		pick string
+		want bool
+	}{
+		{mode: "guess", pick: "5", want: true},
+		{mode: "guess", pick: "4", want: false},
+		{mode: "dodge", pick: "4", want: true},
+		{mode: "dodge", pick: "5", want: false},
+		{mode: "road", pick: "big", want: true},
+		{mode: "road", pick: "even", want: false},
+	} {
+		raw, _ := json.Marshal(map[string]string{"pick": test.pick})
+		if got := hashSelectionWins(test.mode, raw, outcome); got != test.want {
+			t.Fatalf("hashSelectionWins(%q,%q) = %v, want %v", test.mode, test.pick, got, test.want)
+		}
+	}
+}
 
 func TestWithinPoolRejectsValuesOutsideThePool(t *testing.T) {
 	pool := []string{"red", "black"}

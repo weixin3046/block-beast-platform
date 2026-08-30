@@ -340,19 +340,26 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 
 	loginName := "reg-" + uuid.NewString()[:8]
 	password := "register-test-password"
+	inviterID := uuid.NewString()
+	var invitationCode string
+	if err := pool.QueryRow(ctx, `INSERT INTO users(id,login_name,display_name,agent_level) VALUES($1,$2,'registration inviter',1) RETURNING invitation_code::text`, inviterID, "inviter-"+uuid.NewString()[:8]).Scan(&invitationCode); err != nil {
+		t.Fatalf("create inviter: %v", err)
+	}
 	repository := identity.NewPostgresRepository(pool)
 	service := NewService(repository, testSecret, 15*time.Minute).WithRegistrar(repository)
 
-	result, err := service.Register(ctx, loginName, "", password, "10001")
+	result, err := service.Register(ctx, loginName, "", password, invitationCode)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	userID := result.UserID
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM agent_relations WHERE user_id=$1 OR parent_user_id=$1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM wallets WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM auth_identities WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, inviterID)
 	})
 	if result.AccessToken == "" || result.UserID == "" || len(result.Roles) != 1 || result.Roles[0] != "player" {
 		t.Fatalf("register result = %+v", result)
@@ -402,7 +409,7 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 	}
 
 	// 重复注册同一登录名必须冲突。
-	if _, err := service.Register(ctx, loginName, "", password, "10001"); !errors.Is(err, identity.ErrLoginNameTaken) {
+	if _, err := service.Register(ctx, loginName, "", password, invitationCode); !errors.Is(err, identity.ErrLoginNameTaken) {
 		t.Fatalf("duplicate register error = %v, want ErrLoginNameTaken", err)
 	}
 }

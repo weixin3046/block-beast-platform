@@ -136,6 +136,20 @@ func TestOpenRoundsListsBoundedGameTypeRounds(t *testing.T) {
 	}
 }
 
+func TestHashTrendsReturnsSharedResults(t *testing.T) {
+	rounds := &recordingRoundReader{trend: game.HashTrend{GameType: "hash_5", Items: []game.HashTrendItem{{Sequence: 105, Digit: 5, Size: "big", Parity: "odd"}}}}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/hash/trends?game_type=hash_5&limit=50", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || rounds.gameType != "hash_5" || rounds.limit != 50 {
+		t.Fatalf("status=%d gameType=%q limit=%d body=%s", response.Code, rounds.gameType, rounds.limit, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"digit":5`) {
+		t.Fatalf("response = %s", response.Body.String())
+	}
+}
+
 func TestOpenRoundsRejectsInvalidLimit(t *testing.T) {
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, &recordingRoundReader{}, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds?game_type=dice&limit=101", nil)
@@ -238,6 +252,12 @@ func (reader *recordingBetReader) ListUserBets(_ context.Context, _ string, _ st
 	return nil, nil
 }
 
+func (reader *recordingBetReader) CancelBet(_ context.Context, betID, _ string) (betting.PlacedBet, error) {
+	reader.betID = betID
+	reader.bet.Status = "cancelled"
+	return reader.bet, reader.err
+}
+
 func (placer *recordingBetPlacer) PlaceBet(_ context.Context, request betting.PlaceBetRequest) (betting.PlacedBet, error) {
 	placer.request = request
 	return placer.bet, nil
@@ -268,6 +288,7 @@ type recordingRoundReader struct {
 	limit    int
 	err      error
 	state    game.RoundState
+	trend    game.HashTrend
 }
 
 func (reader *recordingRoundReader) Find(_ context.Context, roundID string) (game.Round, error) {
@@ -284,6 +305,12 @@ func (reader *recordingRoundReader) ListOpen(_ context.Context, gameType string,
 func (reader *recordingRoundReader) State(_ context.Context, gameType string) (game.RoundState, error) {
 	reader.gameType = gameType
 	return reader.state, reader.err
+}
+
+func (reader *recordingRoundReader) HashTrend(_ context.Context, gameType string, limit int) (game.HashTrend, error) {
+	reader.gameType = gameType
+	reader.limit = limit
+	return reader.trend, reader.err
 }
 
 func (checker readinessChecker) Ping(context.Context) error {

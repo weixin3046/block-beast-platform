@@ -57,6 +57,7 @@ Token 只在建立连接时校验。客户端刷新 Access Token 后，应在适
 ```ts
 type RealtimeSubject =
   | "game.bet.placed"
+  | "game.bet.cancelled"
   | "game.round.closed"
   | "game.round.settling"
   | "game.round.settled"
@@ -277,6 +278,24 @@ WebSocket 事件是状态变化通知，不是可回放日志：
 ```
 
 这是广播事件，当前 payload 只包含标识字段，不包含币种、金额或选择。需要完整投注数据时，使用有权限的 HTTP 投注查询接口。
+
+### 6.1.1 `game.bet.cancelled`
+
+触发：玩家在封盘前取消投注，退款、账本和 Outbox 已在同一事务中提交。
+
+```json
+{
+  "v": 1,
+  "type": "event",
+  "subject": "game.bet.cancelled",
+  "payload": {
+    "bet_id": "5a69a884-d231-4109-b306-8c98fbe28456",
+    "round_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
+    "user_id": "0ecdd037-e5a1-4831-ad20-ac30f05b6098"
+  },
+  "occurred_at": "2026-08-29T10:00:21Z"
+}
+```
 
 ### 6.2 `game.round.closed`
 

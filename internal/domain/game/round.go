@@ -31,6 +31,32 @@ type RoundState struct {
 	Previous *Round `json:"previous"`
 }
 
+type HashTrendItem struct {
+	Sequence  int64     `json:"sequence"`
+	Digit     int       `json:"digit"`
+	Size      string    `json:"size"`
+	Parity    string    `json:"parity"`
+	SettledAt time.Time `json:"settled_at"`
+}
+
+type HashTrendStreak struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+type HashTrendSummary struct {
+	DigitOmissions map[string]int  `json:"digit_omissions"`
+	SizeStreak     HashTrendStreak `json:"size_streak"`
+	ParityStreak   HashTrendStreak `json:"parity_streak"`
+}
+
+type HashTrend struct {
+	GameType   string           `json:"game_type"`
+	ServerTime time.Time        `json:"server_time"`
+	Items      []HashTrendItem  `json:"items"`
+	Summary    HashTrendSummary `json:"summary"`
+}
+
 type Bet struct {
 	BetID      string
 	RoundID    string
@@ -45,6 +71,7 @@ var ErrInvalidTransition = errors.New("invalid round state transition")
 var ErrRoundNotFound = errors.New("round not found")
 var ErrBettingClosed = errors.New("betting is closed")
 var ErrInvalidStake = errors.New("stake must be positive")
+var ErrInvalidTrendLimit = errors.New("trend limit must be between 1 and 200")
 
 func (round *Round) Close(now time.Time) error {
 	if round.Status != RoundOpen || now.Before(round.BetClosesAt) {

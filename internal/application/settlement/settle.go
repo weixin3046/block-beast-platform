@@ -41,9 +41,6 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	if !withinPool(outcome, rules.Outcomes) {
 		return SettlementResult{}, ErrOutcomeOutsidePool
 	}
-	payoutMultiplier := rules.PayoutMultiplier
-	payoutDivisor := rules.PayoutScale()
-
 	tx, err := service.pool.Begin(ctx)
 	if err != nil {
 		return SettlementResult{}, err
@@ -80,11 +77,14 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 
 	type acceptedBet struct {
 		betID, walletID, userID, currency string
+		playMode                          string
 		selection                         json.RawMessage
 		stake                             int64
+		payoutMultiplier, payoutDivisor   *int64
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT bets.id, bets.wallet_id, bets.user_id, wallets.currency, bets.selection, bets.stake_minor
+		SELECT bets.id, bets.wallet_id, bets.user_id, wallets.currency,COALESCE(bets.play_mode,''),
+			bets.selection,bets.stake_minor,bets.payout_multiplier_snapshot,bets.payout_divisor_snapshot
 		FROM bets JOIN wallets ON wallets.id=bets.wallet_id
 		WHERE round_id = $1 AND status = 'accepted'
 		ORDER BY wallet_id, id
@@ -95,7 +95,8 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	bets := make([]acceptedBet, 0)
 	for rows.Next() {
 		var bet acceptedBet
-		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.userID, &bet.currency, &bet.selection, &bet.stake); err != nil {
+		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.userID, &bet.currency, &bet.playMode,
+			&bet.selection, &bet.stake, &bet.payoutMultiplier, &bet.payoutDivisor); err != nil {
 			rows.Close()
 			return SettlementResult{}, err
 		}
@@ -113,6 +114,9 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			return SettlementResult{}, err
 		}
 		won := rules.SelectionWins(bet.selection, outcome)
+		if bet.playMode != "" {
+			won = hashSelectionWins(bet.playMode, bet.selection, outcome)
+		}
 		if !won {
 			if _, err := tx.Exec(ctx, `UPDATE bets SET status = 'lost', settled_at = $2 WHERE id = $1`, bet.betID, result.SettledAt); err != nil {
 				return SettlementResult{}, err
@@ -120,7 +124,11 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			result.LostBetCount++
 			continue
 		}
-		if bet.stake > math.MaxInt64/payoutMultiplier {
+		payoutMultiplier, payoutDivisor := rules.PayoutMultiplier, rules.PayoutScale()
+		if bet.payoutMultiplier != nil && bet.payoutDivisor != nil {
+			payoutMultiplier, payoutDivisor = *bet.payoutMultiplier, *bet.payoutDivisor
+		}
+		if payoutMultiplier <= 0 || payoutDivisor <= 0 || bet.stake > math.MaxInt64/payoutMultiplier {
 			return SettlementResult{}, ErrPayoutOverflow
 		}
 		payout := bet.stake * payoutMultiplier / payoutDivisor
@@ -163,6 +171,32 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		return SettlementResult{}, err
 	}
 	return result, nil
+}
+
+func hashSelectionWins(mode string, raw json.RawMessage, outcome []string) bool {
+	var selection struct {
+		Pick string `json:"pick"`
+	}
+	if json.Unmarshal(raw, &selection) != nil || selection.Pick == "" {
+		return false
+	}
+	winningDigit := ""
+	for _, value := range outcome {
+		if len(value) == 1 && value[0] >= '0' && value[0] <= '9' {
+			winningDigit = value
+			break
+		}
+	}
+	switch mode {
+	case "guess":
+		return winningDigit != "" && selection.Pick == winningDigit
+	case "dodge":
+		return winningDigit != "" && selection.Pick != winningDigit
+	case "road":
+		return containsOutcome(outcome, selection.Pick)
+	default:
+		return false
+	}
 }
 
 func settledResult(ctx context.Context, tx pgx.Tx, roundID string, rawOutcome json.RawMessage, settledAt *time.Time) (SettlementResult, error) {

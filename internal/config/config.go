@@ -14,6 +14,7 @@ type Config struct {
 	RealtimeAddress        string
 	RealtimeAllowedOrigins []string
 	WorkerPollInterval     time.Duration
+	SettlementPollInterval time.Duration
 	PostgresDSN            string
 	NATSURL                string
 	AuthTokenSecret        string
@@ -57,6 +58,7 @@ func Load() Config {
 		RealtimeAddress:        valueOrDefault("REALTIME_ADDRESS", ":8081"),
 		RealtimeAllowedOrigins: splitOrDefault("REALTIME_ALLOWED_ORIGINS", []string{"localhost:*", "127.0.0.1:*"}),
 		WorkerPollInterval:     durationOrDefault("WORKER_POLL_INTERVAL", 5*time.Second),
+		SettlementPollInterval: durationOrDefault("SETTLEMENT_POLL_INTERVAL", 250*time.Millisecond),
 		PostgresDSN:            os.Getenv("POSTGRES_DSN"),
 		NATSURL:                os.Getenv("NATS_URL"),
 		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),

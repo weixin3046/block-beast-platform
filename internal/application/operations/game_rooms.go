@@ -69,6 +69,31 @@ func (service *Service) ListGameRooms(ctx context.Context, enabledOnly bool) ([]
 			rooms[position].GameTypes = append(rooms[position].GameTypes, item)
 		}
 	}
+	shared, err := service.pool.Query(ctx, `
+		SELECT grt.room_id::text,gt.id::text,gt.code,gt.name,COALESCE(gt.mode,''),
+			COALESCE(gt.block_interval,0),gt.close_before_seconds,gt.enabled,gt.rules,
+			gt.created_at,gt.updated_at
+		FROM game_room_types grt
+		JOIN game_types gt ON gt.id=grt.game_type_id
+		ORDER BY grt.sort_order,gt.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer shared.Close()
+	for shared.Next() {
+		var item GameType
+		if err := shared.Scan(&item.RoomID, &item.ID, &item.Code, &item.Name, &item.Mode,
+			&item.BlockInterval, &item.CloseBeforeSecs, &item.Enabled, &item.Rules,
+			&item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if position, ok := index[item.RoomID]; ok && (!enabledOnly || item.Enabled) {
+			rooms[position].GameTypes = append(rooms[position].GameTypes, item)
+		}
+	}
+	if err := shared.Err(); err != nil {
+		return nil, err
+	}
 	return rooms, nil
 }
 

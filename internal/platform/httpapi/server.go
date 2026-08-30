@@ -48,6 +48,7 @@ type Server struct {
 	analytics          AnalyticsService
 	gameAdmin          GameAdminService
 	gameRoomAdmin      GameRoomService
+	hashConfig         HashConfigService
 	chat               ChatService
 	uploads            UploadService
 	leaderboards       LeaderboardService
@@ -139,6 +140,7 @@ type BetPlacer interface {
 type BetReader interface {
 	Find(ctx context.Context, betID string) (betting.PlacedBet, error)
 	ListUserBets(ctx context.Context, userID, status string, limit int) ([]betting.PlacedBet, error)
+	CancelBet(ctx context.Context, betID, userID string) (betting.PlacedBet, error)
 }
 
 type ReadinessChecker interface {
@@ -153,6 +155,7 @@ type RoundReader interface {
 	Find(ctx context.Context, roundID string) (game.Round, error)
 	ListOpen(ctx context.Context, gameType string, limit int) ([]game.Round, error)
 	State(ctx context.Context, gameType string) (game.RoundState, error)
+	HashTrend(ctx context.Context, gameType string, limit int) (game.HashTrend, error)
 }
 
 type RoundCanceller interface {
@@ -174,6 +177,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("GET /v1/assets", server.assets)
 	mux.HandleFunc("GET /v1/game-rooms", server.protect(server.gameRooms))
+	mux.HandleFunc("GET /v1/hash/menus", server.protect(server.hashMenus))
+	mux.HandleFunc("GET /v1/hash/trends", server.protect(server.hashTrends))
 	mux.HandleFunc("GET /v1/announcements", server.announcements)
 	mux.HandleFunc("GET /v1/configs/{key}", server.publicConfig)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
@@ -210,6 +215,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/agents/{agentID}/commissions", server.protectRoles(server.grantCommission, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
 	mux.HandleFunc("GET /v1/bets/{betID}", server.protect(server.bet))
+	mux.HandleFunc("POST /v1/bets/{betID}/cancel", server.protect(server.cancelBet))
 	mux.HandleFunc("GET /v1/bets", server.protect(server.userBets))
 	mux.HandleFunc("GET /v1/wallets/{accountID}", server.protect(server.balance))
 	mux.HandleFunc("GET /v1/rounds", server.protect(server.openRounds))
@@ -253,6 +259,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/tasks/bet-configs", server.protectRoles(server.adminBetTaskConfigs, identity.RoleAdmin))
 	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs", server.protectRoles(server.replaceBetTaskConfigs, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/game-types", server.protectRoles(server.adminGameTypes, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/hash/config", server.protectRoles(server.adminHashConfig, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/hash/config", server.protectRoles(server.updateHashConfig, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/game-rooms", server.protectRoles(server.adminGameRooms, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/game-rooms", server.protectRoles(server.createGameRoom, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/game-rooms/{roomID}", server.protectRoles(server.updateGameRoom, identity.RoleAdmin, identity.RoleOperator))
@@ -563,6 +571,37 @@ func (server *Server) bet(writer http.ResponseWriter, request *http.Request) {
 	server.writePublicJSON(writer, request, http.StatusOK, bet)
 }
 
+func (server *Server) cancelBet(writer http.ResponseWriter, request *http.Request) {
+	if server.bets == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "bets are unavailable"})
+		return
+	}
+	bet, err := server.bets.Find(request.Context(), request.PathValue("betID"))
+	if errors.Is(err, betting.ErrBetNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read bet"})
+		return
+	}
+	if !authorizeAccount(request, bet.AccountID) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "bet belongs to another account"})
+		return
+	}
+	bet, err = server.bets.CancelBet(request.Context(), bet.BetID, bet.AccountID)
+	switch {
+	case errors.Is(err, betting.ErrBetNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, betting.ErrBetCancellationClosed):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to cancel bet"})
+	default:
+		server.writePublicJSON(writer, request, http.StatusOK, bet)
+	}
+}
+
 func (server *Server) userBets(writer http.ResponseWriter, request *http.Request) {
 	if server.bets == nil {
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "bets are unavailable"})
@@ -617,6 +656,36 @@ func (server *Server) openRounds(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	writeJSON(writer, http.StatusOK, rounds)
+}
+
+func (server *Server) hashTrends(writer http.ResponseWriter, request *http.Request) {
+	if server.rounds == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "rounds are unavailable"})
+		return
+	}
+	gameType := request.URL.Query().Get("game_type")
+	if gameType == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "game type is required"})
+		return
+	}
+	limit := 100
+	if value := request.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 || parsed > 200 {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": game.ErrInvalidTrendLimit.Error()})
+			return
+		}
+		limit = parsed
+	}
+	trend, err := server.rounds.HashTrend(request.Context(), gameType, limit)
+	switch {
+	case errors.Is(err, game.ErrRoundNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "hash game type not found"})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to load hash trends"})
+	default:
+		writeJSON(writer, http.StatusOK, trend)
+	}
 }
 
 func (server *Server) roundState(writer http.ResponseWriter, request *http.Request) {
@@ -731,11 +800,11 @@ func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request
 
 func writeBetError(writer http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, betting.ErrInvalidSelection), errors.Is(err, game.ErrInvalidStake):
+	case errors.Is(err, betting.ErrInvalidSelection), errors.Is(err, betting.ErrHashRoomRequired), errors.Is(err, betting.ErrSelectionOutsidePlay), errors.Is(err, game.ErrInvalidStake):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, betting.ErrRoundNotFound), errors.Is(err, wallet.ErrWalletNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
-	case errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds):
+	case errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds), errors.Is(err, betting.ErrStakeOutsideLimits), errors.Is(err, betting.ErrHashRoomConflict):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, betting.ErrAccountDisabled), errors.Is(err, betting.ErrBettingBanned):
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})

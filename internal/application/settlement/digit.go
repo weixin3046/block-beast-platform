@@ -91,6 +91,12 @@ func oddEvenOutcome(digit int) []string {
 	return []string{"even"}
 }
 
+// sharedHashOutcome 返回共享哈希轮次的完整结果。六个赔率房间和三种玩法
+// 复用同一目标区块，因此一次持久化数字、大小与单双三个维度。
+func sharedHashOutcome(digit int) []string {
+	return []string{fmt.Sprintf("%d", digit), bigSmallOutcome(digit)[0], oddEvenOutcome(digit)[0]}
+}
+
 // containsOutcome 检查 outcome 列表中是否包含指定值。
 func containsOutcome(outcomes []string, target string) bool {
 	for _, outcome := range outcomes {

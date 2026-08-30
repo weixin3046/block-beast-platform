@@ -53,13 +53,20 @@ func TestSetUserRolesRevokesSessionsAndProtectsSelf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var actorPublicID, targetPublicID string
+	if err := pool.QueryRow(ctx, `SELECT public_id::text FROM users WHERE id=$1`, actorID).Scan(&actorPublicID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT public_id::text FROM users WHERE id=$1`, targetID).Scan(&targetPublicID); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM sessions WHERE user_id IN ($1,$2)`, actorID, targetID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id IN ($1,$2)`, actorID, targetID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id IN ($1,$2)`, actorID, targetID)
 	})
 	service := NewService(pool)
-	result, err := service.SetUserRoles(ctx, actorID, targetID, []string{identity.RoleOperator})
+	result, err := service.SetUserRoles(ctx, actorID, targetPublicID, []string{identity.RoleOperator})
 	if err != nil || len(result.Roles) != 1 || result.Roles[0] != identity.RoleOperator {
 		t.Fatalf("assignment = %+v, err = %v", result, err)
 	}
@@ -67,10 +74,10 @@ func TestSetUserRolesRevokesSessionsAndProtectsSelf(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id=$1`, targetID).Scan(&sessions); err != nil || sessions != 0 {
 		t.Fatalf("sessions = %d, err = %v", sessions, err)
 	}
-	if _, err := service.SetUserRoles(ctx, actorID, actorID, []string{identity.RoleOperator}); !errors.Is(err, ErrCannotRemoveOwnAdmin) {
+	if _, err := service.SetUserRoles(ctx, actorID, actorPublicID, []string{identity.RoleOperator}); !errors.Is(err, ErrCannotRemoveOwnAdmin) {
 		t.Fatalf("self removal error = %v", err)
 	}
-	if err := service.SetUserStatus(ctx, actorID, actorID, "disabled"); !errors.Is(err, ErrCannotDisableOwnAdmin) {
+	if err := service.SetUserStatus(ctx, actorID, actorPublicID, "disabled"); !errors.Is(err, ErrCannotDisableOwnAdmin) {
 		t.Fatalf("self disable error = %v", err)
 	}
 	_, err = pool.Exec(ctx, `
@@ -80,7 +87,7 @@ func TestSetUserRolesRevokesSessionsAndProtectsSelf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.SetUserStatus(ctx, actorID, targetID, "disabled"); err != nil {
+	if err := service.SetUserStatus(ctx, actorID, targetPublicID, "disabled"); err != nil {
 		t.Fatalf("disable target: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id=$1`, targetID).Scan(&sessions); err != nil || sessions != 0 {

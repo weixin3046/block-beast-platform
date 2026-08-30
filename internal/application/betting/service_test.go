@@ -38,7 +38,7 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create wallet: %v", err)
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO game_types (id, code, name, rules) VALUES ($1, $2, $3, $4)`, gameTypeID, "test-"+gameTypeID, "test game", `{}`)
+	_, err = pool.Exec(ctx, `INSERT INTO game_types (id, code, name, rules) VALUES ($1, $2, $3, $4)`, gameTypeID, "test-"+gameTypeID, "test game", `{"outcomes":["red","blue"],"payout_multiplier":2}`)
 	if err != nil {
 		t.Fatalf("create game type: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 		RoundID:         roundID,
 		AccountID:       accountID,
 		Currency:        "USDT",
-		Selection:       json.RawMessage(`{"color":"red"}`),
+		Selection:       json.RawMessage(`{"pick":"red"}`),
 		StakeMinor:      2_500,
 	}
 	first, err := service.PlaceBet(ctx, request)
@@ -105,13 +105,25 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 		RoundID:         roundID,
 		AccountID:       accountID,
 		Currency:        "USDT",
-		Selection:       json.RawMessage(`{"color":"blue"}`),
+		Selection:       json.RawMessage(`{"pick":"blue"}`),
 		StakeMinor:      7_501,
 	})
 	if !errors.Is(err, wallet.ErrInsufficientFunds) {
 		t.Fatalf("error = %v, want insufficient funds", err)
 	}
 	assertCount(t, ctx, pool, `SELECT count(*) FROM bets WHERE wallet_id = $1`, walletID, 1)
+
+	cancelled, err := service.CancelBet(ctx, first.BetID, accountID)
+	if err != nil || cancelled.Status != "cancelled" {
+		t.Fatalf("cancel bet = %+v, err = %v", cancelled, err)
+	}
+	if _, err := service.CancelBet(ctx, first.BetID, accountID); err != nil {
+		t.Fatalf("repeat cancel must be idempotent: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id=$1`, walletID).Scan(&availableMinor); err != nil || availableMinor != 10_000 {
+		t.Fatalf("balance after cancel = %d, err = %v", availableMinor, err)
+	}
+	assertCount(t, ctx, pool, `SELECT count(*) FROM ledger_entries WHERE wallet_id=$1 AND entry_type='bet_refund'`, walletID, 1)
 }
 
 func assertCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query string, argument any, want int) {
@@ -122,5 +134,24 @@ func assertCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query st
 	}
 	if got != want {
 		t.Fatalf("row count = %d, want %d", got, want)
+	}
+}
+
+func TestValidHashSelection(t *testing.T) {
+	for _, test := range []struct {
+		mode string
+		raw  string
+		want bool
+	}{
+		{mode: "guess", raw: `{"pick":"0"}`, want: true},
+		{mode: "dodge", raw: `{"pick":"9"}`, want: true},
+		{mode: "guess", raw: `{"pick":"10"}`, want: false},
+		{mode: "road", raw: `{"pick":"big"}`, want: true},
+		{mode: "road", raw: `{"pick":"5"}`, want: false},
+		{mode: "unknown", raw: `{"pick":"5"}`, want: false},
+	} {
+		if got := validHashSelection(test.mode, json.RawMessage(test.raw)); got != test.want {
+			t.Fatalf("validHashSelection(%q,%s) = %v, want %v", test.mode, test.raw, got, test.want)
+		}
 	}
 }

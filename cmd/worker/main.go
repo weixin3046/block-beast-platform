@@ -82,7 +82,9 @@ func main() {
 	defer resultSource.Close()
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
 	defer ticker.Stop()
-	logger.Info("worker started", "poll_interval", cfg.WorkerPollInterval)
+	settlementTicker := time.NewTicker(cfg.SettlementPollInterval)
+	defer settlementTicker.Stop()
+	logger.Info("worker started", "poll_interval", cfg.WorkerPollInterval, "settlement_poll_interval", cfg.SettlementPollInterval)
 	processDueRounds(ctx, logger, roundRepository)
 	ensureScheduledRounds(ctx, logger, roundRepository, resultSource)
 	settleDueRounds(ctx, logger, settlementService, resultSource)
@@ -110,14 +112,15 @@ func main() {
 			return
 		case <-ticker.C:
 			ensureScheduledRounds(ctx, logger, roundRepository, resultSource)
-			processDueRounds(ctx, logger, roundRepository)
-			settleDueRounds(ctx, logger, settlementService, resultSource)
 			processPending(logger, processor)
 			reconcileWithdrawals(ctx, logger, withdrawalSender)
 			expirePendingUploads(ctx, logger, uploadMaintenance)
 			refundExpiredRedPackets(ctx, logger, redPacketService)
 			runVirtualAccounts(ctx, logger, virtualBotService)
 			lastStats = logConsumerStats(logger, eventConsumer, lastStats)
+		case <-settlementTicker.C:
+			processDueRounds(ctx, logger, roundRepository)
+			settleDueRounds(ctx, logger, settlementService, resultSource)
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
 		case <-leaderboardTicker.C:

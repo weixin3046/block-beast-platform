@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/block-beast/platform/internal/domain/events"
@@ -36,13 +37,16 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 	rows, err := tx.Query(ctx, `
 		SELECT gt.id::text,COALESCE(gt.block_interval,0),gt.rules->>'source',gt.close_before_seconds
 		FROM game_types gt
-		JOIN game_rooms gr ON gr.id=gt.room_id
-		WHERE gt.enabled=true AND gr.enabled=true
+		WHERE gt.enabled=true
+		  AND (
+		    EXISTS(SELECT 1 FROM game_rooms gr WHERE gr.id=gt.room_id AND gr.enabled=true)
+		    OR EXISTS(SELECT 1 FROM game_room_types grt JOIN game_rooms gr ON gr.id=grt.room_id WHERE grt.game_type_id=gt.id AND gr.enabled=true)
+		  )
 		  AND (
 		    (gt.rules->>'source'='tron_hash' AND gt.block_interval > 0)
 		    OR gt.rules->>'source'='okx_kline'
 		  )
-		ORDER BY gr.sort_order,gt.code`)
+		ORDER BY gt.code`)
 	if err != nil {
 		return 0, err
 	}
@@ -211,6 +215,105 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 		return nil, err
 	}
 	return rounds, nil
+}
+
+// HashTrend 返回共享哈希玩法的最近开奖结果。六个赔率房间共用同一期结果，
+// 因此走势图只按 hash_5/hash_9/hash_13/hash_17/hash_19 查询。
+func (repository *PostgresRepository) HashTrend(ctx context.Context, gameType string, limit int) (HashTrend, error) {
+	if limit <= 0 || limit > 200 {
+		return HashTrend{}, ErrInvalidTrendLimit
+	}
+	var exists bool
+	if err := repository.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM game_types WHERE code=$1 AND enabled=true AND rules->>'source'='tron_hash')`, gameType).Scan(&exists); err != nil {
+		return HashTrend{}, err
+	}
+	if !exists {
+		return HashTrend{}, ErrRoundNotFound
+	}
+	rows, err := repository.pool.Query(ctx, `
+		SELECT sequence,outcome,settled_at
+		FROM rounds r JOIN game_types gt ON gt.id=r.game_type_id
+		WHERE gt.code=$1 AND r.status='settled' AND r.outcome IS NOT NULL AND r.settled_at IS NOT NULL
+		ORDER BY r.sequence DESC LIMIT $2`, gameType, limit)
+	if err != nil {
+		return HashTrend{}, err
+	}
+	defer rows.Close()
+	result := HashTrend{GameType: gameType, ServerTime: time.Now().UTC(), Items: make([]HashTrendItem, 0), Summary: HashTrendSummary{DigitOmissions: make(map[string]int, 10)}}
+	for rows.Next() {
+		var sequence int64
+		var raw json.RawMessage
+		var settledAt time.Time
+		if err := rows.Scan(&sequence, &raw, &settledAt); err != nil {
+			return HashTrend{}, err
+		}
+		item, err := parseHashTrendOutcome(sequence, raw, settledAt)
+		if err != nil {
+			return HashTrend{}, err
+		}
+		result.Items = append(result.Items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return HashTrend{}, err
+	}
+	result.Summary = summarizeHashTrend(result.Items)
+	return result, nil
+}
+
+func parseHashTrendOutcome(sequence int64, raw json.RawMessage, settledAt time.Time) (HashTrendItem, error) {
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return HashTrendItem{}, err
+	}
+	item := HashTrendItem{Sequence: sequence, Digit: -1, SettledAt: settledAt}
+	for _, value := range values {
+		switch {
+		case len(value) == 1 && value[0] >= '0' && value[0] <= '9':
+			item.Digit = int(value[0] - '0')
+		case value == "big" || value == "small":
+			item.Size = value
+		case value == "odd" || value == "even":
+			item.Parity = value
+		}
+	}
+	if item.Digit < 0 || item.Size == "" || item.Parity == "" {
+		return HashTrendItem{}, errors.New("settled hash round has invalid outcome")
+	}
+	return item, nil
+}
+
+func summarizeHashTrend(items []HashTrendItem) HashTrendSummary {
+	summary := HashTrendSummary{DigitOmissions: make(map[string]int, 10)}
+	for digit := 0; digit <= 9; digit++ {
+		omission := len(items)
+		for index, item := range items {
+			if item.Digit == digit {
+				omission = index
+				break
+			}
+		}
+		summary.DigitOmissions[fmt.Sprintf("%d", digit)] = omission
+	}
+	if len(items) == 0 {
+		return summary
+	}
+	summary.SizeStreak = HashTrendStreak{Value: items[0].Size}
+	summary.ParityStreak = HashTrendStreak{Value: items[0].Parity}
+	for _, item := range items {
+		if item.Size == summary.SizeStreak.Value {
+			summary.SizeStreak.Count++
+		} else {
+			break
+		}
+	}
+	for _, item := range items {
+		if item.Parity == summary.ParityStreak.Value {
+			summary.ParityStreak.Count++
+		} else {
+			break
+		}
+	}
+	return summary
 }
 
 func (repository *PostgresRepository) State(ctx context.Context, gameType string) (RoundState, error) {

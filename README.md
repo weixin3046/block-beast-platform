@@ -119,6 +119,9 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 | `GET /v1/admin/configs`、`PUT /v1/admin/configs/{key}` | 后台通过版本号安全管理平台配置。仅 admin。 |
 | `GET /v1/admin/audit-logs` | 按操作或管理员筛选不可变审计日志。仅 admin。 |
 | `GET /v1/game-rooms` | 查询启用的游戏房间及房内玩法。 |
+| `GET /v1/hash/menus` | 查询固定六个赔率房间、五个共享哈希区块及按币种配置的三类玩法参数。 |
+| `GET /v1/hash/trends?game_type=hash_5&limit=100` | 查询共享哈希玩法的尾数、大小、单双走势及当前遗漏/连开统计。 |
+| `GET/PUT /v1/admin/hash/config` | 通过版本号原子查询或更新哈希房间名称、顺序、状态、倍率和累计投注上限。仅 operator/admin。 |
 | `GET/POST /v1/admin/game-rooms` | 管理房间数量、名称、分类、排序和状态；代码由后端生成。仅 operator/admin。 |
 | `GET/POST /v1/admin/game-types` | 查询或创建房内玩法与结算规则。仅 operator/admin。 |
 | `PUT /v1/admin/game-types/{game_type_id}` | 修改玩法规则或启停玩法。仅 operator/admin。 |
@@ -128,6 +131,7 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 | `POST /v1/rounds/{round_id}/cancel` | 取消开放或已封盘轮次，并退款全部接受中的投注。仅 operator/admin。 |
 | `POST /v1/bets` | 创建幂等投注，同时扣减余额、写入账本和 outbox。仅本人或 operator/admin。 |
 | `GET /v1/bets/{bet_id}` | 查询投注记录与状态。仅本人或 operator/admin。 |
+| `POST /v1/bets/{bet_id}/cancel` | 玩家在封盘前幂等取消自己的投注并原路退款。 |
 | `GET /v1/wallets/{account_id}?currency={code}` | 查询钱包可用与冻结余额。仅本人或 operator/admin。 |
 | `POST /v1/webhooks/chain/deposits` | 链上充值回调（服务商）：HMAC 签名验签，按事件 ID 与交易哈希幂等入账。 |
 | `POST /v1/withdrawals` | 创建提现申请：校验地址及单笔/每日限额，冻结金额，幂等键防重复。仅本人。 |
@@ -174,7 +178,7 @@ docker compose down --volumes
 
 ## 下一步实现顺序
 
-已实现轮次结算与 Worker 接入：房间按 `game_kind` 分为哈希和 K 线两类。房间和玩法代码均由后端自动生成。TRON 平均 3 秒出块，哈希 N 使用当前高度 H 的下一个 N 整倍数 `(floor(H/N)+1)×N` 作为目标区块，并把该高度直接保存为轮次号，不需要基准区块；K 线房间内可选择 BTC 或 ETH，每分钟使用刚闭合的上一根 1 分钟 K 线开奖。每个房内玩法独立配置赔率、投注限额和提前封盘秒数。Worker 为每个启用玩法自动保持三期未来轮次，并只在开奖时刻到达后结算已封盘（或中断在结算中）的轮次。玩法赔率使用百分整数，194 表示 1.94 倍。玩法规则定义在 `game_types.rules` 中，包括结果池 `outcomes`、派奖倍数 `payout_multiplier`、倍率除数 `payout_divisor`、可选的中奖字段 `match_field` 和开奖个数 `result_count`。`okx_kline` 使用 OKX 业务 WebSocket 的 `candle1m` 作为实时主通道；`tron_hash` 优先使用官方 TronGrid FullNode gRPC 查询区块高度与哈希，并在 gRPC 暂时不可用时回退到官方 HTTP FullNode API。
+已实现轮次结算与 Worker 接入。哈希游戏固定初始化 1.94、1.95、1.96、1.97、1.98、1.985 六个赔率房间；六个房间共同关联 5、9、13、17、19 五套区块轮次，不会生成 30 套重复开奖。TRON 平均 3 秒出块，哈希 N 使用当前高度 H 的下一个 N 整倍数 `(floor(H/N)+1)×N` 作为目标区块，并把该高度直接保存为轮次号。每期提前 5 秒封盘，目标区块到达后立即解析哈希末尾向前遇到的第一个十进制数字并结算，不设置人为结算延迟。竞猜、躲避、上下路赔率与累计上限按房间和币种配置；投注时保存赔率快照，运营后续修改不会影响已接受投注。Worker 为每个区块类型自动保持三期未来轮次。旧 K 线实现暂留代码但不属于本次固定哈希菜单初始化。
 
 玩法规则示例：
 

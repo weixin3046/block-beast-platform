@@ -61,6 +61,10 @@ func (service *Service) SettleDueRounds(ctx context.Context, source ResultSource
 		}
 		outcome, err := source.Outcome(ctx, item.round, rules)
 		if err != nil {
+			// 目标区块尚未产生是正常状态，下个高频周期立即重试，不记录为失败。
+			if errors.Is(err, ErrBlockNotFound) {
+				continue
+			}
 			failures = append(failures, fmt.Errorf("round %s outcome: %w", item.round.RoundID, err))
 			continue
 		}

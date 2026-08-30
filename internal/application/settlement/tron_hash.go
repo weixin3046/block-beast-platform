@@ -48,6 +48,7 @@ func newTronHashResultSourceForEndpoint(endpoint string, apiKey string) TronHash
 // tronExtras 解析 rules.extras 中的 TRON 数据源参数。
 type tronExtras struct {
 	BlockInterval int64 `json:"block_interval"`
+	HashShared    bool  `json:"hash_shared"`
 }
 
 // jsonRPCRequest 是 JSON-RPC 2.0 请求结构。
@@ -104,6 +105,9 @@ func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round
 		return nil, fmt.Errorf("extract digit from block hash: %w", err)
 	}
 
+	if extras.HashShared {
+		return sharedHashOutcome(digit), nil
+	}
 	shape := detectShape(rules.Outcomes, rules.DodgeMode)
 	return mapOutcome(digit, shape), nil
 }

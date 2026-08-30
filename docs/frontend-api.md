@@ -32,8 +32,9 @@
    游戏页同时调用 `GET /v1/rounds/state?game_type={code}` 展示当前轮次封盘倒计时
    与最近一期已结算结果；倒计时始终以响应中的 `bet_closes_at` 为准。使用同一响应的
    `server_time` 与收到响应时的本地时间计算时差，避免设备时钟快慢造成 1–2 秒误差。
-3. 调用 `POST /v1/bets` 创建投注，`currency` 可传 `USDT`、`POINTS`（宝石）、`JADE`（玉石）或 `ORIGIN_STONE`（源石）。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
+3. 调用 `POST /v1/bets` 创建投注。共享哈希轮次还必须提交 `game_room_id` 和 `play_mode`：竞猜/躲避使用 `selection={"pick":"0"}` 至 `{"pick":"9"}`，上下路使用 `big`、`small`、`odd`、`even`。`currency` 可传 `USDT`、`POINTS`（宝石）、`JADE`（玉石）或 `ORIGIN_STONE`（源石）。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
 4. 使用 `GET /v1/bets/{betID}` 轮询投注状态；当前状态有 `accepted`、`won`、`lost` 与 `refunded`。
+   玩家在 `bet_closes_at` 前可调用 `POST /v1/bets/{betID}/cancel` 取消自己的投注并原路退款；封盘后返回 409。
 5. 使用 `GET /v1/wallets/{accountID}?currency=USDT` 查询单币种余额，或 `GET /v1/wallets/{accountID}/all` 一次拉取全部币种。
 6. 体力只通过参与平台活动任务获得，不再提供每日签到领取体力接口。参加活动时调用 `POST /v1/stamina/consume` 扣体力，`activity_id` 由活动方提供；体力不足返回 409。
 7. 大厅调用 `GET /v1/announcements` 获取当前时间窗口内启用的公告；该接口无需登录。
@@ -77,16 +78,21 @@ const remainingMs = () => Math.max(
 409，后台应重新读取后让操作者确认，不得静默覆盖。配置只保存非敏感业务 JSON，
 API 密钥、密码和令牌必须继续使用环境变量或密钥管理系统。
 
-玩家通过 `GET /v1/game-rooms` 动态读取启用房间及房内玩法。运营后台通过
-`GET/POST /v1/admin/game-rooms` 和 `PUT /v1/admin/game-rooms/{id}` 管理
-房间数量、名称、分类、顺序与启停状态。房间代码由后端自动生成。通过
-`GET/POST /v1/admin/game-types` 创建房内玩法，通过
-`PUT /v1/admin/game-types/{id}` 修改玩法、独立赔率和区块间隔；玩法代码同样
-由后端自动生成。TRON 平均每 3 秒一个区块，Worker 根据当前区块高度 H 计算
-`(floor(H/N)+1)×N` 作为哈希 N 的下一目标块，并把目标块高度直接保存为轮次号，
-不配置基准区块。每个玩法按自己的 `close_before_seconds` 提前封盘。
-Worker 会为每个启用玩法自动保持三期未来轮次；`POST /v1/admin/rounds`
-仅作为人工补轮入口。
+玩家通过 `GET /v1/hash/menus` 一次读取固定六个赔率房间、每个房间相同的
+5/9/13/17/19 区块菜单，以及当前币种的竞猜、躲避、上下路倍率和累计上限。
+运营后台使用 `GET /v1/admin/hash/config` 读取完整矩阵，并通过
+`PUT /v1/admin/hash/config` 携带 `expected_version` 原子保存。六个房间及五个共享
+区块关系固定，只允许修改名称、排序、启停状态和各币种参数。
+
+走势图调用 `GET /v1/hash/trends?game_type=hash_5&limit=100`。返回结果按目标区块
+高度倒序排列，每条包含 `digit`、`size`、`parity` 和 `settled_at`；`summary`
+同时提供数字 0–9 的当前遗漏期数，以及最新大小、单双的连续出现次数。六个赔率
+房间共用走势图，切换赔率房间时不需要重新请求不同数据。
+
+TRON 平均每 3 秒一个区块，Worker 根据当前区块高度 H 计算
+`(floor(H/N)+1)×N` 作为下一目标块并把高度保存为轮次号。每期提前 5 秒封盘；
+目标区块实际取得后立即结算，不设置 1 秒或其他人为结算延迟。六个房间使用同一
+目标区块和开奖结果，赔率在投注成交时快照，因此后台修改参数不会影响历史投注。
 
 ## TypeScript 示例
 

@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -11,6 +12,29 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestHashTrendParsingAndSummary(t *testing.T) {
+	now := time.Now().UTC()
+	latest, err := parseHashTrendOutcome(105, json.RawMessage(`["5","big","odd"]`), now)
+	if err != nil || latest.Digit != 5 || latest.Size != "big" || latest.Parity != "odd" {
+		t.Fatalf("latest = %+v, err = %v", latest, err)
+	}
+	items := []HashTrendItem{
+		latest,
+		{Sequence: 100, Digit: 5, Size: "big", Parity: "even", SettledAt: now.Add(-time.Minute)},
+		{Sequence: 95, Digit: 3, Size: "small", Parity: "odd", SettledAt: now.Add(-2 * time.Minute)},
+	}
+	summary := summarizeHashTrend(items)
+	if summary.DigitOmissions["5"] != 0 || summary.DigitOmissions["3"] != 2 || summary.DigitOmissions["9"] != 3 {
+		t.Fatalf("omissions = %+v", summary.DigitOmissions)
+	}
+	if summary.SizeStreak.Value != "big" || summary.SizeStreak.Count != 2 || summary.ParityStreak.Value != "odd" || summary.ParityStreak.Count != 1 {
+		t.Fatalf("summary = %+v", summary)
+	}
+	if _, err := parseHashTrendOutcome(1, json.RawMessage(`["5"]`), now); err == nil {
+		t.Fatal("incomplete hash outcome must be rejected")
+	}
+}
 
 func TestNextTronTargetUsesNextIntervalMultiple(t *testing.T) {
 	tests := []struct {

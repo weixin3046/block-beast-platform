@@ -13,6 +13,7 @@ type Event struct {
 
 const (
 	BetPlaced           = "game.bet.placed"
+	BetCancelled        = "game.bet.cancelled"
 	RoundClosed         = "game.round.closed"
 	RoundSettling       = "game.round.settling"
 	RoundSettled        = "game.round.settled"

@@ -26,12 +26,59 @@ type GameRoomService interface {
 	UpdateGameRoom(ctx context.Context, id string, input operations.GameRoomInput) (operations.GameRoom, error)
 }
 
+type HashConfigService interface {
+	GetHashConfig(ctx context.Context, enabledOnly bool) (operations.HashConfig, error)
+	UpdateHashConfig(ctx context.Context, input operations.HashConfigUpdate) (operations.HashConfig, error)
+}
+
 func WithGameAdmin(service GameAdminService) Option {
 	return func(server *Server) { server.gameAdmin = service }
 }
 
 func WithGameRooms(service GameRoomService) Option {
 	return func(server *Server) { server.gameRoomAdmin = service }
+}
+
+func WithHashConfig(service HashConfigService) Option {
+	return func(server *Server) { server.hashConfig = service }
+}
+
+func (server *Server) hashMenus(writer http.ResponseWriter, request *http.Request) {
+	item, err := server.hashConfig.GetHashConfig(request.Context(), true)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list hash menus"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, item)
+}
+
+func (server *Server) adminHashConfig(writer http.ResponseWriter, request *http.Request) {
+	item, err := server.hashConfig.GetHashConfig(request.Context(), false)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to load hash configuration"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, item)
+}
+
+func (server *Server) updateHashConfig(writer http.ResponseWriter, request *http.Request) {
+	var input operations.HashConfigUpdate
+	if err := decodeStrictJSON(writer, request, &input); err != nil {
+		return
+	}
+	item, err := server.hashConfig.UpdateHashConfig(request.Context(), input)
+	switch {
+	case errors.Is(err, operations.ErrInvalidHashConfig):
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, operations.ErrHashConfigConflict):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to update hash configuration"})
+	default:
+		claims, _ := ClaimsFromContext(request.Context())
+		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "hash_config.update", TargetType: "hash_config", TargetID: "singleton", Payload: map[string]any{"version": item.Version}})
+		writeJSON(writer, http.StatusOK, item)
+	}
 }
 
 func (server *Server) gameRooms(writer http.ResponseWriter, request *http.Request) {
