@@ -14,17 +14,26 @@ import (
 )
 
 type MonitorBet struct {
-	BetID         string          `json:"bet_id"`
-	UserID        int64           `json:"user_id"`
-	LoginName     string          `json:"login_name"`
-	DisplayName   string          `json:"display_name"`
-	GameType      string          `json:"game_type"`
-	RoundSequence int64           `json:"round_sequence"`
-	Currency      string          `json:"currency"`
-	Selection     json.RawMessage `json:"selection"`
-	StakeMinor    int64           `json:"stake_minor"`
-	Status        string          `json:"status"`
-	CreatedAt     time.Time       `json:"created_at"`
+	BetID            string          `json:"bet_id"`
+	UserID           int64           `json:"user_id"`
+	LoginName        string          `json:"login_name"`
+	DisplayName      string          `json:"display_name"`
+	IsVirtual        bool            `json:"is_virtual"`
+	GameType         string          `json:"game_type"`
+	GameName         string          `json:"game_name"`
+	RoundSequence    int64           `json:"round_sequence"`
+	Currency         string          `json:"currency"`
+	GameRoomID       string          `json:"game_room_id,omitempty"`
+	GameRoomCode     string          `json:"game_room_code,omitempty"`
+	GameRoomName     string          `json:"game_room_name,omitempty"`
+	PlayMode         string          `json:"play_mode,omitempty"`
+	Selection        json.RawMessage `json:"selection"`
+	StakeMinor       int64           `json:"stake_minor"`
+	PayoutMultiplier int64           `json:"payout_multiplier"`
+	PayoutDivisor    int64           `json:"payout_divisor"`
+	PayoutRate       string          `json:"payout_rate"`
+	Status           string          `json:"status"`
+	CreatedAt        time.Time       `json:"created_at"`
 }
 type MonitorRound struct {
 	GameType    string    `json:"game_type"`
@@ -56,16 +65,30 @@ func (s *Service) CurrentBets(ctx context.Context, userQuery, gameType string, l
 		limit = 100
 	}
 	result := []MonitorBet{}
-	rows, err := s.pool.Query(ctx, `SELECT b.id::text,u.public_id,COALESCE(u.login_name,''),u.display_name,gt.code,r.sequence,w.currency,b.selection,b.stake_minor,b.status,b.created_at FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id WHERE b.status='accepted' AND ($1='' OR gt.code=$1) AND ($2='' OR u.public_id::text=$2 OR u.login_name ILIKE '%'||$2||'%') ORDER BY b.created_at DESC LIMIT $3`, gameType, userQuery, limit)
+	rows, err := s.pool.Query(ctx, `
+		SELECT b.id::text,u.public_id,COALESCE(u.login_name,''),u.display_name,u.is_virtual,
+			gt.code,gt.name,r.sequence,w.currency,COALESCE(b.game_room_id::text,''),
+			COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),b.selection,b.stake_minor,
+			COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),b.status,b.created_at
+		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
+		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
+		LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
+		WHERE b.status='accepted' AND ($1='' OR gt.code=$1)
+			AND ($2='' OR u.public_id::text=$2 OR u.login_name ILIKE '%'||$2||'%')
+		ORDER BY b.created_at DESC,b.id DESC LIMIT $3`, gameType, userQuery, limit)
 	if err != nil {
 		return result, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var v MonitorBet
-		if err := rows.Scan(&v.BetID, &v.UserID, &v.LoginName, &v.DisplayName, &v.GameType, &v.RoundSequence, &v.Currency, &v.Selection, &v.StakeMinor, &v.Status, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.BetID, &v.UserID, &v.LoginName, &v.DisplayName, &v.IsVirtual,
+			&v.GameType, &v.GameName, &v.RoundSequence, &v.Currency, &v.GameRoomID, &v.GameRoomCode,
+			&v.GameRoomName, &v.PlayMode, &v.Selection, &v.StakeMinor, &v.PayoutMultiplier,
+			&v.PayoutDivisor, &v.Status, &v.CreatedAt); err != nil {
 			return result, err
 		}
+		v.PayoutRate = payoutRate(v.PayoutMultiplier, v.PayoutDivisor)
 		result = append(result, v)
 	}
 	return result, rows.Err()
@@ -280,13 +303,25 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	if _, err = tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='player'`, id); err != nil {
 		return VirtualAccount{}, err
 	}
-	for _, currency := range []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA", "USDT_STAMINA", "JADE_STAMINA", "ORIGIN_STONE_STAMINA"} {
-		amount := in.InitialBalances[currency]
+	if _, err = tx.Exec(ctx, `INSERT INTO wallets(id,user_id,currency) SELECT gen_random_uuid(),$1,code FROM currencies WHERE enabled AND create_on_registration`, id); err != nil {
+		return VirtualAccount{}, err
+	}
+	for currency, amount := range in.InitialBalances {
 		if amount < 0 {
 			return VirtualAccount{}, ErrInvalidVirtualAccount
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,$3,$4)`, uuid.NewString(), id, currency, amount); err != nil {
+		var walletID string
+		err = tx.QueryRow(ctx, `INSERT INTO wallets(id,user_id,currency,available_minor) SELECT gen_random_uuid(),$1,code,$3 FROM currencies WHERE code=$2 AND enabled ON CONFLICT(user_id,currency) DO UPDATE SET available_minor=EXCLUDED.available_minor RETURNING id`, id, currency, amount).Scan(&walletID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return VirtualAccount{}, ErrInvalidVirtualAccount
+		}
+		if err != nil {
 			return VirtualAccount{}, err
+		}
+		if amount > 0 {
+			if _, err = tx.Exec(ctx, `INSERT INTO ledger_entries(id,wallet_id,business_type,business_id,entry_type,amount_minor,balance_after_minor) VALUES(gen_random_uuid(),$1,'virtual_initial_balance',$2,'virtual_initial_balance',$3,$3)`, walletID, id, amount); err != nil {
+				return VirtualAccount{}, err
+			}
 		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO virtual_account_automations(user_id) VALUES($1)`, id); err != nil {

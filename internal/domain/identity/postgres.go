@@ -170,7 +170,7 @@ func (repository *PostgresRepository) UpdateSecondaryPasswordHash(ctx context.Co
 
 // RegisterPasswordUser 在单个事务中创建用户、密码凭证、指定角色和一组货币的
 // 零余额钱包。登录名冲突时返回 ErrLoginNameTaken。
-func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, currencies []string, invitationCode int64) (string, error) {
+func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, loginName string, displayName string, passwordHash string, roleCode string, invitationCode int64) (string, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -219,10 +219,8 @@ func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, 
 	if _, err := tx.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`, userID, roleID); err != nil {
 		return "", err
 	}
-	for _, currency := range currencies {
-		if _, err := tx.Exec(ctx, `INSERT INTO wallets (id, user_id, currency) VALUES ($1, $2, $3)`, uuid.NewString(), userID, currency); err != nil {
-			return "", err
-		}
+	if _, err := tx.Exec(ctx, `INSERT INTO wallets (id,user_id,currency) SELECT gen_random_uuid(),$1,code FROM currencies WHERE enabled AND create_on_registration`, userID); err != nil {
+		return "", err
 	}
 	userLabel := strings.ReplaceAll(userID, "-", "_")
 	parentLabel := strings.ReplaceAll(parentUserID, "-", "_")

@@ -139,6 +139,7 @@ func (server *Server) reviewPointWithdrawal(writer http.ResponseWriter, request 
 // TaskService 定义参与活动产生的投注任务能力。
 type TaskService interface {
 	BetTasks(ctx context.Context, userID string) ([]task.BetTask, error)
+	ClaimBetTask(ctx context.Context, userID, configID string) (task.BetTaskClaim, error)
 	BetTaskConfigs(ctx context.Context) ([]task.BetTaskConfig, error)
 	ReplaceBetTaskConfigs(ctx context.Context, items []task.BetTaskConfig) ([]task.BetTaskConfig, error)
 }
@@ -164,8 +165,8 @@ func (server *Server) adminCredit(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if input.UserID == "" || input.Currency == "" || input.AmountMinor <= 0 || input.RequestID == "" {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "user_id, currency, amount_minor, request_id are required"})
+	if input.UserID == "" || input.Currency == "" || input.Amount == "" || input.RequestID == "" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "user_id, currency, amount, request_id are required"})
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
@@ -195,7 +196,7 @@ func (server *Server) adminCredit(writer http.ResponseWriter, request *http.Requ
 		Action:      "admin.credit",
 		TargetType:  "user",
 		TargetID:    publicUserID,
-		Payload:     map[string]any{"currency": input.Currency, "amount_minor": input.AmountMinor, "credited": result.Credited},
+		Payload:     map[string]any{"currency": input.Currency, "amount": input.Amount, "amount_minor": result.AmountMinor, "credited": result.Credited},
 	})
 	server.writePublicJSON(writer, request, http.StatusOK, result)
 }

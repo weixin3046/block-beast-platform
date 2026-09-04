@@ -9,11 +9,23 @@ import (
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type fixedResultSource struct {
 	outcome []string
+}
+
+type taskHookSpy struct {
+	calls      int
+	totalStake int64
+}
+
+func (hook *taskHookSpy) OnBetSettled(_ context.Context, _ pgx.Tx, _, _ string, stakeMinor int64, _ time.Time) error {
+	hook.calls++
+	hook.totalStake += stakeMinor
+	return nil
 }
 
 func (source fixedResultSource) Outcome(_ context.Context, _ game.Round, _ game.Rules) ([]string, error) {
@@ -72,7 +84,8 @@ func TestSettleDueRoundsSettlesClosedRoundsByRules(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, accountID)
 	})
 
-	service := NewService(pool)
+	taskHook := &taskHookSpy{}
+	service := NewService(pool).WithTaskHook(taskHook)
 	source := fixedResultSource{outcome: []string{"red"}}
 	settled, err := service.SettleDueRounds(ctx, source, 100)
 	if err != nil {
@@ -85,9 +98,13 @@ func TestSettleDueRoundsSettlesClosedRoundsByRules(t *testing.T) {
 	if result.WonBetCount != 1 || result.LostBetCount != 1 || result.PayoutMinor != 2000 {
 		t.Fatalf("result = %+v, want 1 won / 1 lost / payout 2000", result)
 	}
+	if taskHook.calls != 2 || taskHook.totalStake != 1500 {
+		t.Fatalf("task hook calls = %d, total stake = %d", taskHook.calls, taskHook.totalStake)
+	}
 
 	var availableMinor int64
 	var wonStatus, lostStatus, roundStatus string
+	var wonBalanceAfterSettlement, lostBalanceAfterSettlement *int64
 	if err := pool.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1`, walletID).Scan(&availableMinor); err != nil {
 		t.Fatalf("read wallet: %v", err)
 	}
@@ -97,11 +114,27 @@ func TestSettleDueRoundsSettlesClosedRoundsByRules(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT status FROM bets WHERE id = $1`, lostBetID).Scan(&lostStatus); err != nil {
 		t.Fatalf("read losing bet: %v", err)
 	}
+	if err := pool.QueryRow(ctx, `SELECT balance_after_settlement_minor FROM bets WHERE id = $1`, wonBetID).Scan(&wonBalanceAfterSettlement); err != nil {
+		t.Fatalf("read winning bet settlement balance: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT balance_after_settlement_minor FROM bets WHERE id = $1`, lostBetID).Scan(&lostBalanceAfterSettlement); err != nil {
+		t.Fatalf("read losing bet settlement balance: %v", err)
+	}
 	if err := pool.QueryRow(ctx, `SELECT status FROM rounds WHERE id = $1`, roundID).Scan(&roundStatus); err != nil {
 		t.Fatalf("read round: %v", err)
 	}
 	if availableMinor != 2000 || wonStatus != "won" || lostStatus != "lost" || roundStatus != "settled" {
 		t.Fatalf("wallet = %d, won bet = %q, lost bet = %q, round = %q", availableMinor, wonStatus, lostStatus, roundStatus)
+	}
+	if wonBalanceAfterSettlement == nil || lostBalanceAfterSettlement == nil {
+		t.Fatalf("settlement balances must both be recorded: won=%v lost=%v", wonBalanceAfterSettlement, lostBalanceAfterSettlement)
+	}
+	wantLostBalanceAfterSettlement := int64(0)
+	if wonBetID < lostBetID {
+		wantLostBalanceAfterSettlement = 2000
+	}
+	if *wonBalanceAfterSettlement != 2000 || *lostBalanceAfterSettlement != wantLostBalanceAfterSettlement {
+		t.Fatalf("settlement balances: won=%d lost=%d, want won=2000 lost=%d", *wonBalanceAfterSettlement, *lostBalanceAfterSettlement, wantLostBalanceAfterSettlement)
 	}
 	assertCount(t, ctx, pool, `SELECT count(*) FROM ledger_entries WHERE wallet_id = $1 AND entry_type = 'settlement_credit'`, walletID, 1)
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = $2`, []any{roundID, events.RoundSettled}, 1)

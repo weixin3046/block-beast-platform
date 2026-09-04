@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/block-beast/platform/internal/platform/usermessage"
 	"github.com/google/uuid"
 )
 
@@ -70,6 +71,9 @@ func validTopic(topic string) bool {
 }
 
 func encodeMessage(message serverMessage) []byte {
+	if message.Error != "" {
+		message.Error = usermessage.Chinese(message.Error)
+	}
 	message.Version = ProtocolVersion
 	message.OccurredAt = time.Now().UTC()
 	payload, _ := json.Marshal(message)

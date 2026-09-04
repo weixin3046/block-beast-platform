@@ -28,7 +28,7 @@ func (service *Service) SendApprovedWithdrawal(ctx context.Context, withdrawalID
 	var chainTokenID int64
 	var decimals int
 	if err := service.pool.QueryRow(ctx, `
-		SELECT provider_chain_token_id, token_decimals
+		SELECT provider_chain_token_id, platform_decimals
 		FROM withdrawals WHERE id=$1`, withdrawalID).Scan(&chainTokenID, &decimals); err != nil {
 		return err
 	}

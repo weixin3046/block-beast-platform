@@ -35,8 +35,12 @@ func (server *Server) updateCurrentProfile(writer http.ResponseWriter, request *
 	}
 	claims, _ := ClaimsFromContext(request.Context())
 	user, err := server.userAdmin.UpdateCurrentProfile(request.Context(), claims.Subject, input.DisplayName, input.AvatarURL)
-	if errors.Is(err, operations.ErrInvalidProfile) {
+	if errors.Is(err, operations.ErrInvalidProfile) || errors.Is(err, operations.ErrInvalidAvatar) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, operations.ErrUserNotFound) {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
 	if err != nil {
@@ -99,6 +103,12 @@ func (server *Server) setSecondaryPassword(writer http.ResponseWriter, request *
 	var err error
 	if input.CurrentSecondaryPassword != "" {
 		err = server.secondaryPasswords.ChangeSecondaryPassword(request.Context(), claims.Subject, input.CurrentSecondaryPassword, input.SecondaryPassword)
+		// The stored state is authoritative. A client may still send the current-password
+		// field while the user is performing the first setup; tolerate that stale UI state
+		// instead of turning ErrSecondaryPasswordNotSet into an internal server error.
+		if errors.Is(err, auth.ErrSecondaryPasswordNotSet) {
+			err = server.secondaryPasswords.SetSecondaryPassword(request.Context(), claims.Subject, "", input.SecondaryPassword)
+		}
 	} else {
 		err = server.secondaryPasswords.SetSecondaryPassword(request.Context(), claims.Subject, "", input.SecondaryPassword)
 	}
@@ -114,7 +124,12 @@ func (server *Server) setSecondaryPassword(writer http.ResponseWriter, request *
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}
+	if errors.Is(err, auth.ErrSecondaryPasswordNotSet) {
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
 	if err != nil {
+		server.logger.Error("unable to update secondary password", "user_id", claims.Subject, "error", err)
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to update secondary password"})
 		return
 	}

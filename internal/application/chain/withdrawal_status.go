@@ -60,7 +60,7 @@ func (service *Service) ApplyWithdrawalStatus(ctx context.Context, input Withdra
 		if _, err := tx.Exec(ctx, `UPDATE withdrawals SET status='confirmed', tx_hash=NULLIF($2, ''), failure_reason=NULL, provider_fee_minor=$3 WHERE id=$1`, withdrawalID, input.TxHash, feeMinor); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor) VALUES ($1,$2,'withdrawal',$3,'withdrawal_debit',$4,$5)`, uuid.NewString(), walletID, withdrawalID, -amount, available); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor,available_delta_minor,frozen_delta_minor) VALUES ($1,$2,'withdrawal',$3,'withdrawal_debit',$4,$5,0,$4)`, uuid.NewString(), walletID, withdrawalID, -amount, available); err != nil {
 			return err
 		}
 	} else {
@@ -71,7 +71,7 @@ func (service *Service) ApplyWithdrawalStatus(ctx context.Context, input Withdra
 		if _, err := tx.Exec(ctx, `UPDATE withdrawals SET status='failed', tx_hash=NULLIF($2, ''), failure_reason=$3 WHERE id=$1`, withdrawalID, input.TxHash, input.FailureReason); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor) VALUES ($1,$2,'withdrawal',$3,'withdrawal_unfreeze',$4,$5)`, uuid.NewString(), walletID, withdrawalID, amount, available); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor,frozen_delta_minor) VALUES ($1,$2,'withdrawal',$3,'withdrawal_unfreeze',$4,$5,-$4::bigint)`, uuid.NewString(), walletID, withdrawalID, amount, available); err != nil {
 			return err
 		}
 	}

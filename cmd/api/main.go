@@ -17,6 +17,7 @@ import (
 	"github.com/block-beast/platform/internal/application/chain"   // 链上充提应用服务
 	"github.com/block-beast/platform/internal/application/chat"
 	"github.com/block-beast/platform/internal/application/credit" // 积分/体力充值应用服务
+	"github.com/block-beast/platform/internal/application/currency"
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
@@ -59,10 +60,11 @@ func main() {
 	defer pool.Close()
 	creditService := credit.NewService(pool)
 	taskService := task.NewService(pool, creditService)
-	bettingService := betting.NewService(pool).WithTaskHook(taskService)
+	bettingService := betting.NewService(pool)
 	cancellationService := settlement.NewService(pool)
 	identityRepository := identity.NewPostgresRepository(pool)
 	options := []httpapi.Option{httpapi.WithAudit(audit.NewService(pool))}
+	options = append(options, httpapi.WithCurrencies(currency.NewService(pool)))
 	if cfg.AuthTokenSecret == "" {
 		logger.Warn("AUTH_TOKEN_SECRET is not set; business endpoints are unauthenticated")
 	} else {

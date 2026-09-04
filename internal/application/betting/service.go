@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/big"
 	"strings"
 	"time"
 
@@ -39,52 +40,81 @@ type PlaceBetRequest struct {
 }
 
 type PlacedBet struct {
-	BetID           string          `json:"bet_id"`
-	ClientRequestID string          `json:"client_request_id"`
-	RoundID         string          `json:"round_id"`
-	AccountID       string          `json:"account_id"`
-	Currency        string          `json:"currency"`
-	GameRoomID      string          `json:"game_room_id,omitempty"`
-	PlayMode        string          `json:"play_mode,omitempty"`
-	Selection       json.RawMessage `json:"selection"`
-	StakeMinor      int64           `json:"stake_minor"`
-	Status          string          `json:"status"`
-	PayoutMinor     int64           `json:"payout_minor"`
-	PlacedAt        time.Time       `json:"placed_at"`
-	SettledAt       *time.Time      `json:"settled_at,omitempty"`
+	BetID                       string          `json:"bet_id"`
+	ClientRequestID             string          `json:"client_request_id"`
+	RoundID                     string          `json:"round_id"`
+	AccountID                   string          `json:"account_id"`
+	GameType                    string          `json:"game_type"`
+	GameName                    string          `json:"game_name"`
+	RoundSequence               int64           `json:"round_sequence"`
+	Currency                    string          `json:"currency"`
+	GameRoomID                  string          `json:"game_room_id,omitempty"`
+	GameRoomCode                string          `json:"game_room_code,omitempty"`
+	GameRoomName                string          `json:"game_room_name,omitempty"`
+	PlayMode                    string          `json:"play_mode,omitempty"`
+	Selection                   json.RawMessage `json:"selection"`
+	StakeMinor                  int64           `json:"stake_minor"`
+	PayoutMultiplier            int64           `json:"payout_multiplier"`
+	PayoutDivisor               int64           `json:"payout_divisor"`
+	PayoutRate                  string          `json:"payout_rate"`
+	Status                      string          `json:"status"`
+	PayoutMinor                 int64           `json:"payout_minor"`
+	BalanceAfterBetMinor        *int64          `json:"balance_after_bet_minor,omitempty"`
+	BalanceAfterRefundMinor     *int64          `json:"balance_after_refund_minor,omitempty"`
+	BalanceAfterSettlementMinor *int64          `json:"balance_after_settlement_minor,omitempty"`
+	PlacedAt                    time.Time       `json:"placed_at"`
+	SettledAt                   *time.Time      `json:"settled_at,omitempty"`
 }
 
-// BetTaskHook 在积分投注成交后累计任务进度（如投注达标送体力），可为 nil。
-// 在投注事务内调用，返回错误则整笔投注回滚。
-type BetTaskHook interface {
-	OnBetPlaced(ctx context.Context, tx pgx.Tx, userID, currency string, stakeMinor int64) error
+type PublicPlayer struct {
+	UserID      int64  `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+	IsVirtual   bool   `json:"is_virtual"`
+}
+
+type PublicBet struct {
+	BetID            string          `json:"bet_id"`
+	Player           PublicPlayer    `json:"player"`
+	RoundID          string          `json:"round_id"`
+	GameType         string          `json:"game_type"`
+	GameName         string          `json:"game_name"`
+	RoundSequence    int64           `json:"round_sequence"`
+	Currency         string          `json:"currency"`
+	GameRoomID       string          `json:"game_room_id,omitempty"`
+	GameRoomCode     string          `json:"game_room_code,omitempty"`
+	GameRoomName     string          `json:"game_room_name,omitempty"`
+	PlayMode         string          `json:"play_mode,omitempty"`
+	Selection        json.RawMessage `json:"selection"`
+	StakeMinor       int64           `json:"stake_minor"`
+	PayoutMultiplier int64           `json:"payout_multiplier"`
+	PayoutDivisor    int64           `json:"payout_divisor"`
+	PayoutRate       string          `json:"payout_rate"`
+	Status           string          `json:"status"`
+	PayoutMinor      int64           `json:"payout_minor"`
+	PlacedAt         time.Time       `json:"placed_at"`
+	SettledAt        *time.Time      `json:"settled_at,omitempty"`
+}
+
+type PublicBetQuery struct {
+	GameType   string
+	Currency   string
+	Status     string
+	PlayerType string
+	Limit      int
+	Offset     int
 }
 
 type Service struct {
-	pool     *pgxpool.Pool
-	taskHook BetTaskHook
+	pool *pgxpool.Pool
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// WithTaskHook 装配投注任务钩子；未装配时跳过任务进度累计。
-func (service *Service) WithTaskHook(hook BetTaskHook) *Service {
-	service.taskHook = hook
-	return service
-}
-
 func (service *Service) Find(ctx context.Context, betID string) (PlacedBet, error) {
-	var bet PlacedBet
-	err := service.pool.QueryRow(ctx, `
-		SELECT bets.id, bets.client_request_id, bets.round_id, bets.user_id, wallets.currency,
-			COALESCE(bets.game_room_id::text,''),COALESCE(bets.play_mode,''),
-			bets.selection, bets.stake_minor, bets.status, bets.payout_minor, bets.created_at, bets.settled_at
-		FROM bets
-		JOIN wallets ON wallets.id = bets.wallet_id
-		WHERE bets.id = $1`, betID).
-		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.GameRoomID, &bet.PlayMode, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PayoutMinor, &bet.PlacedAt, &bet.SettledAt)
+	bet, err := scanPlacedBet(service.pool.QueryRow(ctx, placedBetSelect+` WHERE b.id=$1`, betID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, ErrBetNotFound
 	}
@@ -94,17 +124,20 @@ func (service *Service) Find(ctx context.Context, betID string) (PlacedBet, erro
 	return bet, nil
 }
 
-func (service *Service) ListUserBets(ctx context.Context, userID, status string, limit int) ([]PlacedBet, error) {
+func (service *Service) ListUserBets(ctx context.Context, userID, status string, limit, offset int) ([]PlacedBet, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	query := `SELECT bets.id,bets.client_request_id,bets.round_id,bets.user_id,wallets.currency,COALESCE(bets.game_room_id::text,''),COALESCE(bets.play_mode,''),bets.selection,bets.stake_minor,bets.status,bets.payout_minor,bets.created_at,bets.settled_at FROM bets JOIN wallets ON wallets.id=bets.wallet_id WHERE bets.user_id=$1`
-	args := []any{userID, limit}
+	if offset < 0 {
+		offset = 0
+	}
+	query := placedBetSelect + ` WHERE b.user_id=$1`
+	args := []any{userID, limit, offset}
 	if status != "" {
-		query += ` AND bets.status=$3`
+		query += ` AND b.status=$4`
 		args = append(args, status)
 	}
-	query += ` ORDER BY bets.created_at DESC LIMIT $2`
+	query += ` ORDER BY b.created_at DESC,b.id DESC LIMIT $2 OFFSET $3`
 	rows, err := service.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -112,13 +145,119 @@ func (service *Service) ListUserBets(ctx context.Context, userID, status string,
 	defer rows.Close()
 	items := make([]PlacedBet, 0)
 	for rows.Next() {
-		var bet PlacedBet
-		if err := rows.Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.GameRoomID, &bet.PlayMode, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PayoutMinor, &bet.PlacedAt, &bet.SettledAt); err != nil {
+		bet, err := scanPlacedBet(rows)
+		if err != nil {
 			return nil, err
 		}
 		items = append(items, bet)
 	}
 	return items, rows.Err()
+}
+
+const placedBetSelect = `
+	SELECT b.id::text,b.client_request_id,b.round_id::text,b.user_id::text,
+		gt.code,gt.name,r.sequence,w.currency,
+		COALESCE(b.game_room_id::text,''),COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),
+		b.selection,b.stake_minor,COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
+		b.status,b.payout_minor,debit.balance_after_minor,b.balance_after_settlement_minor,b.created_at,b.settled_at
+	FROM bets b
+	JOIN wallets w ON w.id=b.wallet_id
+	JOIN rounds r ON r.id=b.round_id
+	JOIN game_types gt ON gt.id=r.game_type_id
+	LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
+	LEFT JOIN ledger_entries debit ON debit.wallet_id=b.wallet_id AND debit.business_type='bet'
+		AND debit.business_id=b.id::text AND debit.entry_type='bet_debit'`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPlacedBet(row rowScanner) (PlacedBet, error) {
+	var bet PlacedBet
+	err := row.Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID,
+		&bet.GameType, &bet.GameName, &bet.RoundSequence, &bet.Currency,
+		&bet.GameRoomID, &bet.GameRoomCode, &bet.GameRoomName, &bet.PlayMode,
+		&bet.Selection, &bet.StakeMinor, &bet.PayoutMultiplier, &bet.PayoutDivisor,
+		&bet.Status, &bet.PayoutMinor, &bet.BalanceAfterBetMinor, &bet.BalanceAfterSettlementMinor, &bet.PlacedAt, &bet.SettledAt)
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	bet.PayoutRate = formatPayoutRate(bet.PayoutMultiplier, bet.PayoutDivisor)
+	return bet, nil
+}
+
+func formatPayoutRate(multiplier, divisor int64) string {
+	if multiplier <= 0 || divisor <= 0 {
+		return ""
+	}
+	value := new(big.Rat).SetFrac64(multiplier, divisor).FloatString(6)
+	value = strings.TrimRight(value, "0")
+	return strings.TrimRight(value, ".")
+}
+
+func (service *Service) ListPublicBets(ctx context.Context, query PublicBetQuery) ([]PublicBet, error) {
+	if query.Limit <= 0 || query.Limit > 100 {
+		query.Limit = 50
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+	query.Currency = strings.ToUpper(strings.TrimSpace(query.Currency))
+	query.GameType = strings.TrimSpace(query.GameType)
+	query.Status = strings.TrimSpace(query.Status)
+	query.PlayerType = strings.TrimSpace(query.PlayerType)
+	if query.PlayerType == "" {
+		query.PlayerType = "all"
+	}
+	rows, err := service.pool.Query(ctx, publicBetSelect+`
+		WHERE ($1='' OR gt.code=$1)
+			AND ($2='' OR w.currency=$2)
+			AND ($3='' OR b.status=$3)
+			AND ($4='all' OR ($4='real' AND u.is_virtual=false) OR ($4='virtual' AND u.is_virtual=true))
+		ORDER BY b.created_at DESC,b.id DESC
+		LIMIT $5 OFFSET $6`, query.GameType, query.Currency, query.Status, query.PlayerType, query.Limit, query.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]PublicBet, 0)
+	for rows.Next() {
+		item, err := scanPublicBet(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+const publicBetSelect = `
+		SELECT b.id::text,u.public_id,u.display_name,
+			CASE WHEN u.avatar_url LIKE 'uploads/%'
+				THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '')
+				ELSE COALESCE(u.avatar_url,'') END,u.is_virtual,
+			b.round_id::text,gt.code,gt.name,r.sequence,w.currency,
+			COALESCE(b.game_room_id::text,''),COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),
+			b.selection,b.stake_minor,COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
+			b.status,b.payout_minor,b.created_at,b.settled_at
+		FROM bets b
+		JOIN users u ON u.id=b.user_id
+		JOIN wallets w ON w.id=b.wallet_id
+		JOIN rounds r ON r.id=b.round_id
+		JOIN game_types gt ON gt.id=r.game_type_id
+		LEFT JOIN game_rooms gr ON gr.id=b.game_room_id`
+
+func scanPublicBet(row rowScanner) (PublicBet, error) {
+	var item PublicBet
+	if err := row.Scan(&item.BetID, &item.Player.UserID, &item.Player.DisplayName, &item.Player.AvatarURL, &item.Player.IsVirtual,
+		&item.RoundID, &item.GameType, &item.GameName, &item.RoundSequence, &item.Currency, &item.GameRoomID,
+		&item.GameRoomCode, &item.GameRoomName, &item.PlayMode, &item.Selection, &item.StakeMinor,
+		&item.PayoutMultiplier, &item.PayoutDivisor, &item.Status,
+		&item.PayoutMinor, &item.PlacedAt, &item.SettledAt); err != nil {
+		return PublicBet{}, err
+	}
+	item.PayoutRate = formatPayoutRate(item.PayoutMultiplier, item.PayoutDivisor)
+	return item, nil
 }
 
 // CancelBet 在封盘前原子取消玩家自己的投注并把本金退回原钱包。
@@ -147,6 +286,10 @@ func (service *Service) CancelBet(ctx context.Context, betID, userID string) (Pl
 		return PlacedBet{}, err
 	}
 	if bet.Status == "cancelled" {
+		bet, err = cancelledBetResult(ctx, tx, bet.AccountID, bet.ClientRequestID, bet.BetID)
+		if err != nil {
+			return PlacedBet{}, err
+		}
 		return bet, tx.Commit(ctx)
 	}
 	if bet.Status != "accepted" || !time.Now().UTC().Before(betClosesAt) {
@@ -164,23 +307,48 @@ func (service *Service) CancelBet(ctx context.Context, betID, userID string) (Pl
 	if _, err := tx.Exec(ctx, `UPDATE wallets SET available_minor=$2,version=version+1,updated_at=$3 WHERE id=$1`, walletID, availableMinor, now); err != nil {
 		return PlacedBet{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE bets SET status='cancelled',settled_at=$2 WHERE id=$1`, betID, now); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE bets SET status='cancelled',settled_at=$2,balance_after_settlement_minor=$3 WHERE id=$1`, betID, now, availableMinor); err != nil {
 		return PlacedBet{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries(id,wallet_id,business_type,business_id,entry_type,amount_minor,balance_after_minor) VALUES($1,$2,'bet_cancel',$3,'bet_refund',$4,$5)`, uuid.NewString(), walletID, betID, bet.StakeMinor, availableMinor); err != nil {
 		return PlacedBet{}, err
 	}
-	payload, err := json.Marshal(map[string]string{"bet_id": betID, "round_id": bet.RoundID, "user_id": userID})
+	publicBet, err := scanPublicBet(tx.QueryRow(ctx, publicBetSelect+` WHERE b.id=$1`, betID))
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	payload, err := json.Marshal(struct {
+		Bet PublicBet `json:"bet"`
+	}{Bet: publicBet})
 	if err != nil {
 		return PlacedBet{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload,occurred_at) VALUES($1,'bet',$2,$3,$4,$5)`, uuid.NewString(), betID, events.BetCancelled, payload, now); err != nil {
 		return PlacedBet{}, err
 	}
-	bet.Status, bet.SettledAt = "cancelled", &now
+	bet, err = cancelledBetResult(ctx, tx, userID, bet.ClientRequestID, betID)
+	if err != nil {
+		return PlacedBet{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return PlacedBet{}, err
 	}
+	return bet, nil
+}
+
+func cancelledBetResult(ctx context.Context, tx pgx.Tx, userID, clientRequestID, betID string) (PlacedBet, error) {
+	bet, err := findBet(ctx, tx, userID, clientRequestID)
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	var balance int64
+	err = tx.QueryRow(ctx, `
+		SELECT balance_after_minor FROM ledger_entries
+		WHERE business_type='bet_cancel' AND business_id=$1 AND entry_type='bet_refund'`, betID).Scan(&balance)
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	bet.BalanceAfterRefundMinor = &balance
 	return bet, nil
 }
 
@@ -356,11 +524,13 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		return PlacedBet{}, err
 	}
 
+	publicBet, err := scanPublicBet(tx.QueryRow(ctx, publicBetSelect+` WHERE b.id=$1`, bet.BetID))
+	if err != nil {
+		return PlacedBet{}, err
+	}
 	payload, err := json.Marshal(struct {
-		BetID   string `json:"bet_id"`
-		RoundID string `json:"round_id"`
-		UserID  string `json:"user_id"`
-	}{BetID: bet.BetID, RoundID: bet.RoundID, UserID: bet.AccountID})
+		Bet PublicBet `json:"bet"`
+	}{Bet: publicBet})
 	if err != nil {
 		return PlacedBet{}, err
 	}
@@ -371,11 +541,9 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		return PlacedBet{}, err
 	}
 
-	// 投注按任务配置的累计币种触发进度；重复请求已在上方返回，不会走到这里。
-	if service.taskHook != nil {
-		if err := service.taskHook.OnBetPlaced(ctx, tx, request.AccountID, request.Currency, request.StakeMinor); err != nil {
-			return PlacedBet{}, err
-		}
+	bet, err = findBet(ctx, tx, request.AccountID, request.ClientRequestID)
+	if err != nil {
+		return PlacedBet{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -385,16 +553,7 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 }
 
 func findBet(ctx context.Context, tx pgx.Tx, accountID string, clientRequestID string) (PlacedBet, error) {
-	var bet PlacedBet
-	err := tx.QueryRow(ctx, `
-		SELECT bets.id, bets.client_request_id, bets.round_id, bets.user_id, wallets.currency,
-			COALESCE(bets.game_room_id::text,''),COALESCE(bets.play_mode,''),
-			bets.selection, bets.stake_minor, bets.status, bets.created_at
-		FROM bets
-		JOIN wallets ON wallets.id = bets.wallet_id
-		WHERE bets.user_id = $1 AND bets.client_request_id = $2`, accountID, clientRequestID).
-		Scan(&bet.BetID, &bet.ClientRequestID, &bet.RoundID, &bet.AccountID, &bet.Currency, &bet.GameRoomID, &bet.PlayMode, &bet.Selection, &bet.StakeMinor, &bet.Status, &bet.PlacedAt)
-	return bet, err
+	return scanPlacedBet(tx.QueryRow(ctx, placedBetSelect+` WHERE b.user_id=$1 AND b.client_request_id=$2`, accountID, clientRequestID))
 }
 
 func sharedHashRules(rules game.Rules) bool {

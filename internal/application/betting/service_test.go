@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,9 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 	if second.Currency != "USDT" || second.Status != "accepted" {
 		t.Fatalf("repeated bet = %#v, want complete accepted bet", second)
 	}
+	if second.RoundSequence != 1 || second.GameType != "test-"+gameTypeID || second.GameName != "test game" || second.PayoutRate != "2" || second.BalanceAfterBetMinor == nil || *second.BalanceAfterBetMinor != 7_500 {
+		t.Fatalf("repeated bet context = %#v", second)
+	}
 	found, err := service.Find(ctx, first.BetID)
 	if err != nil {
 		t.Fatalf("find placed bet: %v", err)
@@ -86,10 +90,33 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 	if found.BetID != first.BetID || found.Status != "accepted" || found.Currency != "USDT" {
 		t.Fatalf("found bet = %#v", found)
 	}
+	publicBets, err := service.ListPublicBets(ctx, PublicBetQuery{GameType: "test-" + gameTypeID, Currency: "usdt", Status: "accepted", PlayerType: "real", Limit: 10})
+	if err != nil {
+		t.Fatalf("list public bets: %v", err)
+	}
+	if len(publicBets) != 1 || publicBets[0].BetID != first.BetID || publicBets[0].Player.DisplayName != "bet test player" || publicBets[0].Player.IsVirtual || publicBets[0].RoundSequence != 1 || publicBets[0].PayoutRate != "2" {
+		t.Fatalf("public bets = %#v", publicBets)
+	}
+	virtualBets, err := service.ListPublicBets(ctx, PublicBetQuery{PlayerType: "virtual", Limit: 10})
+	if err != nil {
+		t.Fatalf("list virtual bets: %v", err)
+	}
+	for _, item := range virtualBets {
+		if item.BetID == first.BetID {
+			t.Fatalf("real bet appeared in virtual filter: %#v", item)
+		}
+	}
 
 	assertCount(t, ctx, pool, `SELECT count(*) FROM bets WHERE wallet_id = $1`, walletID, 1)
 	assertCount(t, ctx, pool, `SELECT count(*) FROM ledger_entries WHERE wallet_id = $1 AND entry_type = 'bet_debit'`, walletID, 1)
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'game.bet.placed'`, first.BetID, 1)
+	var placedPayload string
+	if err := pool.QueryRow(ctx, `SELECT payload::text FROM outbox_events WHERE aggregate_id=$1 AND event_type='game.bet.placed'`, first.BetID).Scan(&placedPayload); err != nil {
+		t.Fatalf("placed event payload: %v", err)
+	}
+	if strings.Contains(placedPayload, accountID) || !strings.Contains(placedPayload, `"round_sequence": 1`) || !strings.Contains(placedPayload, `"display_name": "bet test player"`) {
+		t.Fatalf("placed event payload = %s", placedPayload)
+	}
 
 	var availableMinor int64
 	err = pool.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1`, walletID).Scan(&availableMinor)
@@ -117,6 +144,9 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 	if err != nil || cancelled.Status != "cancelled" {
 		t.Fatalf("cancel bet = %+v, err = %v", cancelled, err)
 	}
+	if cancelled.BalanceAfterBetMinor == nil || *cancelled.BalanceAfterBetMinor != 7_500 || cancelled.BalanceAfterRefundMinor == nil || *cancelled.BalanceAfterRefundMinor != 10_000 || cancelled.BalanceAfterSettlementMinor == nil || *cancelled.BalanceAfterSettlementMinor != 10_000 {
+		t.Fatalf("cancel balances = %+v", cancelled)
+	}
 	if _, err := service.CancelBet(ctx, first.BetID, accountID); err != nil {
 		t.Fatalf("repeat cancel must be idempotent: %v", err)
 	}
@@ -124,6 +154,18 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatalf("balance after cancel = %d, err = %v", availableMinor, err)
 	}
 	assertCount(t, ctx, pool, `SELECT count(*) FROM ledger_entries WHERE wallet_id=$1 AND entry_type='bet_refund'`, walletID, 1)
+}
+
+func TestFormatPayoutRate(t *testing.T) {
+	for _, testCase := range []struct {
+		multiplier int64
+		divisor    int64
+		want       string
+	}{{1940, 1000, "1.94"}, {9350, 1000, "9.35"}, {2, 1, "2"}, {0, 1000, ""}} {
+		if got := formatPayoutRate(testCase.multiplier, testCase.divisor); got != testCase.want {
+			t.Fatalf("formatPayoutRate(%d,%d) = %q, want %q", testCase.multiplier, testCase.divisor, got, testCase.want)
+		}
+	}
 }
 
 func assertCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query string, argument any, want int) {

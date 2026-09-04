@@ -21,7 +21,7 @@ import (
 func TestPlaceBetCreatesBet(t *testing.T) {
 	placer := &recordingBetPlacer{bet: betting.PlacedBet{BetID: "bet-1", PlacedAt: time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)}}
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil, nil, nil, nil)
-	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":"player-1","currency":"USDT","selection":{"color":"red"},"stake_minor":2500}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":100009,"currency":"USDT","selection":{"color":"red"},"stake_minor":2500}`))
 	response := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(response, request)
@@ -32,7 +32,7 @@ func TestPlaceBetCreatesBet(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"bet_id":"bet-1"`) {
 		t.Fatalf("response body = %s, want snake_case bet ID", response.Body.String())
 	}
-	if placer.request.ClientRequestID != "request-1" || placer.request.StakeMinor != 2500 {
+	if placer.request.ClientRequestID != "request-1" || placer.request.AccountID != "100009" || placer.request.StakeMinor != 2500 {
 		t.Fatalf("placer request = %#v", placer.request)
 	}
 	var body betting.PlacedBet
@@ -41,6 +41,18 @@ func TestPlaceBetCreatesBet(t *testing.T) {
 	}
 	if body.BetID != "bet-1" {
 		t.Fatalf("bet ID = %q, want bet-1", body.BetID)
+	}
+}
+
+func TestPlaceBetRejectsStringAccountID(t *testing.T) {
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), &recordingBetPlacer{}, readinessChecker{}, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":"100009","currency":"POINTS","selection":{"pick":"odd"},"stake_minor":1000}`))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "请求参数格式不正确") {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}
 }
 
@@ -218,6 +230,54 @@ func TestBetReturnsBet(t *testing.T) {
 	}
 }
 
+func TestPublicBetsSupportsPlayerTypeAndPagination(t *testing.T) {
+	bets := &recordingBetReader{publicBets: []betting.PublicBet{{
+		BetID:  "bet-public-1",
+		Player: betting.PublicPlayer{UserID: 100009, DisplayName: "虚拟玩家", AvatarURL: "/v1/avatars/100009", IsVirtual: true},
+		Status: "accepted",
+	}}}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets, nil, WithAuth(NewAuthenticator(testSecret)))
+	request := httptest.NewRequest(http.MethodGet, "/v1/bets/public-feed?player_type=virtual&game_type=hash_9&currency=usdt&status=accepted&limit=20&offset=40", nil)
+	request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "player-1", []string{"player"}))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if bets.publicQuery.PlayerType != "virtual" || bets.publicQuery.GameType != "hash_9" || bets.publicQuery.Currency != "usdt" || bets.publicQuery.Status != "accepted" || bets.publicQuery.Limit != 20 || bets.publicQuery.Offset != 40 {
+		t.Fatalf("public query = %#v", bets.publicQuery)
+	}
+	if !strings.Contains(response.Body.String(), `"is_virtual":true`) || !strings.Contains(response.Body.String(), `"display_name":"虚拟玩家"`) {
+		t.Fatalf("response = %s", response.Body.String())
+	}
+}
+
+func TestPublicBetsRequiresAuthentication(t *testing.T) {
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, &recordingBetReader{}, nil, WithAuth(NewAuthenticator(testSecret)))
+	request := httptest.NewRequest(http.MethodGet, "/v1/bets/public-feed", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPublicBetsRejectsInvalidPlayerType(t *testing.T) {
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, &recordingBetReader{}, nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/bets/public-feed?player_type=robot", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestCancelRoundReturnsRefundedBetCount(t *testing.T) {
 	canceller := &recordingRoundCanceller{refundedBetCount: 2}
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, canceller)
@@ -243,9 +303,11 @@ type recordingBetPlacer struct {
 }
 
 type recordingBetReader struct {
-	betID string
-	bet   betting.PlacedBet
-	err   error
+	betID       string
+	bet         betting.PlacedBet
+	publicQuery betting.PublicBetQuery
+	publicBets  []betting.PublicBet
+	err         error
 }
 
 type recordingRoundCanceller struct {
@@ -264,8 +326,13 @@ func (reader *recordingBetReader) Find(_ context.Context, betID string) (betting
 	return reader.bet, reader.err
 }
 
-func (reader *recordingBetReader) ListUserBets(_ context.Context, _ string, _ string, _ int) ([]betting.PlacedBet, error) {
+func (reader *recordingBetReader) ListUserBets(_ context.Context, _ string, _ string, _, _ int) ([]betting.PlacedBet, error) {
 	return nil, nil
+}
+
+func (reader *recordingBetReader) ListPublicBets(_ context.Context, query betting.PublicBetQuery) ([]betting.PublicBet, error) {
+	reader.publicQuery = query
+	return reader.publicBets, reader.err
 }
 
 func (reader *recordingBetReader) CancelBet(_ context.Context, betID, _ string) (betting.PlacedBet, error) {

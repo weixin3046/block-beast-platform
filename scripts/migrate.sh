@@ -68,7 +68,11 @@ for migration_path in migrations/*.sql; do
     echo "      登记已有迁移 ${migration_file}"
   else
     echo "      执行迁移 ${migration_file}"
-    psql_command < "${migration_path}" >/dev/null
+    # DDL、数据搬迁与版本登记原子提交，失败不会留下半张账本或已删除的旧表。
+    psql_command --single-transaction -f - \
+      -c "INSERT INTO schema_migrations (version) VALUES ('${version}') ON CONFLICT DO NOTHING" \
+      < "${migration_path}" >/dev/null
+    continue
   fi
 
   psql_command -c "INSERT INTO schema_migrations (version) VALUES ('${version}') ON CONFLICT DO NOTHING" >/dev/null

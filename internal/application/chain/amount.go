@@ -4,7 +4,30 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/block-beast/platform/internal/domain/wallet"
 )
+
+// Validate the network precision without first multiplying into a potentially
+// overflowing 18-decimal integer. Excess platform precision is never rounded.
+func parsePlatformDeposit(value string, chainDecimals, platformDecimals int) (int64, error) {
+	value = strings.TrimSpace(value)
+	if chainDecimals < 0 || chainDecimals > 18 || !wallet.ValidDisplayAmount(value) {
+		return 0, ErrInvalidAmount
+	}
+	parts := strings.SplitN(value, ".", 2)
+	if len(parts) == 2 {
+		if len(parts[1]) > chainDecimals {
+			return 0, ErrInvalidAmount
+		}
+		value = strings.TrimRight(strings.TrimRight(value, "0"), ".")
+	}
+	amount, err := wallet.ParseDisplayAmount(value, platformDecimals)
+	if err != nil {
+		return 0, ErrInvalidAmount
+	}
+	return amount, nil
+}
 
 func parseDecimalMinor(value string, decimals int) (int64, error) {
 	if decimals < 0 || decimals > 18 {

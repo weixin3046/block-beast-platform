@@ -13,12 +13,15 @@ import (
 
 // DepositInput 是链上服务商推送的一笔已确认充值。
 type DepositInput struct {
-	ProviderEventID string `json:"provider_event_id"`
-	TxHash          string `json:"tx_hash"`
-	ChainCode       string `json:"chain_code"`
-	TokenCode       string `json:"token_code"`
-	Address         string `json:"address"`
-	AmountMinor     int64  `json:"amount_minor"`
+	ProviderEventID  string `json:"provider_event_id"`
+	TxHash           string `json:"tx_hash"`
+	ChainCode        string `json:"chain_code"`
+	TokenCode        string `json:"token_code"`
+	Address          string `json:"address"`
+	AmountMinor      int64  `json:"amount_minor"`
+	ProviderAmount   string `json:"-"`
+	ChainDecimals    *int   `json:"-"`
+	PlatformDecimals *int   `json:"-"`
 }
 
 type DepositResult struct {
@@ -99,10 +102,10 @@ func (service *Service) CreditDeposit(ctx context.Context, input DepositInput) (
 	depositID := uuid.NewString()
 	creditedAt := time.Now().UTC()
 	err = tx.QueryRow(ctx, `
-		INSERT INTO deposits (id, chain_address_id, provider_event_id, tx_hash, amount_minor, status, confirmed_at)
-		VALUES ($1, $2, $3, $4, $5, 'credited', $6)
+		INSERT INTO deposits (id, chain_address_id, provider_event_id, tx_hash, amount_minor, status, confirmed_at, provider_amount, chain_decimals, platform_decimals)
+		VALUES ($1, $2, $3, $4, $5, 'credited', $6, NULLIF($7,''), $8, $9)
 		ON CONFLICT DO NOTHING
-		RETURNING id`, depositID, chainAddressID, input.ProviderEventID, input.TxHash, input.AmountMinor, creditedAt).Scan(&depositID)
+		RETURNING id`, depositID, chainAddressID, input.ProviderEventID, input.TxHash, input.AmountMinor, creditedAt, input.ProviderAmount, input.ChainDecimals, input.PlatformDecimals).Scan(&depositID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// 服务商事件 ID 或交易哈希已存在：重复回调，直接返回既有记录，不重复入账。
 		var existingID string

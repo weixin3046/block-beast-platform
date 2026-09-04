@@ -17,9 +17,11 @@ import (
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/domain/identity"
 	"github.com/block-beast/platform/internal/domain/wallet"
+	"github.com/block-beast/platform/internal/platform/usermessage"
 )
 
 type Server struct {
+	currencies         CurrencyService
 	config             config.Config
 	logger             *slog.Logger
 	betPlacer          BetPlacer
@@ -139,7 +141,8 @@ type BetPlacer interface {
 
 type BetReader interface {
 	Find(ctx context.Context, betID string) (betting.PlacedBet, error)
-	ListUserBets(ctx context.Context, userID, status string, limit int) ([]betting.PlacedBet, error)
+	ListUserBets(ctx context.Context, userID, status string, limit, offset int) ([]betting.PlacedBet, error)
+	ListPublicBets(ctx context.Context, query betting.PublicBetQuery) ([]betting.PublicBet, error)
 	CancelBet(ctx context.Context, betID, userID string) (betting.PlacedBet, error)
 }
 
@@ -176,6 +179,11 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
 	mux.HandleFunc("GET /v1/assets", server.assets)
+	mux.HandleFunc("GET /v1/currencies", server.protect(server.listCurrencies))
+	mux.HandleFunc("GET /v1/users/me/ledger", server.protect(server.currentUserLedger))
+	mux.HandleFunc("GET /v1/admin/currencies", server.protectRoles(server.adminCurrencies, identity.RoleAdmin))
+	mux.HandleFunc("POST /v1/admin/currencies", server.protectRoles(server.createCurrency, identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/currencies/{code}", server.protectRoles(server.updateCurrency, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/game-rooms", server.protect(server.gameRooms))
 	mux.HandleFunc("GET /v1/hash/menus", server.protect(server.hashMenus))
 	mux.HandleFunc("GET /v1/hash/trends", server.protect(server.hashTrends))
@@ -201,7 +209,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/uploads/{uploadID}", server.protect(server.upload))
 	mux.HandleFunc("PUT /v1/uploads/{uploadID}/content", server.protect(server.putUploadContent))
 	mux.HandleFunc("GET /v1/uploads/{uploadID}/content", server.protect(server.downloadUploadContent))
-	mux.HandleFunc("GET /v1/leaderboards/daily", server.protect(server.dailyLeaderboard))
+	mux.HandleFunc("GET /v1/leaderboards", server.protect(server.leaderboard))
 	mux.HandleFunc("POST /v1/chat/rooms/{roomID}/red-packets", server.protect(server.createRedPacket))
 	mux.HandleFunc("GET /v1/red-packets/{packetID}", server.protect(server.redPacket))
 	mux.HandleFunc("POST /v1/red-packets/{packetID}/claim", server.protect(server.claimRedPacket))
@@ -214,6 +222,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/commissions/{commissionID}/reverse", server.protectRoles(server.reverseCommission, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/agents/{agentID}/commissions", server.protectRoles(server.grantCommission, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
+	mux.HandleFunc("GET /v1/bets/public-feed", server.protect(server.publicBets))
 	mux.HandleFunc("GET /v1/bets/{betID}", server.protect(server.bet))
 	mux.HandleFunc("POST /v1/bets/{betID}/cancel", server.protect(server.cancelBet))
 	mux.HandleFunc("GET /v1/bets", server.protect(server.userBets))
@@ -255,6 +264,9 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/virtual-accounts", server.protectRoles(server.createVirtualAccount, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/virtual-accounts/{userID}/automation", server.protectRoles(server.setVirtualAutomation, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/configs", server.protectRoles(server.adminConfigs, identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/admin/leaderboard-reward-rules", server.protectRoles(server.leaderboardRules, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/leaderboard-reward-rules", server.protectRoles(server.replaceLeaderboardRules, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/leaderboard-rewards", server.protectRoles(server.leaderboardRewards, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/configs/{key}", server.protectRoles(server.putConfig, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/tasks/bet-configs", server.protectRoles(server.adminBetTaskConfigs, identity.RoleAdmin))
 	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs", server.protectRoles(server.replaceBetTaskConfigs, identity.RoleAdmin))
@@ -269,6 +281,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/point-withdrawals", server.protectRoles(server.adminPointWithdrawals, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/stamina/consume", server.protect(server.consumeStamina))
 	mux.HandleFunc("GET /v1/tasks/bet-progress", server.protect(server.betTasks))
+	mux.HandleFunc("POST /v1/tasks/{taskID}/claim", server.protect(server.claimBetTask))
 	mux.HandleFunc("GET /v1/activities/spins", server.protect(server.spinConfigs))
 	mux.HandleFunc("POST /v1/activities/spins/{spinID}/play", server.protect(server.playConfiguredSpin))
 	mux.HandleFunc("GET /v1/admin/spins", server.protectRoles(server.adminSpinConfigs, identity.RoleAdmin))
@@ -276,7 +289,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/wallets/{accountID}/all", server.protect(server.allBalances))
 	mux.HandleFunc("GET /v1/points/{accountID}/ledger", server.protect(server.pointsLedger))
 	mux.HandleFunc("GET /v1/stamina/{accountID}/ledger", server.protect(server.staminaLedger))
-	return server.withCORS(server.withRequestLog(mux))
+	return server.withCORS(server.withRequestLog(chineseRoutingErrors(mux)))
 }
 
 func (server *Server) withCORS(next http.Handler) http.Handler {
@@ -618,12 +631,84 @@ func (server *Server) userBets(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
-	items, err := server.bets.ListUserBets(request.Context(), userID, request.URL.Query().Get("status"), 50)
+	limit, offset, ok := betPage(writer, request)
+	if !ok {
+		return
+	}
+	status := request.URL.Query().Get("status")
+	if !validBetStatus(status) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid bet status"})
+		return
+	}
+	items, err := server.bets.ListUserBets(request.Context(), userID, status, limit, offset)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list bets"})
 		return
 	}
 	server.writePublicJSON(writer, request, http.StatusOK, items)
+}
+
+func (server *Server) publicBets(writer http.ResponseWriter, request *http.Request) {
+	if server.bets == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "bets are unavailable"})
+		return
+	}
+	limit, offset, ok := betPage(writer, request)
+	if !ok {
+		return
+	}
+	status := request.URL.Query().Get("status")
+	if !validBetStatus(status) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid bet status"})
+		return
+	}
+	playerType := request.URL.Query().Get("player_type")
+	if playerType == "" {
+		playerType = "all"
+	}
+	if playerType != "all" && playerType != "real" && playerType != "virtual" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "player_type must be all, real, or virtual"})
+		return
+	}
+	items, err := server.bets.ListPublicBets(request.Context(), betting.PublicBetQuery{
+		GameType:   request.URL.Query().Get("game_type"),
+		Currency:   request.URL.Query().Get("currency"),
+		Status:     status,
+		PlayerType: playerType,
+		Limit:      limit,
+		Offset:     offset,
+	})
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list public bets"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, items)
+}
+
+func betPage(writer http.ResponseWriter, request *http.Request) (int, int, bool) {
+	limit := 50
+	if value := request.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 || parsed > 100 {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "limit must be between 1 and 100"})
+			return 0, 0, false
+		}
+		limit = parsed
+	}
+	offset := 0
+	if value := request.URL.Query().Get("offset"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "offset must be zero or greater"})
+			return 0, 0, false
+		}
+		offset = parsed
+	}
+	return limit, offset, true
+}
+
+func validBetStatus(status string) bool {
+	return status == "" || status == "accepted" || status == "cancelled" || status == "won" || status == "lost" || status == "refunded"
 }
 
 func (server *Server) openRounds(writer http.ResponseWriter, request *http.Request) {
@@ -763,18 +848,27 @@ func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "betting is unavailable"})
 		return
 	}
-	var input betting.PlaceBetRequest
+	var input struct {
+		ClientRequestID string          `json:"client_request_id"`
+		RoundID         string          `json:"round_id"`
+		AccountID       int64           `json:"account_id"`
+		Currency        string          `json:"currency"`
+		GameRoomID      string          `json:"game_room_id,omitempty"`
+		PlayMode        string          `json:"play_mode,omitempty"`
+		Selection       json.RawMessage `json:"selection"`
+		StakeMinor      int64           `json:"stake_minor"`
+	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if input.ClientRequestID == "" || input.RoundID == "" || input.AccountID == "" || input.Currency == "" {
+	if input.ClientRequestID == "" || input.RoundID == "" || input.AccountID < 100000 || input.Currency == "" {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "missing required bet fields"})
 		return
 	}
-	internalID, err := server.resolvePublicUserID(request.Context(), input.AccountID)
+	internalID, err := server.resolvePublicUserID(request.Context(), strconv.FormatInt(input.AccountID, 10))
 	if err != nil {
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "user not found"})
 		return
@@ -783,9 +877,16 @@ func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "cannot place bets for another account"})
 		return
 	}
-	input.AccountID = internalID
-
-	bet, err := server.betPlacer.PlaceBet(request.Context(), input)
+	bet, err := server.betPlacer.PlaceBet(request.Context(), betting.PlaceBetRequest{
+		ClientRequestID: input.ClientRequestID,
+		RoundID:         input.RoundID,
+		AccountID:       internalID,
+		Currency:        input.Currency,
+		GameRoomID:      input.GameRoomID,
+		PlayMode:        input.PlayMode,
+		Selection:       input.Selection,
+		StakeMinor:      input.StakeMinor,
+	})
 	if err != nil {
 		writeBetError(writer, err)
 		return
@@ -842,7 +943,34 @@ func (server *Server) withRequestLog(next http.Handler) http.Handler {
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
+	if status >= 400 {
+		value = chineseErrorResponse(value)
+	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(value)
+}
+
+func chineseErrorResponse(value any) any {
+	switch source := value.(type) {
+	case map[string]string:
+		if message, ok := source["error"]; ok {
+			copy := make(map[string]string, len(source))
+			for k, v := range source {
+				copy[k] = v
+			}
+			copy["error"] = usermessage.Chinese(message)
+			return copy
+		}
+	case map[string]any:
+		if message, ok := source["error"].(string); ok {
+			copy := make(map[string]any, len(source))
+			for k, v := range source {
+				copy[k] = v
+			}
+			copy["error"] = usermessage.Chinese(message)
+			return copy
+		}
+	}
+	return value
 }

@@ -113,12 +113,23 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		if err := applyCommission(ctx, tx, bet.betID, bet.userID, bet.currency, bet.stake, result.SettledAt); err != nil {
 			return SettlementResult{}, err
 		}
+		var availableMinor int64
+		if err := tx.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1 FOR UPDATE`, bet.walletID).Scan(&availableMinor); err != nil {
+			return SettlementResult{}, err
+		}
 		won := rules.SelectionWins(bet.selection, outcome)
 		if bet.playMode != "" {
 			won = hashSelectionWins(bet.playMode, bet.selection, outcome)
 		}
+		// 只有实际结算为输或赢的投注才属于活动任务有效流水。取消和退款投注
+		// 不会进入 SettleRound，因此从源头上不会累计，也不存在领取后再回退的问题。
+		if service.taskHook != nil {
+			if err := service.taskHook.OnBetSettled(ctx, tx, bet.userID, bet.currency, bet.stake, result.SettledAt); err != nil {
+				return SettlementResult{}, err
+			}
+		}
 		if !won {
-			if _, err := tx.Exec(ctx, `UPDATE bets SET status = 'lost', settled_at = $2 WHERE id = $1`, bet.betID, result.SettledAt); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE bets SET status = 'lost', settled_at = $2, balance_after_settlement_minor = $3 WHERE id = $1`, bet.betID, result.SettledAt, availableMinor); err != nil {
 				return SettlementResult{}, err
 			}
 			result.LostBetCount++
@@ -132,10 +143,6 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			return SettlementResult{}, ErrPayoutOverflow
 		}
 		payout := bet.stake * payoutMultiplier / payoutDivisor
-		var availableMinor int64
-		if err := tx.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1 FOR UPDATE`, bet.walletID).Scan(&availableMinor); err != nil {
-			return SettlementResult{}, err
-		}
 		if availableMinor > math.MaxInt64-payout {
 			return SettlementResult{}, ErrPayoutOverflow
 		}
@@ -143,7 +150,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		if _, err := tx.Exec(ctx, `UPDATE wallets SET available_minor = $2, version = version + 1, updated_at = $3 WHERE id = $1`, bet.walletID, availableMinor, result.SettledAt); err != nil {
 			return SettlementResult{}, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE bets SET status = 'won', payout_minor = $2, settled_at = $3 WHERE id = $1`, bet.betID, payout, result.SettledAt); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE bets SET status = 'won', payout_minor = $2, settled_at = $3, balance_after_settlement_minor = $4 WHERE id = $1`, bet.betID, payout, result.SettledAt, availableMinor); err != nil {
 			return SettlementResult{}, err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor) VALUES ($1, $2, 'settlement', $3, 'settlement_credit', $4, $5)`, uuid.NewString(), bet.walletID, bet.betID, payout, availableMinor); err != nil {

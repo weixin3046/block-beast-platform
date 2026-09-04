@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/block-beast/platform/internal/application/auth"
 	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/identity"
@@ -16,6 +17,27 @@ import (
 
 type stubUserAdmin struct {
 	roleError error
+}
+
+type stubSecondaryPasswords struct {
+	setErr      error
+	changeErr   error
+	setCalls    int
+	changeCalls int
+}
+
+func (stub *stubSecondaryPasswords) SetSecondaryPassword(context.Context, string, string, string) error {
+	stub.setCalls++
+	return stub.setErr
+}
+
+func (*stubSecondaryPasswords) VerifySecondaryPassword(context.Context, string, string) error {
+	return nil
+}
+
+func (stub *stubSecondaryPasswords) ChangeSecondaryPassword(context.Context, string, string, string) error {
+	stub.changeCalls++
+	return stub.changeErr
 }
 
 func (stubUserAdmin) ListUsers(context.Context, string, string, int) ([]operations.User, error) {
@@ -67,5 +89,51 @@ func TestRoleManagementRequiresAdminAndMapsSafetyErrors(t *testing.T) {
 	newServer(stubUserAdmin{roleError: operations.ErrCannotRemoveLastAdmin}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("last admin status = %d", response.Code)
+	}
+}
+
+func TestSecondaryPasswordFirstSetupToleratesCurrentPasswordField(t *testing.T) {
+	passwords := &stubSecondaryPasswords{changeErr: auth.ErrSecondaryPasswordNotSet}
+	server := New(
+		config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		nil, readinessChecker{}, nil, nil, nil, nil,
+		WithAuth(NewAuthenticator(testSecret)), WithSecondaryPasswords(passwords),
+	)
+	request := httptest.NewRequest(http.MethodPut, "/v1/users/me/secondary-password", strings.NewReader(
+		`{"current_secondary_password":"stale-value","secondary_password":"new-password"}`,
+	))
+	request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "user-1", []string{identity.RolePlayer}))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if passwords.changeCalls != 1 || passwords.setCalls != 1 {
+		t.Fatalf("change calls = %d, set calls = %d", passwords.changeCalls, passwords.setCalls)
+	}
+}
+
+func TestSecondaryPasswordChangeStillRejectsWrongCurrentPassword(t *testing.T) {
+	passwords := &stubSecondaryPasswords{changeErr: auth.ErrInvalidCredentials}
+	server := New(
+		config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		nil, readinessChecker{}, nil, nil, nil, nil,
+		WithAuth(NewAuthenticator(testSecret)), WithSecondaryPasswords(passwords),
+	)
+	request := httptest.NewRequest(http.MethodPut, "/v1/users/me/secondary-password", strings.NewReader(
+		`{"current_secondary_password":"wrong-password","secondary_password":"new-password"}`,
+	))
+	request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "user-1", []string{identity.RolePlayer}))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if passwords.changeCalls != 1 || passwords.setCalls != 0 {
+		t.Fatalf("change calls = %d, set calls = %d", passwords.changeCalls, passwords.setCalls)
 	}
 }

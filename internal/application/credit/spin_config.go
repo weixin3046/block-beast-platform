@@ -113,7 +113,7 @@ func (service *Service) ReplaceSpinConfigs(ctx context.Context, items []SpinConf
 
 func findSpinConfig(ctx context.Context, tx pgx.Tx, idOrCode string, enabledOnly bool) (SpinConfig, error) {
 	var v SpinConfig
-	err := tx.QueryRow(ctx, `SELECT id::text,code,title,enabled,cost_currency,cost_minor,sort_order FROM spin_configs WHERE (id::text=$1 OR code=$1) AND (NOT $2 OR enabled=true)`, idOrCode, enabledOnly).Scan(&v.ID, &v.Code, &v.Title, &v.Enabled, &v.CostCurrency, &v.CostMinor, &v.SortOrder)
+	err := tx.QueryRow(ctx, `SELECT id::text,code,title,enabled,cost_currency,cost_minor,sort_order FROM spin_configs WHERE (id::text=$1 OR code=$1) AND (NOT $2 OR enabled=true) FOR SHARE`, idOrCode, enabledOnly).Scan(&v.ID, &v.Code, &v.Title, &v.Enabled, &v.CostCurrency, &v.CostMinor, &v.SortOrder)
 	if err != nil {
 		return v, err
 	}

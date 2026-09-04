@@ -65,6 +65,22 @@ func (service *Service) RequestWithdrawal(ctx context.Context, input WithdrawalI
 	if err != nil {
 		return Withdrawal{}, err
 	}
+	platformDecimals, err := wallet.ResolveDecimals(ctx, tx, input.Currency, true)
+	if errors.Is(err, wallet.ErrUnknownCurrency) || errors.Is(err, wallet.ErrCurrencyDisabled) {
+		return Withdrawal{}, ErrUnsupportedAsset
+	}
+	if err != nil {
+		return Withdrawal{}, err
+	}
+	if tokenDecimals < platformDecimals {
+		scale := int64(1)
+		for range platformDecimals - tokenDecimals {
+			scale *= 10
+		}
+		if input.AmountMinor%scale != 0 {
+			return Withdrawal{}, ErrInvalidAmount
+		}
+	}
 	if err := service.withdrawalPolicy.validateAmount(input.AmountMinor); err != nil {
 		return Withdrawal{}, err
 	}
@@ -121,19 +137,19 @@ func (service *Service) RequestWithdrawal(ctx context.Context, input WithdrawalI
 		INSERT INTO withdrawals (
 			id, user_id, wallet_id, client_request_id, destination_address,
 			destination_memo, chain_code, token_code, provider_chain_token_id,
-			token_decimals, amount_minor, status
+			token_decimals, amount_minor, status, platform_decimals
 		)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8, $9, $10, $11, 'requested')
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8, $9, $10, $11, 'requested', $12)
 		RETURNING created_at`,
 		withdrawal.WithdrawalID, input.UserID, walletID, input.ClientRequestID, input.DestinationAddress,
-		input.DestinationMemo, input.ChainCode, input.Currency, chainTokenID, tokenDecimals, input.AmountMinor).
+		input.DestinationMemo, input.ChainCode, input.Currency, chainTokenID, tokenDecimals, input.AmountMinor, platformDecimals).
 		Scan(&withdrawal.CreatedAt)
 	if err != nil {
 		return Withdrawal{}, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor)
-		VALUES ($1, $2, 'withdrawal', $3, 'withdrawal_freeze', $4, $5)`, uuid.NewString(), walletID, withdrawal.WithdrawalID, -input.AmountMinor, availableMinor); err != nil {
+        INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor,frozen_delta_minor)
+        VALUES ($1, $2, 'withdrawal', $3, 'withdrawal_freeze', $4, $5,-$4::bigint)`, uuid.NewString(), walletID, withdrawal.WithdrawalID, -input.AmountMinor, availableMinor); err != nil {
 		return Withdrawal{}, err
 	}
 	payload, err := json.Marshal(struct {

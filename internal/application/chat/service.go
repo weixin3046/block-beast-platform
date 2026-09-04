@@ -35,14 +35,20 @@ type CustomerServiceRooms struct {
 	Withdrawal Room `json:"withdrawal"`
 }
 
+type MessageSender struct {
+	UserID      int64  `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+}
+
 type Message struct {
-	ID              string    `json:"id"`
-	RoomID          string    `json:"room_id"`
-	SenderUserID    *string   `json:"sender_user_id,omitempty"`
-	Body            string    `json:"body"`
-	Status          string    `json:"status"`
-	ClientRequestID *string   `json:"client_request_id,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string         `json:"id"`
+	RoomID          string         `json:"room_id"`
+	Sender          *MessageSender `json:"sender,omitempty"`
+	Body            string         `json:"body"`
+	Status          string         `json:"status"`
+	ClientRequestID *string        `json:"client_request_id,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 type Service struct {
@@ -129,9 +135,15 @@ func (service *Service) ListMessages(ctx context.Context, roomID, userID string,
 		limit = 50
 	}
 	rows, err := service.pool.Query(ctx, `
-		SELECT id::text,room_id::text,sender_user_id::text,body,status,client_request_id,created_at
-		FROM chat_messages WHERE room_id=$1 AND status='visible'
-		ORDER BY created_at DESC,id DESC LIMIT $2`, roomID, limit)
+		SELECT m.id::text,m.room_id::text,m.body,m.status,m.client_request_id,m.created_at,
+			u.public_id,u.display_name,
+			CASE WHEN u.avatar_url LIKE 'uploads/%'
+				THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '')
+				ELSE COALESCE(u.avatar_url,'') END
+		FROM chat_messages m
+		LEFT JOIN users u ON u.id=m.sender_user_id
+		WHERE m.room_id=$1 AND m.status='visible'
+		ORDER BY m.created_at DESC,m.id DESC LIMIT $2`, roomID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -139,9 +151,13 @@ func (service *Service) ListMessages(ctx context.Context, roomID, userID string,
 	items := make([]Message, 0)
 	for rows.Next() {
 		var item Message
-		if err := rows.Scan(&item.ID, &item.RoomID, &item.SenderUserID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt); err != nil {
+		var senderUserID *int64
+		var senderDisplayName, senderAvatarURL *string
+		if err := rows.Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt,
+			&senderUserID, &senderDisplayName, &senderAvatarURL); err != nil {
 			return nil, err
 		}
+		item.Sender = newMessageSender(senderUserID, senderDisplayName, senderAvatarURL)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -166,17 +182,30 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 	defer tx.Rollback(ctx)
 	messageID := uuid.NewString()
 	var item Message
+	var senderPublicID *int64
+	var senderDisplayName, senderAvatarURL *string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO chat_messages (id,room_id,sender_user_id,body,client_request_id)
-		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (room_id,sender_user_id,client_request_id) WHERE sender_user_id IS NOT NULL AND client_request_id IS NOT NULL
-		DO UPDATE SET client_request_id=EXCLUDED.client_request_id
-		RETURNING id::text,room_id::text,sender_user_id::text,body,status,client_request_id,created_at`,
+		WITH saved AS (
+			INSERT INTO chat_messages (id,room_id,sender_user_id,body,client_request_id)
+			VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (room_id,sender_user_id,client_request_id) WHERE sender_user_id IS NOT NULL AND client_request_id IS NOT NULL
+			DO UPDATE SET client_request_id=EXCLUDED.client_request_id
+			RETURNING id,room_id,sender_user_id,body,status,client_request_id,created_at
+		)
+		SELECT saved.id::text,saved.room_id::text,saved.body,saved.status,saved.client_request_id,saved.created_at,
+			u.public_id,u.display_name,
+			CASE WHEN u.avatar_url LIKE 'uploads/%'
+				THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '')
+				ELSE COALESCE(u.avatar_url,'') END
+		FROM saved
+		LEFT JOIN users u ON u.id=saved.sender_user_id`,
 		messageID, roomID, senderUserID, body, clientRequestID).
-		Scan(&item.ID, &item.RoomID, &item.SenderUserID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt)
+		Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt,
+			&senderPublicID, &senderDisplayName, &senderAvatarURL)
 	if err != nil {
 		return Message{}, false, err
 	}
+	item.Sender = newMessageSender(senderPublicID, senderDisplayName, senderAvatarURL)
 	created := item.ID == messageID
 	if created {
 		var roomType string
@@ -216,6 +245,20 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 		}
 	}
 	return item, created, tx.Commit(ctx)
+}
+
+func newMessageSender(userID *int64, displayName, avatarURL *string) *MessageSender {
+	if userID == nil {
+		return nil
+	}
+	sender := &MessageSender{UserID: *userID}
+	if displayName != nil {
+		sender.DisplayName = *displayName
+	}
+	if avatarURL != nil {
+		sender.AvatarURL = *avatarURL
+	}
+	return sender
 }
 
 func (service *Service) authorize(ctx context.Context, roomID, userID string, staff bool) error {

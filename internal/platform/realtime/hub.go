@@ -69,14 +69,14 @@ func (hub *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	token, protocol := accessToken(request)
 	claims, err := identity.VerifyAccessToken(hub.secret, token, time.Now().UTC())
 	if err != nil {
-		http.Error(writer, "missing or invalid access token", http.StatusUnauthorized)
+		http.Error(writer, "登录凭证缺失或无效，请重新登录", http.StatusUnauthorized)
 		return
 	}
 	options := &websocket.AcceptOptions{OriginPatterns: hub.origins}
 	if protocol != "" {
 		options.Subprotocols = []string{protocol}
 	}
-	connection, err := websocket.Accept(writer, request, options)
+	connection, err := websocket.Accept(&handshakeResponseWriter{ResponseWriter: writer}, request, options)
 	if err != nil {
 		return
 	}
@@ -117,8 +117,8 @@ func accessToken(request *http.Request) (token, protocol string) {
 }
 
 func (hub *Hub) publish(message *nats.Msg) {
-	envelope := encodeMessage(serverMessage{Type: "event", Subject: message.Subject, Payload: append([]byte(nil), message.Data...)})
 	userIDs, broadcast := eventTargets(message.Subject, message.Data)
+	envelope := encodeMessage(serverMessage{Type: "event", Subject: message.Subject, Payload: publicEventPayload(message.Subject, message.Data)})
 	if broadcast {
 		hub.publishTopics(eventTopics(message.Subject, message.Data), envelope)
 		return
@@ -126,6 +126,23 @@ func (hub *Hub) publish(message *nats.Msg) {
 	for _, userID := range userIDs {
 		hub.send(userID, envelope)
 	}
+}
+
+func publicEventPayload(subject string, data []byte) []byte {
+	payload := append([]byte(nil), data...)
+	if !strings.HasPrefix(subject, "chat.") {
+		return payload
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(payload, &fields) != nil {
+		return payload
+	}
+	delete(fields, "user_ids")
+	publicPayload, err := json.Marshal(fields)
+	if err != nil {
+		return payload
+	}
+	return publicPayload
 }
 
 func (hub *Hub) handleCommand(ctx context.Context, item *client, claims identity.AccessTokenClaims, payload []byte) {

@@ -158,6 +158,9 @@ func TestCreditDepositIsIdempotentByEventAndTxHash(t *testing.T) {
 
 func TestCreditDepositCreatesWalletForNewToken(t *testing.T) {
 	pool, ctx := testPool(t)
+	if _, err := pool.Exec(ctx, `INSERT INTO currencies(code,name,decimals,category) VALUES('TRX','TRX',6,'token') ON CONFLICT(code) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 	f := seedChainUser(t, pool, ctx, "TRX")
 	service := NewService(pool)
 

@@ -46,12 +46,12 @@ func (service *Service) CreditPQPADeposit(ctx context.Context, callback PQPADepo
 		return DepositResult{}, false, nil
 	}
 	var chainCode, tokenCode string
-	var decimals int
+	var decimals, platformDecimals int
 	err = service.pool.QueryRow(ctx, `
-		SELECT chain_code, token_code, decimals
-		FROM provider_supported_assets
-		WHERE provider='pqpa' AND provider_chain_token_id=$1 AND enabled=true AND support_deposit=true`,
-		callback.ChainTokenID).Scan(&chainCode, &tokenCode, &decimals)
+		SELECT a.chain_code, a.token_code, a.decimals, c.decimals
+		FROM provider_supported_assets a JOIN currencies c ON c.code=a.token_code
+		WHERE a.provider='pqpa' AND a.provider_chain_token_id=$1 AND a.enabled=true AND a.support_deposit=true`,
+		callback.ChainTokenID).Scan(&chainCode, &tokenCode, &decimals, &platformDecimals)
 	if errors.Is(err, pgx.ErrNoRows) {
 		service.finishProviderEvent(ctx, eventID, ErrUnsupportedAsset)
 		return DepositResult{}, false, ErrUnsupportedAsset
@@ -60,7 +60,7 @@ func (service *Service) CreditPQPADeposit(ctx context.Context, callback PQPADepo
 		service.finishProviderEvent(ctx, eventID, err)
 		return DepositResult{}, false, err
 	}
-	amountMinor, err := parseDecimalMinor(callback.Amount, decimals)
+	amountMinor, err := parsePlatformDeposit(callback.Amount, decimals, platformDecimals)
 	if err != nil || amountMinor <= 0 {
 		service.finishProviderEvent(ctx, eventID, ErrInvalidAmount)
 		return DepositResult{}, false, ErrInvalidAmount
@@ -69,6 +69,7 @@ func (service *Service) CreditPQPADeposit(ctx context.Context, callback PQPADepo
 		ProviderEventID: eventID,
 		TxHash:          callback.TxHash, ChainCode: chainCode, TokenCode: tokenCode,
 		Address: callback.Address, AmountMinor: amountMinor,
+		ProviderAmount: callback.Amount, ChainDecimals: &decimals, PlatformDecimals: &platformDecimals,
 	})
 	service.finishProviderEvent(ctx, eventID, err)
 	return result, err == nil, err

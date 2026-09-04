@@ -58,7 +58,8 @@ func TestServiceCancelRoundRefundsAcceptedBets(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, accountID)
 	})
 
-	service := NewService(pool)
+	taskHook := &taskHookSpy{}
+	service := NewService(pool).WithTaskHook(taskHook)
 	refunded, err := service.CancelRound(ctx, roundID)
 	if err != nil {
 		t.Fatalf("cancel round: %v", err)
@@ -66,9 +67,13 @@ func TestServiceCancelRoundRefundsAcceptedBets(t *testing.T) {
 	if refunded != 1 {
 		t.Fatalf("refunded bets = %d, want 1", refunded)
 	}
+	if taskHook.calls != 0 {
+		t.Fatalf("refunded bet triggered task accumulation %d times", taskHook.calls)
+	}
 
 	var availableMinor int64
 	var betStatus, roundStatus string
+	var balanceAfterSettlement *int64
 	err = pool.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1`, walletID).Scan(&availableMinor)
 	if err != nil {
 		t.Fatalf("read wallet: %v", err)
@@ -81,8 +86,15 @@ func TestServiceCancelRoundRefundsAcceptedBets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read round: %v", err)
 	}
+	err = pool.QueryRow(ctx, `SELECT balance_after_settlement_minor FROM bets WHERE id = $1`, betID).Scan(&balanceAfterSettlement)
+	if err != nil {
+		t.Fatalf("read refunded bet settlement balance: %v", err)
+	}
 	if availableMinor != 10_000 || betStatus != "refunded" || roundStatus != "cancelled" {
 		t.Fatalf("wallet = %d, bet = %q, round = %q", availableMinor, betStatus, roundStatus)
+	}
+	if balanceAfterSettlement == nil || *balanceAfterSettlement != 10_000 {
+		t.Fatalf("refund settlement balance = %v, want 10000", balanceAfterSettlement)
 	}
 	assertCount(t, ctx, pool, `SELECT count(*) FROM ledger_entries WHERE wallet_id = $1 AND entry_type = 'refund'`, walletID, 1)
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = $2`, []any{roundID, events.RoundCancelled}, 1)

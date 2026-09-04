@@ -19,6 +19,12 @@ type Service struct {
 	now           func() time.Time
 }
 
+var chinaTimeZone = time.FixedZone("China Standard Time", 8*60*60)
+
+var ErrTaskConfigNotFound = errors.New("task config not found")
+var ErrTaskNotCompleted = errors.New("task has not reached its claim threshold today")
+var ErrTaskAlreadyClaimed = errors.New("task reward has already been claimed today")
+
 func NewService(pool *pgxpool.Pool, creditService *credit.Service) *Service {
 	return &Service{pool: pool, creditService: creditService, now: time.Now}
 }
@@ -41,6 +47,15 @@ type BetTaskConfig struct {
 	ThresholdMinor       int64  `json:"threshold_minor"`
 	RewardMinor          int64  `json:"reward_minor"`
 	Enabled              bool   `json:"enabled"`
+}
+
+type BetTaskClaim struct {
+	TaskID            string    `json:"task_id"`
+	BetDate           string    `json:"bet_date"`
+	RewardCurrency    string    `json:"reward_currency"`
+	RewardMinor       int64     `json:"reward_minor"`
+	BalanceAfterMinor int64     `json:"balance_after_minor"`
+	ClaimedAt         time.Time `json:"claimed_at"`
 }
 
 func (service *Service) BetTaskConfigs(ctx context.Context) ([]BetTaskConfig, error) {
@@ -76,7 +91,7 @@ func (service *Service) ReplaceBetTaskConfigs(ctx context.Context, items []BetTa
 		item.AccumulationCurrency = strings.ToUpper(strings.TrimSpace(item.AccumulationCurrency))
 		item.RewardCurrency = strings.ToUpper(strings.TrimSpace(item.RewardCurrency))
 		if item.ThresholdMinor <= 0 || item.RewardMinor <= 0 || !validAccumulationCurrency(item.AccumulationCurrency) || !validRewardCurrency(item.RewardCurrency) {
-			return nil, errors.New("task currencies must be supported and threshold/reward must be positive")
+			return nil, errors.New("task currencies must be non-empty and threshold/reward must be positive")
 		}
 		if item.ID == "" {
 			item.ID = uuid.NewString()
@@ -87,12 +102,16 @@ func (service *Service) ReplaceBetTaskConfigs(ctx context.Context, items []BetTa
 				return nil, err
 			}
 		} else {
-			if _, err := tx.Exec(ctx, `
+			result, err := tx.Exec(ctx, `
 				UPDATE bet_task_configs
 				SET accumulation_currency=$2,reward_currency=$3,threshold_minor=$4,reward_minor=$5,enabled=$6
 				WHERE id=$1`,
-				item.ID, item.AccumulationCurrency, item.RewardCurrency, item.ThresholdMinor, item.RewardMinor, item.Enabled); err != nil {
+				item.ID, item.AccumulationCurrency, item.RewardCurrency, item.ThresholdMinor, item.RewardMinor, item.Enabled)
+			if err != nil {
 				return nil, err
+			}
+			if result.RowsAffected() == 0 {
+				return nil, fmt.Errorf("%w: %s", ErrTaskConfigNotFound, item.ID)
 			}
 		}
 		keep = append(keep, item.ID)
@@ -108,7 +127,7 @@ func (service *Service) ReplaceBetTaskConfigs(ctx context.Context, items []BetTa
 }
 
 func (service *Service) BetTasks(ctx context.Context, userID string) ([]BetTask, error) {
-	today := service.now().UTC().Format("2006-01-02")
+	today := service.betDate()
 	rows, err := service.pool.Query(ctx, `
 		SELECT c.id::text,c.accumulation_currency,c.reward_currency,c.threshold_minor,c.reward_minor,
 			COALESCE(p.total_stake_minor,0),
@@ -140,10 +159,10 @@ func (service *Service) BetTasks(ctx context.Context, userID string) ([]BetTask,
 	return items, rows.Err()
 }
 
-// OnBetPlaced 按配置币种累计当日进度，并对新达标的档位发放配置币种奖励。
-// 在 betting service 的投注事务内调用，任一档位失败则整体回滚。
-func (service *Service) OnBetPlaced(ctx context.Context, tx pgx.Tx, userID, currency string, stakeMinor int64) error {
-	today := service.now().UTC().Format("2006-01-02")
+// OnBetSettled 只累计最终结算为 won/lost 的有效投注。取消和退款不会调用此方法。
+// 奖励仍须玩家在结算所属的中国时区自然日内主动领取。
+func (service *Service) OnBetSettled(ctx context.Context, tx pgx.Tx, userID, currency string, stakeMinor int64, settledAt time.Time) error {
+	today := service.betDateAt(settledAt)
 	var configured bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM bet_task_configs WHERE enabled=true AND accumulation_currency=$1)`, currency).Scan(&configured); err != nil {
 		return err
@@ -153,64 +172,84 @@ func (service *Service) OnBetPlaced(ctx context.Context, tx pgx.Tx, userID, curr
 	}
 
 	// 累计当前配置币种的当日投注总额。
-	var totalStake int64
-	err := tx.QueryRow(ctx, `
+	_, err := tx.Exec(ctx, `
 		INSERT INTO user_daily_bet_progress (user_id, bet_date, accumulation_currency, total_stake_minor)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (user_id, bet_date, accumulation_currency)
-		DO UPDATE SET total_stake_minor = user_daily_bet_progress.total_stake_minor + $4, updated_at = now()
-		RETURNING total_stake_minor`, userID, today, currency, stakeMinor).Scan(&totalStake)
+		DO UPDATE SET total_stake_minor = user_daily_bet_progress.total_stake_minor + $4, updated_at = now()`,
+		userID, today, currency, stakeMinor)
+	return err
+}
+
+// ClaimBetTask 在中国时区当日领取一个已达标档位。领取记录、钱包余额和流水
+// 位于同一事务；唯一约束保证同一用户、日期和档位只能领取一次。
+func (service *Service) ClaimBetTask(ctx context.Context, userID, configID string) (BetTaskClaim, error) {
+	if _, err := uuid.Parse(configID); err != nil {
+		return BetTaskClaim{}, ErrTaskConfigNotFound
+	}
+	tx, err := service.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return BetTaskClaim{}, err
 	}
+	defer tx.Rollback(ctx)
 
-	// 查找已达标但未领取的档位。
-	rows, err := tx.Query(ctx, `
-		SELECT c.id, c.threshold_minor, c.reward_minor, c.reward_currency
-		FROM bet_task_configs c
-		WHERE c.enabled AND c.accumulation_currency=$4 AND c.threshold_minor <= $1
-			AND NOT EXISTS (
-				SELECT 1 FROM bet_task_reward_records r
-				WHERE r.user_id = $2 AND r.bet_date = $3 AND r.config_id = c.id
-			)
-		ORDER BY c.threshold_minor`, totalStake, userID, today, currency)
+	today := service.betDate()
+	var accumulationCurrency, rewardCurrency string
+	var thresholdMinor, rewardMinor int64
+	err = tx.QueryRow(ctx, `
+		SELECT accumulation_currency,reward_currency,threshold_minor,reward_minor
+		FROM bet_task_configs
+		WHERE id=$1 AND enabled=true
+		FOR UPDATE`, configID).Scan(&accumulationCurrency, &rewardCurrency, &thresholdMinor, &rewardMinor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return BetTaskClaim{}, ErrTaskConfigNotFound
+	}
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type reward struct {
-		configID  string
-		threshold int64
-		amount    int64
-		currency  string
-	}
-	rewards := make([]reward, 0)
-	for rows.Next() {
-		var r reward
-		if err := rows.Scan(&r.configID, &r.threshold, &r.amount, &r.currency); err != nil {
-			return err
-		}
-		rewards = append(rewards, r)
-	}
-	if err := rows.Err(); err != nil {
-		return err
+		return BetTaskClaim{}, err
 	}
 
-	// 逐档发放：先写奖励记录（唯一约束兜底），再发体力。
-	for _, r := range rewards {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO bet_task_reward_records (id, user_id, bet_date, config_id, reward_minor, accumulation_currency, reward_currency)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)`, uuid.NewString(), userID, today, r.configID, r.amount, currency, r.currency); err != nil {
-			return err
-		}
-		bizID := fmt.Sprintf("bet_task:%s:%s:%s", today, currency, r.configID)
-		remark := fmt.Sprintf("当日投注 %s 达 %d 奖励 %s", currency, r.threshold, r.currency)
-		if _, err := service.creditService.RewardCurrency(ctx, tx, userID, r.currency, credit.BizBetTaskReward, bizID, r.amount, remark); err != nil {
-			return err
-		}
+	var progressMinor int64
+	err = tx.QueryRow(ctx, `
+		SELECT total_stake_minor
+		FROM user_daily_bet_progress
+		WHERE user_id=$1 AND bet_date=$2 AND accumulation_currency=$3
+		FOR UPDATE`, userID, today, accumulationCurrency).Scan(&progressMinor)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && progressMinor < thresholdMinor) {
+		return BetTaskClaim{}, ErrTaskNotCompleted
 	}
-	return nil
+	if err != nil {
+		return BetTaskClaim{}, err
+	}
+
+	claim := BetTaskClaim{
+		TaskID:         configID,
+		BetDate:        today,
+		RewardCurrency: rewardCurrency,
+		RewardMinor:    rewardMinor,
+	}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO bet_task_reward_records
+			(id,user_id,bet_date,config_id,reward_minor,accumulation_currency,reward_currency)
+		VALUES($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT(user_id,bet_date,config_id) DO NOTHING
+		RETURNING created_at`, uuid.NewString(), userID, today, configID, rewardMinor, accumulationCurrency, rewardCurrency).Scan(&claim.ClaimedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return BetTaskClaim{}, ErrTaskAlreadyClaimed
+	}
+	if err != nil {
+		return BetTaskClaim{}, err
+	}
+
+	bizID := fmt.Sprintf("bet_task:%s:%s:%s", today, accumulationCurrency, configID)
+	remark := fmt.Sprintf("当日投注 %s 达 %d 手动领取 %s", accumulationCurrency, thresholdMinor, rewardCurrency)
+	claim.BalanceAfterMinor, err = service.creditService.RewardCurrency(ctx, tx, userID, rewardCurrency, credit.BizBetTaskReward, bizID, rewardMinor, remark)
+	if err != nil {
+		return BetTaskClaim{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return BetTaskClaim{}, err
+	}
+	return claim, nil
 }
 
 func validAccumulationCurrency(v string) bool {
@@ -218,4 +257,12 @@ func validAccumulationCurrency(v string) bool {
 }
 func validRewardCurrency(v string) bool {
 	return strings.TrimSpace(v) != ""
+}
+
+func (service *Service) betDate() string {
+	return service.betDateAt(service.now())
+}
+
+func (service *Service) betDateAt(value time.Time) string {
+	return value.In(chinaTimeZone).Format("2006-01-02")
 }

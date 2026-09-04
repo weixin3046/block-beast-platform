@@ -39,8 +39,8 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	userID := uuid.NewString()
 	otherUserID := uuid.NewString()
 	_, err = pool.Exec(ctx, `
-		INSERT INTO users (id,display_name,login_name) VALUES
-		($1,'chat user',$3),($2,'other user',$4)`,
+		INSERT INTO users (id,display_name,login_name,avatar_url) VALUES
+		($1,'chat user',$3,'https://cdn.example/chat-user.png'),($2,'other user',$4,'')`,
 		userID, otherUserID, "chat-"+userID, "chat-"+otherUserID)
 	if err != nil {
 		t.Fatal(err)
@@ -73,16 +73,36 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("send message = %+v/%v/%v", first, created, err)
 	}
+	if first.Sender == nil || first.Sender.UserID < 100000 || first.Sender.DisplayName != "chat user" || first.Sender.AvatarURL != "https://cdn.example/chat-user.png" {
+		t.Fatalf("message sender = %+v", first.Sender)
+	}
 	duplicate, created, err := service.SendMessage(ctx, room.ID, userID, "request-1", "changed body", false)
 	if err != nil || created || duplicate.ID != first.ID || duplicate.Body != "hello" {
 		t.Fatalf("duplicate = %+v/%v/%v", duplicate, created, err)
+	}
+	if duplicate.Sender == nil || duplicate.Sender.UserID != first.Sender.UserID {
+		t.Fatalf("duplicate sender = %+v", duplicate.Sender)
+	}
+	messages, err := service.ListMessages(ctx, room.ID, userID, false, 10)
+	if err != nil || len(messages) != 1 || messages[0].Sender == nil || messages[0].Sender.UserID != first.Sender.UserID {
+		t.Fatalf("messages = %+v, err = %v", messages, err)
 	}
 	if _, err := service.ListMessages(ctx, room.ID, otherUserID, false, 10); !errors.Is(err, ErrRoomAccessDenied) {
 		t.Fatalf("other user error = %v", err)
 	}
 	var eventCount int
-	err = pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE aggregate_id=$1 AND event_type=$2`, room.ID, events.ChatMessageCreated).Scan(&eventCount)
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE aggregate_id=$1 AND event_type=$2`, room.ID, events.ChatMessageCreated).
+		Scan(&eventCount)
 	if err != nil || eventCount != 1 {
 		t.Fatalf("event count = %d, err = %v", eventCount, err)
+	}
+	var eventPayload string
+	err = pool.QueryRow(ctx, `SELECT payload::text FROM outbox_events WHERE aggregate_id=$1 AND event_type=$2`, room.ID, events.ChatMessageCreated).
+		Scan(&eventPayload)
+	if err != nil {
+		t.Fatalf("event payload: %v", err)
+	}
+	if strings.Contains(eventPayload, "sender_user_id") || !strings.Contains(eventPayload, `"display_name": "chat user"`) {
+		t.Fatalf("event payload = %s", eventPayload)
 	}
 }

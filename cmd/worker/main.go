@@ -14,11 +14,13 @@ import (
 
 	"github.com/block-beast/platform/internal/application/betting"
 	chainapp "github.com/block-beast/platform/internal/application/chain"
+	"github.com/block-beast/platform/internal/application/credit"
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/outbox"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/redpacket"
 	"github.com/block-beast/platform/internal/application/settlement"
+	"github.com/block-beast/platform/internal/application/task"
 	"github.com/block-beast/platform/internal/application/uploads"
 	"github.com/block-beast/platform/internal/application/virtualbot"
 	"github.com/block-beast/platform/internal/config"
@@ -71,7 +73,9 @@ func main() {
 	}
 	processor := outbox.NewProcessor(events.NewPostgresOutbox(pool), publisher)
 	roundRepository := game.NewPostgresRepository(pool)
-	settlementService := settlement.NewService(pool)
+	creditService := credit.NewService(pool)
+	taskService := task.NewService(pool, creditService)
+	settlementService := settlement.NewService(pool).WithTaskHook(taskService)
 	uploadMaintenance := uploads.NewService(pool, nil, cfg.UploadMaxBytes, cfg.UploadURLTTL)
 	redPacketService := redpacket.NewService(pool, cfg.RedPacketTTL)
 	virtualBotService := virtualbot.NewService(pool, betting.NewService(pool))
@@ -91,7 +95,7 @@ func main() {
 	processPending(logger, processor)
 	reconcileWithdrawals(ctx, logger, withdrawalSender)
 	expirePendingUploads(ctx, logger, uploadMaintenance)
-	refreshDailyLeaderboard(ctx, logger, leaderboardService)
+	refreshLeaderboards(ctx, logger, leaderboardService)
 	refundExpiredRedPackets(ctx, logger, redPacketService)
 	runVirtualAccounts(ctx, logger, virtualBotService)
 	lastStats := natsjs.ConsumerStats{}
@@ -124,7 +128,7 @@ func main() {
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
 		case <-leaderboardTicker.C:
-			refreshDailyLeaderboard(ctx, logger, leaderboardService)
+			refreshLeaderboards(ctx, logger, leaderboardService)
 		}
 	}
 }
@@ -166,13 +170,13 @@ func refundExpiredRedPackets(ctx context.Context, logger *slog.Logger, service *
 	}
 }
 
-func refreshDailyLeaderboard(ctx context.Context, logger *slog.Logger, service *leaderboard.Service) {
-	entries, err := service.RefreshDaily(ctx, time.Now().UTC())
+func refreshLeaderboards(ctx context.Context, logger *slog.Logger, service *leaderboard.Service) {
+	err := service.Refresh(ctx, time.Now())
 	if err != nil {
-		logger.Error("daily leaderboard refresh failed", "error", err)
+		logger.Error("leaderboard refresh failed", "error", err)
 		return
 	}
-	logger.Info("daily leaderboard refreshed", "entries", entries)
+	logger.Info("leaderboards refreshed")
 }
 
 func expirePendingUploads(ctx context.Context, logger *slog.Logger, service *uploads.Service) {

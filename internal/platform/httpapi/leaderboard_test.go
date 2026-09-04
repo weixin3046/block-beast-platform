@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/config"
@@ -17,11 +16,20 @@ type stubLeaderboardService struct {
 	err error
 }
 
-func (stub stubLeaderboardService) ListDaily(context.Context, time.Time, string, string, int) ([]leaderboard.Entry, error) {
-	return []leaderboard.Entry{}, stub.err
+func (stub stubLeaderboardService) List(context.Context, string, string, int) (leaderboard.Board, error) {
+	return leaderboard.Board{}, stub.err
+}
+func (stub stubLeaderboardService) GetRules(context.Context, string, string) (leaderboard.RewardRuleSet, error) {
+	return leaderboard.RewardRuleSet{}, stub.err
+}
+func (stub stubLeaderboardService) ReplaceRules(context.Context, leaderboard.RewardRuleSet) (leaderboard.RewardRuleSet, error) {
+	return leaderboard.RewardRuleSet{}, stub.err
+}
+func (stub stubLeaderboardService) ListDistributions(context.Context, leaderboard.DistributionQuery) ([]leaderboard.RewardDistribution, error) {
+	return nil, stub.err
 }
 
-func TestDailyLeaderboardValidatesDateAndFilters(t *testing.T) {
+func TestLeaderboardValidatesPeriodAndCurrency(t *testing.T) {
 	newServer := func(stub stubLeaderboardService) *Server {
 		return New(
 			config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)),
@@ -33,9 +41,9 @@ func TestDailyLeaderboardValidatesDateAndFilters(t *testing.T) {
 		stub stubLeaderboardService
 		want int
 	}{
-		{url: "/v1/leaderboards/daily?date=invalid", want: http.StatusBadRequest},
-		{url: "/v1/leaderboards/daily?currency=BTC", stub: stubLeaderboardService{err: leaderboard.ErrInvalidCurrency}, want: http.StatusBadRequest},
-		{url: "/v1/leaderboards/daily?currency=USDT", want: http.StatusOK},
+		{url: "/v1/leaderboards?period=bad&currency=USDT", stub: stubLeaderboardService{err: leaderboard.ErrInvalidPeriod}, want: http.StatusBadRequest},
+		{url: "/v1/leaderboards?period=today", stub: stubLeaderboardService{err: leaderboard.ErrInvalidCurrency}, want: http.StatusBadRequest},
+		{url: "/v1/leaderboards?period=today&currency=USDT", want: http.StatusOK},
 	} {
 		request := httptest.NewRequest(http.MethodGet, testCase.url, nil)
 		response := httptest.NewRecorder()

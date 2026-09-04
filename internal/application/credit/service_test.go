@@ -10,24 +10,27 @@ func TestAdminCreditValidatesInput(t *testing.T) {
 	service := NewService(nil)
 	ctx := context.Background()
 
-	// 金额必须为正。
-	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: CurrencyPoints, AmountMinor: 0, RequestID: "r1"}); !errors.Is(err, ErrInvalidAmount) {
+	// 金额必须是正数展示单位字符串，并由后端按币种精度换算。
+	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: CurrencyPoints, Amount: "0", RequestID: "r1"}); !errors.Is(err, ErrInvalidAmount) {
 		t.Fatalf("zero amount error = %v, want ErrInvalidAmount", err)
 	}
-	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: CurrencyPoints, AmountMinor: -100, RequestID: "r1"}); !errors.Is(err, ErrInvalidAmount) {
+	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: CurrencyPoints, Amount: "-100", RequestID: "r1"}); !errors.Is(err, ErrInvalidAmount) {
 		t.Fatalf("negative amount error = %v, want ErrInvalidAmount", err)
 	}
+	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: CurrencyPoints, Amount: "1.0000000000000000001", RequestID: "r1"}); !errors.Is(err, ErrInvalidAmount) {
+		t.Fatalf("precision error = %v, want ErrInvalidAmount", err)
+	}
 
-	// 币种必须是三种之一。
-	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: " ", AmountMinor: 100, RequestID: "r1"}); !errors.Is(err, ErrInvalidCurrency) {
+	// 币种不能为空。
+	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: " ", Amount: "100", RequestID: "r1"}); !errors.Is(err, ErrInvalidCurrency) {
 		t.Fatalf("invalid currency error = %v, want ErrInvalidCurrency", err)
 	}
 
 	// user_id 和 request_id 必填。
-	if _, err := service.AdminCredit(ctx, AdminCreditInput{Currency: CurrencyPoints, AmountMinor: 100, RequestID: "r1"}); !errors.Is(err, ErrUserNotFound) {
+	if _, err := service.AdminCredit(ctx, AdminCreditInput{Currency: CurrencyPoints, Amount: "100", RequestID: "r1"}); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("empty user error = %v, want ErrUserNotFound", err)
 	}
-	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: CurrencyPoints, AmountMinor: 100}); !errors.Is(err, ErrUserNotFound) {
+	if _, err := service.AdminCredit(ctx, AdminCreditInput{UserID: "u1", Currency: CurrencyPoints, Amount: "100"}); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("empty request_id error = %v, want ErrUserNotFound", err)
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/block-beast/platform/internal/domain/wallet"
 )
 
 // 平台内支持的三种可充值币种。
@@ -196,7 +198,8 @@ func NewService(pool *pgxpool.Pool) *Service {
 type AdminCreditInput struct {
 	UserID      string `json:"user_id"`
 	Currency    string `json:"currency"`
-	AmountMinor int64  `json:"amount_minor"` // 正数
+	Amount      string `json:"amount"` // 展示单位十进制字符串，由后端换算为最小单位
+	AmountMinor int64  `json:"-"`
 	Remark      string `json:"remark"`
 	OperatorID  string `json:"-"`          // 从访问令牌注入，不信任请求体
 	RequestID   string `json:"request_id"` // 幂等键，同一 request_id 不重复入账
@@ -211,20 +214,19 @@ type CreditResult struct {
 	OccurredAt        time.Time `json:"occurred_at"`
 }
 
-// AdminCredit 幂等处理管理员手动充值：锁钱包、加余额、写对应币种的流水表。
-// 积分流水写入 points_ledger，体力流水写入 stamina_ledger，USDT 流水写入 ledger_entries。
+// AdminCredit 幂等处理管理员手动充值：锁钱包、加余额、写统一流水。
+// 所有币种统一写入 ledger_entries，与钱包及 outbox 位于同一事务。
 func (service *Service) AdminCredit(ctx context.Context, input AdminCreditInput) (CreditResult, error) {
 	input.Currency = strings.ToUpper(strings.TrimSpace(input.Currency))
-	if input.AmountMinor <= 0 {
-		return CreditResult{}, ErrInvalidAmount
-	}
 	if !validCurrency(input.Currency) {
 		return CreditResult{}, ErrInvalidCurrency
 	}
 	if input.UserID == "" || input.RequestID == "" {
 		return CreditResult{}, ErrUserNotFound
 	}
-
+	if !wallet.ValidDisplayAmount(input.Amount) {
+		return CreditResult{}, ErrInvalidAmount
+	}
 	tx, err := service.pool.Begin(ctx)
 	if err != nil {
 		return CreditResult{}, err
@@ -232,10 +234,25 @@ func (service *Service) AdminCredit(ctx context.Context, input AdminCreditInput)
 	defer tx.Rollback(ctx)
 
 	// 幂等检查：同一 request_id 已入账则直接返回。
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "admin_credit:"+input.UserID+":"+input.Currency+":"+input.RequestID); err != nil {
+		return CreditResult{}, err
+	}
 	if existing, err := findLedgerByBizID(ctx, tx, input.UserID, input.Currency, BizAdminCredit, input.RequestID); err == nil {
 		return existing, tx.Commit(ctx)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return CreditResult{}, err
+	}
+
+	decimals, err := wallet.ResolveDecimals(ctx, tx, input.Currency, true)
+	if errors.Is(err, wallet.ErrUnknownCurrency) || errors.Is(err, wallet.ErrCurrencyDisabled) {
+		return CreditResult{}, fmt.Errorf("%w: %v", ErrInvalidCurrency, err)
+	}
+	if err != nil {
+		return CreditResult{}, err
+	}
+	input.AmountMinor, err = wallet.ParseDisplayAmount(input.Amount, decimals)
+	if err != nil {
+		return CreditResult{}, fmt.Errorf("%w: amount allows at most %d decimal places", ErrInvalidAmount, decimals)
 	}
 
 	balanceAfter, err := addBalance(ctx, tx, input.UserID, input.Currency, input.AmountMinor)
@@ -331,7 +348,7 @@ func (service *Service) ConsumeStamina(ctx context.Context, input ConsumeStamina
 }
 
 // RewardStamina 发放活动任务体力奖励，供 task service 调用。
-// 在同一事务中更新 wallets 余额并写 stamina_ledger；bizType 区分奖励来源。
+// 在同一事务中更新 wallets 余额并写 ledger_entries；bizType 区分奖励来源。
 func (service *Service) RewardStamina(ctx context.Context, tx pgx.Tx, userID string, bizType string, bizID string, amountMinor int64, remark string) (int64, error) {
 	return service.RewardCurrency(ctx, tx, userID, CurrencyStamina, bizType, bizID, amountMinor, remark)
 }
@@ -359,23 +376,25 @@ func (service *Service) RewardCurrency(ctx context.Context, tx pgx.Tx, userID, c
 func (service *Service) Balance(ctx context.Context, userID string, currency string) (BalanceInfo, error) {
 	var info BalanceInfo
 	err := service.pool.QueryRow(ctx, `
-		SELECT user_id, currency, available_minor, frozen_minor
-		FROM wallets WHERE user_id = $1 AND currency = $2`, userID, currency).
-		Scan(&info.UserID, &info.Currency, &info.AvailableMinor, &info.FrozenMinor)
+		SELECT w.user_id, w.currency, w.available_minor, w.frozen_minor,c.decimals
+		FROM wallets w JOIN currencies c ON c.code=w.currency WHERE w.user_id = $1 AND w.currency = $2`, userID, currency).
+		Scan(&info.UserID, &info.Currency, &info.AvailableMinor, &info.FrozenMinor, &info.Decimals)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BalanceInfo{}, ErrUserNotFound
 	}
 	if err != nil {
 		return BalanceInfo{}, err
 	}
+	info.Available, _ = wallet.FormatDisplayAmount(info.AvailableMinor, info.Decimals)
+	info.Frozen, _ = wallet.FormatDisplayAmount(info.FrozenMinor, info.Decimals)
 	return info, nil
 }
 
 // Balances 查询用户所有币种余额。
 func (service *Service) Balances(ctx context.Context, userID string) ([]BalanceInfo, error) {
 	rows, err := service.pool.Query(ctx, `
-		SELECT user_id, currency, available_minor, frozen_minor
-		FROM wallets WHERE user_id = $1 ORDER BY currency`, userID)
+		SELECT w.user_id, w.currency, w.available_minor, w.frozen_minor,c.decimals
+		FROM wallets w JOIN currencies c ON c.code=w.currency WHERE w.user_id = $1 ORDER BY w.currency`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -383,9 +402,11 @@ func (service *Service) Balances(ctx context.Context, userID string) ([]BalanceI
 	infos := make([]BalanceInfo, 0)
 	for rows.Next() {
 		var info BalanceInfo
-		if err := rows.Scan(&info.UserID, &info.Currency, &info.AvailableMinor, &info.FrozenMinor); err != nil {
+		if err := rows.Scan(&info.UserID, &info.Currency, &info.AvailableMinor, &info.FrozenMinor, &info.Decimals); err != nil {
 			return nil, err
 		}
+		info.Available, _ = wallet.FormatDisplayAmount(info.AvailableMinor, info.Decimals)
+		info.Frozen, _ = wallet.FormatDisplayAmount(info.FrozenMinor, info.Decimals)
 		infos = append(infos, info)
 	}
 	return infos, rows.Err()
@@ -396,6 +417,9 @@ type BalanceInfo struct {
 	Currency       string `json:"currency"`
 	AvailableMinor int64  `json:"available_minor"`
 	FrozenMinor    int64  `json:"frozen_minor"`
+	Decimals       int    `json:"decimals"`
+	Available      string `json:"available"`
+	Frozen         string `json:"frozen"`
 }
 
 // LedgerEntry 是一条积分或体力流水。
@@ -413,22 +437,21 @@ type LedgerEntry struct {
 
 // ListPointsLedger 分页查询用户积分流水（按时间倒序）。
 func (service *Service) ListPointsLedger(ctx context.Context, userID string, limit int, offset int) ([]LedgerEntry, error) {
-	return listLedger(ctx, service.pool, "points_ledger", userID, limit, offset)
+	return listLedger(ctx, service.pool, CurrencyPoints, userID, limit, offset)
 }
 
 // ListStaminaLedger 分页查询用户体力流水（按时间倒序）。
 func (service *Service) ListStaminaLedger(ctx context.Context, userID string, limit int, offset int) ([]LedgerEntry, error) {
-	return listLedger(ctx, service.pool, "stamina_ledger", userID, limit, offset)
+	return listLedger(ctx, service.pool, CurrencyStamina, userID, limit, offset)
 }
 
-func listLedger(ctx context.Context, pool *pgxpool.Pool, table string, userID string, limit int, offset int) ([]LedgerEntry, error) {
+func listLedger(ctx context.Context, pool *pgxpool.Pool, currency string, userID string, limit int, offset int) ([]LedgerEntry, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	query := fmt.Sprintf(`
-		SELECT id, user_id, business_type, business_id, amount_minor, balance_after_minor, remark, COALESCE(operator_id::text, ''), occurred_at
-		FROM %s WHERE user_id = $1 ORDER BY occurred_at DESC LIMIT $2 OFFSET $3`, table)
-	rows, err := pool.Query(ctx, query, userID, limit, offset)
+	query := `SELECT le.id,w.user_id,le.business_type,le.business_id,le.amount_minor,le.balance_after_minor,le.remark,COALESCE(le.operator_id::text,''),le.occurred_at
+        FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id WHERE w.user_id=$1 AND w.currency=$4 ORDER BY le.occurred_at DESC,le.id DESC LIMIT $2 OFFSET $3`
+	rows, err := pool.Query(ctx, query, userID, limit, offset, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -483,34 +506,24 @@ func deductBalance(ctx context.Context, tx pgx.Tx, userID string, currency strin
 	return balanceAfter, err
 }
 
-// writeLedger 按币种写入对应的流水表。
+// writeLedger 为指定币种的钱包写统一流水，并区分可用与冻结变动。
 func writeLedger(ctx context.Context, tx pgx.Tx, userID string, currency string, bizType string, bizID string, amount int64, balanceAfter int64, remark string, operatorID string) error {
-	switch currency {
-	case CurrencyPoints:
-		return insertLedger(ctx, tx, "points_ledger", userID, bizType, bizID, amount, balanceAfter, remark, operatorID)
-	case CurrencyStamina:
-		return insertLedger(ctx, tx, "stamina_ledger", userID, bizType, bizID, amount, balanceAfter, remark, operatorID)
-	default: // USDT 走现有 ledger_entries
-		walletID, err := walletIDOf(ctx, tx, userID, currency)
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `
-			INSERT INTO ledger_entries (id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor)
-			VALUES ($1, $2, $3, $4, 'deposit', $5, $6)`, uuid.NewString(), walletID, bizType, bizID, amount, balanceAfter)
+	walletID, err := walletIDOf(ctx, tx, userID, currency)
+	if err != nil {
 		return err
 	}
-}
-
-func insertLedger(ctx context.Context, tx pgx.Tx, table string, userID string, bizType string, bizID string, amount int64, balanceAfter int64, remark string, operatorID string) error {
-	var operator any
-	if operatorID != "" {
-		operator = operatorID
+	availableDelta, frozenDelta := amount, int64(0)
+	switch bizType {
+	case "point_withdrawal":
+		frozenDelta = -amount
+	case "point_withdrawal_debit":
+		availableDelta = 0
+		frozenDelta = amount
+	case "point_withdrawal_unfreeze":
+		frozenDelta = -amount
 	}
-	query := fmt.Sprintf(`
-		INSERT INTO %s (id, user_id, business_type, business_id, amount_minor, balance_after_minor, remark, operator_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, table)
-	_, err := tx.Exec(ctx, query, uuid.NewString(), userID, bizType, bizID, amount, balanceAfter, remark, operator)
+	_, err = tx.Exec(ctx, `INSERT INTO ledger_entries(id,wallet_id,business_type,business_id,entry_type,amount_minor,balance_after_minor,remark,operator_id,available_delta_minor,frozen_delta_minor)
+        VALUES($1,$2,$3,$4,$3,$5,$6,$7,NULLIF($8,'')::uuid,$9,$10)`, uuid.NewString(), walletID, bizType, bizID, amount, balanceAfter, remark, operatorID, availableDelta, frozenDelta)
 	return err
 }
 
@@ -523,27 +536,11 @@ func walletIDOf(ctx context.Context, tx pgx.Tx, userID string, currency string) 
 // findLedgerByBizID 按业务键查询流水（幂等检查）。
 func findLedgerByBizID(ctx context.Context, tx pgx.Tx, userID string, currency string, bizType string, bizID string) (CreditResult, error) {
 	var result CreditResult
-	var table string
-	switch currency {
-	case CurrencyPoints:
-		table = "points_ledger"
-	case CurrencyStamina:
-		table = "stamina_ledger"
-	default:
-		// USDT: 查 ledger_entries。
-		err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 			SELECT wallets.user_id, wallets.currency, ledger_entries.amount_minor, ledger_entries.balance_after_minor, ledger_entries.occurred_at
 			FROM ledger_entries JOIN wallets ON wallets.id = ledger_entries.wallet_id
 			WHERE wallets.user_id = $1 AND wallets.currency = $2 AND ledger_entries.business_type = $3 AND ledger_entries.business_id = $4`,
-			userID, currency, bizType, bizID).
-			Scan(&result.UserID, &result.Currency, &result.AmountMinor, &result.BalanceAfterMinor, &result.OccurredAt)
-		result.Credited = false
-		return result, err
-	}
-	query := fmt.Sprintf(`
-		SELECT user_id, $2, amount_minor, balance_after_minor, occurred_at
-		FROM %s WHERE user_id = $1 AND business_type = $3 AND business_id = $4`, table)
-	err := tx.QueryRow(ctx, query, userID, currency, bizType, bizID).
+		userID, currency, bizType, bizID).
 		Scan(&result.UserID, &result.Currency, &result.AmountMinor, &result.BalanceAfterMinor, &result.OccurredAt)
 	result.Credited = false
 	return result, err
@@ -552,8 +549,8 @@ func findLedgerByBizID(ctx context.Context, tx pgx.Tx, userID string, currency s
 func findStaminaLedger(ctx context.Context, tx pgx.Tx, userID string, bizType string, bizID string) (LedgerEntry, error) {
 	var entry LedgerEntry
 	err := tx.QueryRow(ctx, `
-		SELECT id, user_id, business_type, business_id, amount_minor, balance_after_minor, remark, COALESCE(operator_id::text, ''), occurred_at
-		FROM stamina_ledger WHERE user_id = $1 AND business_type = $2 AND business_id = $3`, userID, bizType, bizID).
+        SELECT le.id,w.user_id,le.business_type,le.business_id,le.amount_minor,le.balance_after_minor,le.remark,COALESCE(le.operator_id::text,''),le.occurred_at
+        FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id WHERE w.user_id=$1 AND w.currency='STAMINA' AND le.business_type=$2 AND le.business_id=$3`, userID, bizType, bizID).
 		Scan(&entry.ID, &entry.UserID, &entry.BusinessType, &entry.BusinessID, &entry.AmountMinor, &entry.BalanceAfterMinor, &entry.Remark, &entry.OperatorID, &entry.OccurredAt)
 	return entry, err
 }

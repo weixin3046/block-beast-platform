@@ -89,6 +89,25 @@ func (server *Server) betTasks(writer http.ResponseWriter, request *http.Request
 	writeJSON(writer, http.StatusOK, items)
 }
 
+func (server *Server) claimBetTask(writer http.ResponseWriter, request *http.Request) {
+	if server.tasks == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "task service is unavailable"})
+		return
+	}
+	claims, _ := ClaimsFromContext(request.Context())
+	result, err := server.tasks.ClaimBetTask(request.Context(), claims.Subject, request.PathValue("taskID"))
+	switch {
+	case errors.Is(err, task.ErrTaskConfigNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, task.ErrTaskNotCompleted), errors.Is(err, task.ErrTaskAlreadyClaimed):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to claim task reward"})
+	default:
+		writeJSON(writer, http.StatusOK, result)
+	}
+}
+
 func (server *Server) adminBetTaskConfigs(writer http.ResponseWriter, request *http.Request) {
 	if server.tasks == nil {
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "task service is unavailable"})

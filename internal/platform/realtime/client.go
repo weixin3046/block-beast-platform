@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/block-beast/platform/internal/platform/usermessage"
 	"github.com/coder/websocket"
 )
 
@@ -105,6 +106,6 @@ func (item *client) writeLoop(ctx context.Context) {
 func (item *client) close(status websocket.StatusCode, reason string) {
 	item.closeOnce.Do(func() {
 		close(item.done)
-		_ = item.connection.Close(status, reason)
+		_ = item.connection.Close(status, usermessage.Chinese(reason))
 	})
 }

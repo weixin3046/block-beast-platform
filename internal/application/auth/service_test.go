@@ -23,7 +23,7 @@ func TestLoginRejectsUnconfiguredService(t *testing.T) {
 
 type stubRegistrar struct{}
 
-func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ []string, _ int64) (string, error) {
+func (stubRegistrar) RegisterPasswordUser(_ context.Context, _ string, _ string, _ string, _ string, _ int64) (string, error) {
 	return "user-1", nil
 }
 
@@ -393,7 +393,7 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 		}
 		wallets[currency] = availableMinor
 	}
-	for _, currency := range DefaultWalletCurrencies {
+	for _, currency := range []string{"USDT", "POINTS", "JADE", "ORIGIN_STONE", "STAMINA", "USDT_STAMINA", "JADE_STAMINA", "ORIGIN_STONE_STAMINA"} {
 		if balance, ok := wallets[currency]; !ok || balance != 0 {
 			t.Fatalf("wallet %s = %d, want 0", currency, balance)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
@@ -12,12 +13,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type ValidBetTaskHook interface {
+	OnBetSettled(ctx context.Context, tx pgx.Tx, userID, currency string, stakeMinor int64, settledAt time.Time) error
+}
+
 type Service struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	taskHook ValidBetTaskHook
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
+}
+
+func (service *Service) WithTaskHook(hook ValidBetTaskHook) *Service {
+	service.taskHook = hook
+	return service
 }
 
 func (service *Service) CancelRound(ctx context.Context, roundID string) (int, error) {
@@ -82,7 +93,7 @@ func (service *Service) CancelRound(ctx context.Context, roundID string) (int, e
 		if err != nil {
 			return 0, err
 		}
-		_, err = tx.Exec(ctx, `UPDATE bets SET status = 'refunded', settled_at = now() WHERE id = $1`, bet.betID)
+		_, err = tx.Exec(ctx, `UPDATE bets SET status = 'refunded', settled_at = now(), balance_after_settlement_minor = $2 WHERE id = $1`, bet.betID, availableMinor)
 		if err != nil {
 			return 0, err
 		}

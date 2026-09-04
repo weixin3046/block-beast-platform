@@ -17,17 +17,19 @@ var ErrCannotDisableOwnAdmin = errors.New("administrator cannot disable own acco
 var ErrCannotDisableLastAdmin = errors.New("cannot disable the platform's last active admin")
 var ErrInvalidAgentLevel = errors.New("agent level must be between 1 and 6")
 var ErrInvalidProfile = errors.New("display_name is required and profile fields are too long")
+var ErrInvalidAvatar = errors.New("avatar_url must be empty or a confirmed image upload owned by the current user")
 
 type User struct {
-	ID             int64     `json:"id"`
-	LoginName      string    `json:"login_name"`
-	DisplayName    string    `json:"display_name"`
-	Status         string    `json:"status"`
-	InvitationCode int64     `json:"invitation_code"`
-	AgentLevel     int       `json:"agent_level"`
-	Roles          []string  `json:"roles,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	AvatarURL      string    `json:"avatar_url"`
+	ID                   int64     `json:"id"`
+	LoginName            string    `json:"login_name"`
+	DisplayName          string    `json:"display_name"`
+	Status               string    `json:"status"`
+	InvitationCode       int64     `json:"invitation_code"`
+	AgentLevel           int       `json:"agent_level"`
+	Roles                []string  `json:"roles,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	AvatarURL            string    `json:"avatar_url"`
+	SecondaryPasswordSet *bool     `json:"secondary_password_set,omitempty"`
 }
 
 type Service struct{ pool *pgxpool.Pool }
@@ -61,17 +63,22 @@ func (service *Service) ListUsers(ctx context.Context, status, query string, lim
 
 func (service *Service) CurrentUser(ctx context.Context, userID string) (User, error) {
 	var user User
+	var secondaryPasswordSet bool
 	err := service.pool.QueryRow(ctx, `
 		SELECT u.public_id, COALESCE(u.login_name,''), u.display_name, u.status, u.created_at,
 			CASE WHEN u.avatar_url LIKE 'uploads/%' THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '') ELSE COALESCE(u.avatar_url,'') END,
-			u.invitation_code, COALESCE(u.agent_level,0), COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}')
+			u.invitation_code, COALESCE(u.agent_level,0), COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}'),
+			COALESCE(u.secondary_password_hash <> '', false)
 		FROM users u
 		LEFT JOIN user_roles ur ON ur.user_id=u.id
 		LEFT JOIN roles r ON r.id=ur.role_id
 		WHERE u.id=$1
-	GROUP BY u.id`, userID).Scan(&user.ID, &user.LoginName, &user.DisplayName, &user.Status, &user.CreatedAt, &user.AvatarURL, &user.InvitationCode, &user.AgentLevel, &user.Roles)
+	GROUP BY u.id`, userID).Scan(&user.ID, &user.LoginName, &user.DisplayName, &user.Status, &user.CreatedAt, &user.AvatarURL, &user.InvitationCode, &user.AgentLevel, &user.Roles, &secondaryPasswordSet)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
+	}
+	if err == nil {
+		user.SecondaryPasswordSet = &secondaryPasswordSet
 	}
 	return user, err
 }
@@ -82,9 +89,29 @@ func (service *Service) UpdateCurrentProfile(ctx context.Context, userID, displa
 	if displayName == "" || len(displayName) > 100 || len(avatarURL) > 2048 {
 		return User{}, ErrInvalidProfile
 	}
-	_, err := service.pool.Exec(ctx, `UPDATE users SET display_name=$2,avatar_url=$3,updated_at=now() WHERE id=$1`, userID, displayName, avatarURL)
+	result, err := service.pool.Exec(ctx, `
+		UPDATE users
+		SET display_name=$2,avatar_url=$3,updated_at=now()
+		WHERE id=$1
+		  AND ($3='' OR EXISTS(
+			SELECT 1 FROM uploads
+			WHERE owner_user_id=$1
+			  AND storage_key=$3
+			  AND status='confirmed'
+			  AND lower(content_type) IN ('image/jpeg','image/png','image/webp')
+		  ))`, userID, displayName, avatarURL)
 	if err != nil {
 		return User{}, err
+	}
+	if result.RowsAffected() == 0 {
+		var userExists bool
+		if err := service.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)`, userID).Scan(&userExists); err != nil {
+			return User{}, err
+		}
+		if !userExists {
+			return User{}, ErrUserNotFound
+		}
+		return User{}, ErrInvalidAvatar
 	}
 	return service.CurrentUser(ctx, userID)
 }

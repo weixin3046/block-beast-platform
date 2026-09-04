@@ -214,7 +214,11 @@ interface ClientCommand {
     "message": {
       "id": "8ab4bb89-e89f-4a52-b71d-36741de6528f",
       "room_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
-      "sender_user_id": "0ecdd037-e5a1-4831-ad20-ac30f05b6098",
+      "sender": {
+        "user_id": 100009,
+        "display_name": "玩家一号",
+        "avatar_url": "/v1/avatars/100009?v=8f11a3b7"
+      },
       "body": "我要上分",
       "status": "visible",
       "client_request_id": "chat-001",
@@ -269,15 +273,38 @@ WebSocket 事件是状态变化通知，不是可回放日志：
   "type": "event",
   "subject": "game.bet.placed",
   "payload": {
-    "bet_id": "5a69a884-d231-4109-b306-8c98fbe28456",
-    "round_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
-    "user_id": "0ecdd037-e5a1-4831-ad20-ac30f05b6098"
+    "bet": {
+      "bet_id": "5a69a884-d231-4109-b306-8c98fbe28456",
+      "player": {
+        "user_id": 100009,
+        "display_name": "玩家一号",
+        "avatar_url": "/v1/avatars/100009",
+        "is_virtual": false
+      },
+      "round_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
+      "game_type": "hash_9",
+      "game_name": "9区块",
+      "round_sequence": 85767406,
+      "currency": "POINTS",
+      "game_room_id": "94000000-0000-4000-8000-000000000001",
+      "game_room_code": "hash_rate_1940",
+      "game_room_name": "高额返水 1.94 倍",
+      "play_mode": "road",
+      "selection": {"pick": "odd"},
+      "stake_minor": 100,
+      "payout_multiplier": 1940,
+      "payout_divisor": 1000,
+      "payout_rate": "1.94",
+      "status": "accepted",
+      "payout_minor": 0,
+      "placed_at": "2026-08-29T10:00:20Z"
+    }
   },
   "occurred_at": "2026-08-29T10:00:20Z"
 }
 ```
 
-这是广播事件，当前 payload 只包含标识字段，不包含币种、金额或选择。需要完整投注数据时，使用有权限的 HTTP 投注查询接口。
+这是广播事件，`payload.bet` 与 `GET /v1/bets/public-feed` 的单条记录结构一致，前端可直接按 `bet_id` 插入或去重。事件不包含余额、登录账号或内部用户 UUID。
 
 ### 6.1.1 `game.bet.cancelled`
 
@@ -289,13 +316,38 @@ WebSocket 事件是状态变化通知，不是可回放日志：
   "type": "event",
   "subject": "game.bet.cancelled",
   "payload": {
-    "bet_id": "5a69a884-d231-4109-b306-8c98fbe28456",
-    "round_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
-    "user_id": "0ecdd037-e5a1-4831-ad20-ac30f05b6098"
+    "bet": {
+      "bet_id": "5a69a884-d231-4109-b306-8c98fbe28456",
+      "player": {
+        "user_id": 100009,
+        "display_name": "玩家一号",
+        "avatar_url": "/v1/avatars/100009",
+        "is_virtual": false
+      },
+      "round_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
+      "game_type": "hash_9",
+      "game_name": "9区块",
+      "round_sequence": 85767406,
+      "currency": "POINTS",
+      "game_room_code": "hash_rate_1940",
+      "game_room_name": "高额返水 1.94 倍",
+      "play_mode": "road",
+      "selection": {"pick": "odd"},
+      "stake_minor": 100,
+      "payout_multiplier": 1940,
+      "payout_divisor": 1000,
+      "payout_rate": "1.94",
+      "status": "cancelled",
+      "payout_minor": 0,
+      "placed_at": "2026-08-29T10:00:20Z",
+      "settled_at": "2026-08-29T10:00:21Z"
+    }
   },
   "occurred_at": "2026-08-29T10:00:21Z"
 }
 ```
+
+前端按 `payload.bet.bet_id` 替换公开投注列表中的原记录。广播载荷不包含退款后余额；发起取消的玩家从 HTTP 取消响应读取 `balance_after_refund_minor`。
 
 ### 6.2 `game.round.closed`
 
@@ -423,7 +475,11 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
 
 提现 `confirmed` 和 `failed` 终态当前也没有对应的 Outbox/WebSocket 事件。前端在提交提现后必须通过 HTTP 查询提现详情，直到进入终态。不要只依赖 Socket 更新提现状态。
 
-`wallet.ledger.committed` 目前只有事件常量，没有业务发布方，因此前端不能依赖该事件刷新所有钱包变动。
+`wallet.ledger.committed` 自数据库迁移 0045 起由统一账本触发器写入 outbox，再经 Worker 和实时网关发送给该钱包所属用户。投注扣款、结算入账、充值、奖励和提现产生新流水时均会发送；历史搬迁不补发旧事件。
+
+payload 字段：`user_id`（内部路由 ID，不作玩家公开展示）、`currency`、`ledger_id`、`business_id`、`business_type`、`available_delta_minor`、`frozen_delta_minor`、`available_after_minor`、`frozen_after_minor`。金额均为最小单位整数；前端收到后建议重新查询全部钱包余额接口，直接使用其中的 `available/frozen` 字符串。
+
+这是变更通知，不是另一次发奖指令。与原投注/充值等业务事件可能同时到达，按事件 ID 去重，并以 HTTP 查询为最终状态；不能对多个事件重复累加余额，重连后也必须重新查询。
 
 ## 8. 聊天与红包事件
 
@@ -439,13 +495,16 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
     "message": {
       "id": "8ab4bb89-e89f-4a52-b71d-36741de6528f",
       "room_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
-      "sender_user_id": "0ecdd037-e5a1-4831-ad20-ac30f05b6098",
+      "sender": {
+        "user_id": 100009,
+        "display_name": "玩家一号",
+        "avatar_url": "/v1/avatars/100009?v=8f11a3b7"
+      },
       "body": "你好",
       "status": "visible",
       "client_request_id": "chat-001",
       "created_at": "2026-08-29T10:10:00Z"
     },
-    "user_ids": [],
     "broadcast": true
   },
   "occurred_at": "2026-08-29T10:10:00Z"
@@ -453,9 +512,10 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
 ```
 
 - 全局/游戏房间：`broadcast=true`，需要订阅 `chat`。
-- 客服/私聊房间：`broadcast=false`，`user_ids` 是房间成员；成员无需订阅 `chat` 也会定向收到。
-- 后台角色虽然可以通过 HTTP 读写客服房间，但当前不会仅因拥有后台角色就自动加入 `user_ids`。未成为房间成员的后台客服必须通过 HTTP 刷新消息，不能依赖 Socket 收到玩家的新消息。
+- 客服/私聊房间：`broadcast=false`，服务端按房间成员定向投递；成员无需订阅 `chat` 也会收到。内部定向用户 ID 不会出现在前端载荷中。
+- 后台角色虽然可以通过 HTTP 读写客服房间，但当前不会仅因拥有后台角色就自动成为 Socket 定向接收者。未成为房间成员的后台客服必须通过 HTTP 刷新消息，不能依赖 Socket 收到玩家的新消息。
 - 前端按 `message.id` 去重。
+- `message.sender` 与 HTTP 历史消息完全一致：`user_id` 是公开数字 ID，名称读取 `display_name`，头像读取 `avatar_url`。空头像由前端显示默认图；系统消息可以没有 `sender`。
 
 ### 8.2 `chat.red_packet.created`
 
@@ -481,7 +541,6 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
       "expires_at": "2026-08-30T10:10:00Z",
       "created_at": "2026-08-29T10:10:00Z"
     },
-    "user_ids": [],
     "broadcast": true
   },
   "occurred_at": "2026-08-29T10:10:00Z"
@@ -506,7 +565,6 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
       "amount_minor": 860,
       "claimed_at": "2026-08-29T10:11:00Z"
     },
-    "user_ids": [],
     "broadcast": true
   },
   "occurred_at": "2026-08-29T10:11:00Z"
@@ -524,7 +582,6 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
     "room_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
     "red_packet_id": "92a42a95-f3c3-4468-a014-ae59e43ce3bb",
     "refund_minor": 3200,
-    "user_ids": [],
     "broadcast": true
   },
   "occurred_at": "2026-08-30T10:10:01Z"
@@ -542,7 +599,7 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
   "v": 1,
   "type": "error",
   "request_id": "chat-001",
-  "error": "chat room access denied",
+  "error": "无权访问该聊天室",
   "occurred_at": "2026-08-29T10:12:00Z"
 }
 ```
@@ -551,14 +608,16 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
 
 | `error` | 场景 | 建议处理 |
 | --- | --- | --- |
-| `invalid realtime command` | JSON 无效、版本/类型错误、topic 无效、缺少必要字段。 | 记录命令类型并修正客户端；不要原样无限重试。 |
-| `text messages are required` | 发送了二进制帧。 | 改为 JSON 文本帧。 |
-| `message must contain 1-2000 characters` | 聊天内容为空或过长。 | 前端校验后提示用户。 |
-| `client_request_id is required` | 聊天幂等键为空或超过 128 字符。 | 生成并复用合法请求 ID。 |
-| `chat room access denied` | 当前用户无房间权限。 | 停止重试并刷新房间列表。 |
-| `chat room not found` | 房间不存在。 | 刷新房间列表。 |
-| `chat is unavailable` | 网关未装配聊天服务。 | 退避后重试或降级提示。 |
-| `unable to send chat message` | 服务端内部或依赖异常。 | 保留相同 `request_id`，退避后重试。 |
+| `实时消息指令格式不正确` | JSON 无效、版本/类型错误、topic 无效、缺少必要字段。 | 记录命令类型并修正客户端；不要原样无限重试。 |
+| `请发送文本消息` | 发送了二进制帧。 | 改为 JSON 文本帧。 |
+| `消息内容须为 1 至 2000 个字符` | 聊天内容为空或过长。 | 前端校验后提示用户。 |
+| `请填写请求唯一标识 client_request_id` | 聊天幂等键为空或超过 128 字符。 | 生成并复用合法请求 ID。 |
+| `无权访问该聊天室` | 当前用户无房间权限。 | 停止重试并刷新房间列表。 |
+| `聊天室不存在` | 房间不存在。 | 刷新房间列表。 |
+| `聊天服务暂不可用` | 网关未装配聊天服务。 | 退避后重试或降级提示。 |
+| `发送聊天消息失败` | 服务端内部或依赖异常。 | 保留相同 `request_id`，退避后重试。 |
+
+`error` 为展示用中文，`type/subject/request_id` 等协议字段不变，不要按中文文本比较业务类型。未知内部错误使用中文兜底，不直接透传数据库和服务商异常。网关主动关闭连接的说明为中文，关闭码不变；WebSocket 库自身产生的底层协议关闭错误不属于业务提示。
 
 订阅、取消订阅和应用层 ping 的 `request_id` 不是强制字段，但推荐始终提供，便于关联请求与响应。`chat.send` 的 `request_id` 强制必填。
 
@@ -638,7 +697,7 @@ export class RealtimeClient {
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(String(event.data)) as RealtimeEnvelope;
-        if (message.v !== 1) throw new Error(`unsupported realtime version: ${message.v}`);
+        if (message.v !== 1) throw new Error(`不支持的实时协议版本：${message.v}`);
 
         if (message.type === "hello") {
           const extraTopics = [...this.topics].filter((topic) => topic !== "game");
@@ -656,7 +715,7 @@ export class RealtimeClient {
     };
 
     socket.onerror = () => {
-      this.options.onError?.(new Error("realtime connection error"));
+      this.options.onError?.(new Error("实时连接异常"));
     };
 
     socket.onclose = () => {
@@ -689,12 +748,12 @@ export class RealtimeClient {
 
   close(): void {
     this.stopped = true;
-    this.socket?.close(1000, "client closed");
+    this.socket?.close(1000, "客户端主动关闭");
   }
 
   private send(command: object): void {
     if (this.socket?.readyState !== WebSocket.OPEN) {
-      throw new Error("realtime connection is not open");
+      throw new Error("实时连接尚未建立");
     }
     this.socket.send(JSON.stringify(command));
   }
@@ -766,7 +825,7 @@ realtime.subscribe("chat");
 - Socket 内刷新或替换 Access Token。
 - 动态订阅任意钱包或其他用户事件。
 - 提现审批、广播、成功、失败的完整实时状态链。
-- 每一笔账本变化的统一钱包事件。
+- 全部历史钱包事件的离线回放（新流水已有统一钱包通知，但不是可补拉的离线消息队列）。
 - 管理后台专用的全量玩家资金订阅。
 - 管理后台客服角色自动接收全部客服房间消息。
 

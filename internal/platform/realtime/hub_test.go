@@ -28,6 +28,25 @@ func TestEventTargetSeparatesPublicAndPrivateEvents(t *testing.T) {
 	}
 }
 
+func TestPublicChatEventPayloadHidesRoutingUserIDs(t *testing.T) {
+	input := []byte(`{"room_id":"room-1","message":{"sender":{"user_id":100009,"display_name":"玩家一号","avatar_url":"/v1/avatars/100009"}},"user_ids":["internal-user-id"],"broadcast":false}`)
+	payload := publicEventPayload("chat.message.created", input)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode public payload: %v", err)
+	}
+	if _, exists := fields["user_ids"]; exists {
+		t.Fatalf("public payload leaked routing IDs: %s", payload)
+	}
+	if !strings.Contains(string(payload), `"user_id":100009`) || !strings.Contains(string(payload), `"display_name":"玩家一号"`) {
+		t.Fatalf("public payload lost sender summary: %s", payload)
+	}
+	privatePayload := publicEventPayload("wallet.ledger.committed", []byte(`{"user_id":"internal-user-id"}`))
+	if string(privatePayload) != `{"user_id":"internal-user-id"}` {
+		t.Fatalf("non-chat payload changed: %s", privatePayload)
+	}
+}
+
 func TestAccessTokenPrefersWebSocketSubprotocol(t *testing.T) {
 	request := httptest.NewRequest("GET", "/v1/ws?access_token=query-token", nil)
 	request.Header.Set("Sec-WebSocket-Protocol", "bearer.jwt-token")

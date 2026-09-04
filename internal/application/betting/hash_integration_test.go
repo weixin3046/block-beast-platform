@@ -63,7 +63,7 @@ func TestHashBetUsesRoomConfigSnapshotAtSettlement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("place hash bet: %v", err)
 	}
-	if placed.GameRoomID != room194ID || placed.PlayMode != "guess" {
+	if placed.GameRoomID != room194ID || placed.GameRoomCode != "hash_rate_1940" || placed.GameRoomName == "" || placed.PlayMode != "guess" || placed.RoundSequence != sequence || placed.PayoutRate != "9.35" || placed.BalanceAfterBetMinor == nil || *placed.BalanceAfterBetMinor != 990 {
 		t.Fatalf("placed hash bet = %+v", placed)
 	}
 

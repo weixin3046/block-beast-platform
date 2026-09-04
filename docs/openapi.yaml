@@ -3,7 +3,8 @@ info:
   title: Block Beast Platform API
   version: 0.1.0
   description: |
-    Block Beast 的 HTTP 接口。金额均以货币最小单位（minor unit）表示，例如 USDT 的 2500 表示由客户端与游戏规则共同约定的 2500 最小单位。
+    对外 error 提示统一为简体中文；HTTP 状态码及机器可读字段、枚举保持不变。未知内部错误统一返回“操作失败，请稍后重试”，不透传数据库或第三方错误详情。
+    Block Beast 的 HTTP 接口。内部金额使用最小单位整数；后台上分 amount 使用展示金额字符串，由后端换算。其他仍命名为 _minor 的请求字段继续接收最小单位整数。平台精度读取 GET /v1/currencies；POINTS、JADE、ORIGIN_STONE 为3位，四种体力为0位，USDT为6位。GET /v1/assets 的 decimals 仅用于对应链上网络，不解释平台钱包余额。
 
     除健康检查、平台信息和认证接口外的业务接口均需携带 `Authorization: Bearer <access_token>` 访问令牌；登录或注册返回默认有效期 15 分钟的访问令牌和可轮换的刷新令牌。投注、钱包等账号级资源仅本人或具备 operator/admin 角色的账号可访问；轮次取消仅限 operator/admin。
   license:
@@ -44,6 +45,87 @@ tags:
   - name: RedPackets
     description: 聊天室红包创建、领取和查询。
 paths:
+  /v1/users/me/ledger:
+    get:
+      tags: [Wallets]
+      summary: 本人所有币种统一资金流水（游标分页）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: currency, in: query, schema: { type: string }, description: 可选币种代码，不传查询所有币种 }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string }, description: 原样传递上一页 next_cursor，翻页时保持筛选条件不变 }
+      responses:
+        '200':
+          description: 按 occurred_at、id 倒序；无 next_cursor 表示结束。历史冻结快照无法还原时为 null。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/UnifiedLedgerEntry' } }
+                  next_cursor: { type: string }
+        '400': { description: 游标或分页参数无效 }
+        '401': { description: 未登录 }
+  /v1/currencies:
+    get:
+      tags: [Wallets]
+      summary: 查询已启用的平台币种及精度
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 平台精度目录，不使用链上资产 decimals 解释钱包余额。
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Currency' } }
+  /v1/admin/currencies:
+    get:
+      tags: [Admin]
+      summary: 管理员查询全部平台币种（含禁用）
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 币种目录
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Currency' } }
+    post:
+      tags: [Admin]
+      summary: 管理员创建币种，代码与精度创建后不可修改
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CurrencyCreate' }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Currency' }
+        '400': { description: 参数无效 }
+        '409': { description: 币种代码已存在 }
+  /v1/admin/currencies/{code}:
+    put:
+      tags: [Admin]
+      summary: 管理员更新币种名称、开关、注册初始化和排序（乐观锁）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CurrencyUpdate' }
+      responses:
+        '200':
+          description: 更新成功，version 递增
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Currency' }
+        '400': { description: 参数无效 }
+        '409': { description: 版本过期或币种不存在，重新查询后提交 }
   /v1/activities/spins:
     get:
       tags: [Tasks]
@@ -110,8 +192,21 @@ paths:
       tags: [Operations]
       summary: 查询当前接受中的投注
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: user, in: query, schema: { type: string } }
+        - { name: game_type, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
       responses:
-        '200': { description: 当前投注列表与服务端时间 }
+        '200':
+          description: 当前投注列表与服务端时间
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_time, items]
+                properties:
+                  server_time: { type: string, format: date-time }
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminCurrentBet' } }
   /v1/admin/monitor/rounds:
     get:
       tags: [Operations]
@@ -124,8 +219,21 @@ paths:
       tags: [Operations]
       summary: 跨玩家查询全部投注
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: user, in: query, schema: { type: string } }
+        - { name: game_type, in: query, schema: { type: string } }
+        - { name: currency, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [accepted, cancelled, won, lost, refunded] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
-        '200': { description: 投注明细列表 }
+        '200':
+          description: 投注明细列表
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AdminBet' } }
   /v1/admin/ledger:
     get:
       tags: [Operations]
@@ -139,7 +247,11 @@ paths:
       summary: 查询投注退款和玩家清退/下分记录
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: 投注退款、USDT 提现和积分下分明细 }
+        '200':
+          description: 投注退款（含结算退款和主动取消）、USDT 提现和积分下分明细
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RefundClearanceRecord' } }
   /v1/admin/dashboard:
     get:
       tags: [Operations]
@@ -301,9 +413,11 @@ paths:
                   roles: { type: array, items: { type: string } }
                   created_at: { type: string, format: date-time }
                   avatar_url: { type: string }
+                  secondary_password_set: { type: boolean, description: 是否已经设置二级密码；密码本身永不返回。 }
     put:
       tags: [Auth]
       summary: 修改当前用户头像和昵称
+      description: avatar_url 只能为空字符串或当前用户本人已确认的 JPEG/PNG/WebP 上传记录 storage_key；不接受外链、签名上传 URL、公开头像 URL、未确认文件、PDF 或其他用户文件。即使只换头像也必须同时提交非空 display_name。
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -315,7 +429,7 @@ paths:
               required: [display_name, avatar_url]
               properties:
                 display_name: { type: string, maxLength: 100 }
-                avatar_url: { type: string, maxLength: 2048 }
+                avatar_url: { type: string, maxLength: 2048, description: 上传确认响应中的 upload.storage_key；传空字符串清除头像。 }
       responses:
         '200': { description: 修改成功 }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -357,7 +471,7 @@ paths:
     put:
       tags: [Auth]
       summary: 设置或修改当前用户二级密码
-      description: 首次设置无需额外验证；已设置后修改只验证旧二级密码。二级密码只保存不可逆哈希。
+      description: 先通过 GET /v1/users/me 的 secondary_password_set 判断流程。首次设置无需额外验证；已设置后修改必须验证旧二级密码。服务端以数据库中的实际设置状态为准，尚未设置时即使误带 current_secondary_password 也按首次设置处理。二级密码只保存 Argon2id 不可逆哈希，不会撤销当前登录会话。
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -379,6 +493,7 @@ paths:
     post:
       tags: [Auth]
       summary: 验证当前用户二级密码
+      description: 仅返回本次校验结果，不签发后续敏感操作可消费的验证凭证，也不会自动保护提现等业务接口。
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -851,6 +966,30 @@ paths:
           $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/bets/public-feed:
+    get:
+      tags: [Bets]
+      summary: 查询所有真实和虚拟玩家的公开投注列表
+      description: 仅返回玩家公开资料和投注数据，不返回登录账号、内部 UUID、钱包余额或 IP。默认同时包含真实和虚拟玩家。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: player_type, in: query, schema: { type: string, enum: [all, real, virtual], default: all } }
+        - { name: game_type, in: query, schema: { type: string } }
+        - { name: currency, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [accepted, cancelled, won, lost, refunded] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: 按投注时间倒序排列的公开投注列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PublicBet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /v1/bets:
     get:
       tags: [Bets]
@@ -862,7 +1001,10 @@ paths:
           schema: { type: string, enum: [accepted, won, lost, refunded, cancelled] }
         - name: limit
           in: query
-          schema: { type: integer, minimum: 1, maximum: 100 }
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         '200':
           description: 投注列表。
@@ -887,7 +1029,7 @@ paths:
             example:
               client_request_id: web-20260720-0001
               round_id: 8374209d-069a-4e6a-b1f2-c166e3b5ee52
-              account_id: 4fb2b612-88cf-47cf-8312-cd76fa4d8869
+              account_id: 100009
               currency: USDT
               selection:
                 color: red
@@ -1199,8 +1341,8 @@ paths:
       operationId: adminCredit
       summary: 管理员手动充值（积分/USDT/体力）
       description: |
-        为指定用户充值积分、USDT 或体力。按 request_id 幂等，重复请求返回首次结果不重复入账。
-        积分流水写入 points_ledger，体力流水写入 stamina_ledger，USDT 流水写入 ledger_entries；
+        为指定用户充值积分、USDT 或体力。前端提交展示单位的十进制字符串 amount，后端按币种精度换算为最小单位。按 request_id 幂等，重复请求返回首次结果不重复入账。
+        所有币种统一写入 ledger_entries，并在同一事务生成钱包 outbox 事件；币种必须已登记且启用。
         用户尚无该币种钱包时随充值创建。仅限 operator/admin 角色，调用写入审计日志。
       security:
         - bearerAuth: []
@@ -1211,9 +1353,9 @@ paths:
             schema:
               $ref: '#/components/schemas/AdminCreditRequest'
             example:
-              user_id: 4fb2b612-88cf-47cf-8312-cd76fa4d8869
+              user_id: 100009
               currency: POINTS
-              amount_minor: 10000
+              amount: "100"
               remark: 活动补偿
               request_id: admin-20260723-0001
       responses:
@@ -1275,7 +1417,8 @@ paths:
     get:
       tags: [Tasks]
       operationId: listBetTaskProgress
-      summary: 查询当前用户今日投注任务进度
+      summary: 查询当前用户中国时区今日投注任务进度
+      description: 只有最终结算为 won 或 lost 的有效投注才按结算时所在的中国时区自然日累计。cancelled 和 refunded 投注不进入进度。玩家达标后必须在当天调用领取接口；第二天查询从零开始，旧日奖励不能补领。
       security:
         - bearerAuth: []
       responses:
@@ -1287,12 +1430,33 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/BetTask'
+  /v1/tasks/{taskID}/claim:
+    post:
+      tags: [Tasks]
+      operationId: claimBetTaskReward
+      summary: 手动领取当前用户今日已达标的活动任务奖励
+      description: 只允许领取中国时区当天已达标且尚未领取的启用任务。领取记录、钱包余额和资金流水在同一事务中提交；跨日后不能补领。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 领取成功。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BetTaskClaim' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /v1/wallets/{accountID}/all:
     get:
       tags: [Wallets]
       operationId: getAllBalances
       summary: 查询账号全部币种余额
-      description: 返回四种资产钱包及 STAMINA/USDT_STAMINA/JADE_STAMINA/ORIGIN_STONE_STAMINA 四种体力钱包，仅本人或 operator/admin 可查。
+      description: 返回用户持有的全部钱包，含禁用币种。新增后端格式化 available/frozen 字符串和平台 decimals，仅本人或 operator/admin 可查。
       security:
         - bearerAuth: []
       parameters:
@@ -1305,7 +1469,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/WalletBalance'
+                  $ref: '#/components/schemas/WalletBalanceInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1573,22 +1737,20 @@ paths:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /v1/leaderboards/daily:
+  /v1/leaderboards:
     get:
       tags: [Leaderboards]
-      summary: 查询 UTC 每日排行榜
+      summary: 查询中国时区的日榜或周榜
       security: [{ bearerAuth: [] }]
       parameters:
-        - name: date
+        - name: period
           in: query
-          schema: { type: string, format: date }
+          required: true
+          schema: { type: string, enum: [today, yesterday, this_week, last_week] }
         - name: currency
           in: query
           required: true
-          schema: { type: string, enum: [USDT, POINTS] }
-        - name: metric
-          in: query
-          schema: { type: string, enum: [turnover, profit, wins], default: turnover }
+          schema: { type: string }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
@@ -1597,10 +1759,28 @@ paths:
           description: 排行榜。
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/LeaderboardEntry' }
+              schema: { $ref: '#/components/schemas/LeaderboardBoard' }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /v1/admin/leaderboard-reward-rules:
+    get:
+      tags: [Operations]
+      summary: 查询排行榜奖励档位
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: period_type, in: query, required: true, schema: { type: string, enum: [daily, weekly] } }
+        - { name: currency, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: 奖励档位 } }
+    put:
+      tags: [Operations]
+      summary: 原子替换某周期和排行币种的奖励档位
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: 已保存 }, '400': { $ref: '#/components/responses/BadRequest' }, '409': { $ref: '#/components/responses/Conflict' } }
+  /v1/admin/leaderboard-rewards:
+    get:
+      tags: [Operations]
+      summary: 查询已发放的排行榜奖励
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: 发奖明细 } }
   /v1/chat/rooms/{roomID}/red-packets:
     post:
       tags: [RedPackets]
@@ -1702,6 +1882,7 @@ paths:
     put:
       tags: [Admin]
       summary: 替换活动任务档位配置
+      description: 完整列表替换。已有项沿用 GET 返回的 id；新增项 id 传空字符串；不存在的非空 id 返回 400；未提交的旧项会被禁用。币种只要求非空并转为大写，不做白名单限制。
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -2142,6 +2323,61 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    UnifiedLedgerEntry:
+      type: object
+      required: [id, currency, decimals, business_type, business_id, entry_type, amount_minor, amount, available_delta_minor, frozen_delta_minor, available_after_minor, frozen_after_minor, available_after, frozen_after, remark, occurred_at]
+      properties:
+        id: { type: string, format: uuid }
+        currency: { type: string }
+        decimals: { type: integer }
+        business_type: { type: string }
+        business_id: { type: string }
+        entry_type: { type: string }
+        amount_minor: { type: integer, format: int64, description: 业务金额，不一定等于可用余额变化；确认提现只扣冻结余额 }
+        amount: { type: string, description: 已格式化的业务金额 }
+        available_delta_minor: { type: integer, format: int64 }
+        frozen_delta_minor: { type: integer, format: int64 }
+        available_after_minor: { type: integer, format: int64 }
+        frozen_after_minor: { type: [integer, 'null'], format: int64 }
+        available_after: { type: string }
+        frozen_after: { type: [string, 'null'] }
+        remark: { type: string }
+        occurred_at: { type: string, format: date-time }
+    CurrencyCreate:
+      type: object
+      additionalProperties: false
+      required: [code, name, decimals, category, enabled, create_on_registration, sort_order]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,63}$' }
+        name: { type: string, minLength: 1 }
+        decimals: { type: integer, minimum: 0, maximum: 18 }
+        category: { type: string, enum: [token, points, stamina, custom] }
+        enabled: { type: boolean }
+        create_on_registration: { type: boolean }
+        sort_order: { type: integer }
+    CurrencyUpdate:
+      type: object
+      additionalProperties: false
+      required: [name, enabled, create_on_registration, sort_order, version]
+      properties:
+        name: { type: string, minLength: 1 }
+        enabled: { type: boolean }
+        create_on_registration: { type: boolean }
+        sort_order: { type: integer }
+        version: { type: integer, format: int64, minimum: 1 }
+    Currency:
+      type: object
+      required: [id, code, name, decimals, category, enabled, create_on_registration, sort_order, version]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        decimals: { type: integer, minimum: 0, maximum: 18 }
+        category: { type: string, enum: [token, points, stamina, custom] }
+        enabled: { type: boolean }
+        create_on_registration: { type: boolean }
+        sort_order: { type: integer }
+        version: { type: integer, format: int64 }
     AdminUser:
       type: object
       required: [id, login_name, display_name, status, created_at]
@@ -2206,19 +2442,34 @@ components:
         currency: { type: string, enum: [USDT, POINTS] }
         amount_minor: { type: integer, format: int64, minimum: 1 }
         claimed_at: { type: string, format: date-time }
-    LeaderboardEntry:
+    LeaderboardBoard:
       type: object
-      required: [rank, user_id, display_name, currency, effective_stake_minor, payout_minor, net_profit_minor, bet_count, win_count]
+      required: [period, period_type, currency, starts_at, ends_at, status, items]
       properties:
-        rank: { type: integer, format: int64, minimum: 1 }
-        user_id: { type: integer, format: int64, minimum: 100000 }
-        display_name: { type: string }
-        currency: { type: string, enum: [USDT, POINTS] }
-        effective_stake_minor: { type: integer, format: int64 }
-        payout_minor: { type: integer, format: int64 }
-        net_profit_minor: { type: integer, format: int64 }
-        bet_count: { type: integer, format: int64 }
-        win_count: { type: integer, format: int64 }
+        period: { type: string, enum: [today, yesterday, this_week, last_week] }
+        period_type: { type: string, enum: [daily, weekly] }
+        currency: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        status: { type: string, enum: [running, frozen] }
+        refreshed_at: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            required: [rank, user_id, display_name, avatar_url, is_virtual, effective_stake_minor]
+            properties:
+              rank: { type: integer, minimum: 1 }
+              user_id: { type: integer, format: int64, minimum: 100000 }
+              display_name: { type: string }
+              avatar_url: { type: string }
+              is_virtual: { type: boolean }
+              effective_stake_minor: { type: integer, format: int64 }
+              reward:
+                type: object
+                properties:
+                  currency: { type: string }
+                  amount_minor: { type: integer, format: int64 }
     Upload:
       type: object
       required: [id, owner_user_id, storage_key, content_type, size_bytes, status, created_at]
@@ -2272,11 +2523,26 @@ components:
       properties:
         id: { type: string, format: uuid }
         room_id: { type: string, format: uuid }
-        sender_user_id: { type: integer, format: int64, minimum: 100000 }
+        sender:
+          allOf: [{ $ref: '#/components/schemas/ChatMessageSender' }]
+          description: 发送者摘要；系统消息可以不存在。
         body: { type: string }
         status: { type: string, enum: [visible, hidden, deleted] }
         client_request_id: { type: string }
         created_at: { type: string, format: date-time }
+    ChatMessageSender:
+      type: object
+      required: [user_id, display_name, avatar_url]
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          minimum: 100000
+          description: 对外公开的数字用户 ID，不是内部 UUID。
+        display_name: { type: string }
+        avatar_url:
+          type: string
+          description: 头像 URL；空字符串表示未设置，站内 `/v1/avatars/{userID}` 地址可直接显示。
     Status:
       type: object
       required: [status]
@@ -2669,7 +2935,8 @@ components:
       properties:
         error:
           type: string
-          example: round not found
+          description: 简体中文提示，可直接展示；不要按提示文本判断业务分支。
+          example: 轮次不存在
     Platform:
       type: object
       required: [environment, domains]
@@ -2727,6 +2994,7 @@ components:
           type: integer
           format: int64
           minimum: 100000
+          description: 玩家公开数字 ID；必须与当前访问令牌对应的账号一致。
         currency:
           type: string
           minLength: 1
@@ -2747,7 +3015,7 @@ components:
           minimum: 1
     Bet:
       type: object
-      required: [bet_id, client_request_id, round_id, account_id, currency, selection, stake_minor, status, placed_at]
+      required: [bet_id, client_request_id, round_id, account_id, game_type, game_name, round_sequence, currency, selection, stake_minor, payout_multiplier, payout_divisor, payout_rate, status, payout_minor, placed_at]
       properties:
         bet_id:
           type: string
@@ -2761,11 +3029,16 @@ components:
           type: integer
           format: int64
           minimum: 100000
+        game_type: { type: string, example: hash_9 }
+        game_name: { type: string, example: 9区块 }
+        round_sequence: { type: integer, format: int64 }
         currency:
           type: string
         game_room_id:
           type: string
           format: uuid
+        game_room_code: { type: string, example: hash_rate_1940 }
+        game_room_name: { type: string, example: 高额返水 1.94 倍 }
         play_mode:
           type: string
           enum: [guess, dodge, road]
@@ -2773,12 +3046,118 @@ components:
         stake_minor:
           type: integer
           format: int64
+        payout_multiplier: { type: integer, format: int64, description: 投注成交时保存的赔率分子快照。 }
+        payout_divisor: { type: integer, format: int64, description: 投注成交时保存的赔率分母快照。 }
+        payout_rate: { type: string, example: '1.94', description: 由赔率快照精确格式化的展示值。 }
         status:
           type: string
           enum: [accepted, cancelled, lost, won, refunded]
+        payout_minor: { type: integer, format: int64 }
+        balance_after_bet_minor:
+          type: integer
+          format: int64
+          description: 本次投注扣款后的该币种余额快照；仅本人/有权查看该投注的接口返回。
+        balance_after_refund_minor:
+          type: integer
+          format: int64
+          description: 主动取消投注退款后的余额快照；仅取消投注响应返回。
+        balance_after_settlement_minor:
+          type: integer
+          format: int64
+          description: 赢、输、结算退款或主动取消完成瞬间的该币种余额快照；进行中的投注不返回。
         placed_at:
           type: string
           format: date-time
+        settled_at: { type: string, format: date-time }
+    PublicBetPlayer:
+      type: object
+      required: [user_id, display_name, avatar_url, is_virtual]
+      properties:
+        user_id: { type: integer, format: int64, minimum: 100000 }
+        display_name: { type: string }
+        avatar_url:
+          type: string
+          description: 空字符串表示未设置头像；站内 `/v1/avatars/{userID}` 地址可直接显示。
+        is_virtual:
+          type: boolean
+          description: true 表示平台虚拟玩家。
+    PublicBet:
+      type: object
+      required: [bet_id, player, round_id, game_type, game_name, round_sequence, currency, selection, stake_minor, payout_multiplier, payout_divisor, payout_rate, status, payout_minor, placed_at]
+      properties:
+        bet_id: { type: string, format: uuid }
+        player: { $ref: '#/components/schemas/PublicBetPlayer' }
+        round_id: { type: string, format: uuid }
+        game_type: { type: string }
+        game_name: { type: string }
+        round_sequence: { type: integer, format: int64 }
+        currency: { type: string }
+        game_room_id: { type: string, format: uuid }
+        game_room_code: { type: string }
+        game_room_name: { type: string }
+        play_mode: { type: string, enum: [guess, dodge, road] }
+        selection: {}
+        stake_minor: { type: integer, format: int64 }
+        payout_multiplier: { type: integer, format: int64 }
+        payout_divisor: { type: integer, format: int64 }
+        payout_rate: { type: string, example: '1.94' }
+        status: { type: string, enum: [accepted, cancelled, won, lost, refunded] }
+        payout_minor: { type: integer, format: int64 }
+        placed_at: { type: string, format: date-time }
+        settled_at: { type: string, format: date-time }
+    AdminCurrentBet:
+      type: object
+      required: [bet_id, user_id, login_name, display_name, is_virtual, game_type, game_name, round_sequence, currency, selection, stake_minor, payout_multiplier, payout_divisor, payout_rate, status, created_at]
+      properties:
+        bet_id: { type: string, format: uuid }
+        user_id: { type: integer, format: int64, minimum: 100000 }
+        login_name: { type: string }
+        display_name: { type: string }
+        is_virtual: { type: boolean }
+        game_type: { type: string }
+        game_name: { type: string }
+        round_sequence: { type: integer, format: int64 }
+        currency: { type: string }
+        game_room_id: { type: string, format: uuid }
+        game_room_code: { type: string }
+        game_room_name: { type: string }
+        play_mode: { type: string, enum: [guess, dodge, road] }
+        selection: {}
+        stake_minor: { type: integer, format: int64 }
+        payout_multiplier: { type: integer, format: int64 }
+        payout_divisor: { type: integer, format: int64 }
+        payout_rate: { type: string }
+        status: { type: string, enum: [accepted, cancelled, won, lost, refunded] }
+        created_at: { type: string, format: date-time }
+    AdminBet:
+      allOf:
+        - $ref: '#/components/schemas/AdminCurrentBet'
+        - type: object
+          required: [payout_minor]
+          properties:
+            status: { type: string, enum: [accepted, cancelled, won, lost, refunded] }
+            payout_minor: { type: integer, format: int64 }
+            settled_at: { type: string, format: date-time }
+    RefundClearanceRecord:
+      type: object
+      required: [id, record_type, user_id, login_name, currency, amount_minor, balance_after_minor, status, occurred_at]
+      properties:
+        id: { type: string }
+        record_type: { type: string, enum: [bet_refund, withdrawal, point_withdrawal] }
+        user_id: { type: integer, format: int64, minimum: 100000 }
+        login_name: { type: string }
+        currency: { type: string }
+        amount_minor: { type: integer, format: int64 }
+        balance_after_minor: { type: integer, format: int64 }
+        status: { type: string }
+        bet_id: { type: string, format: uuid }
+        game_type: { type: string }
+        game_name: { type: string }
+        round_sequence: { type: integer, format: int64 }
+        game_room_id: { type: string, format: uuid }
+        game_room_code: { type: string }
+        game_room_name: { type: string }
+        occurred_at: { type: string, format: date-time }
     WalletBalance:
       type: object
       required: [account_id, currency, available_minor, frozen_minor]
@@ -2795,6 +3174,17 @@ components:
         frozen_minor:
           type: integer
           format: int64
+    WalletBalanceInfo:
+      type: object
+      required: [user_id, currency, available_minor, frozen_minor, decimals, available, frozen]
+      properties:
+        user_id: { type: integer, format: int64 }
+        currency: { type: string }
+        available_minor: { type: integer, format: int64 }
+        frozen_minor: { type: integer, format: int64 }
+        decimals: { type: integer }
+        available: { type: string }
+        frozen: { type: string }
     Cancellation:
       type: object
       required: [round_id, refunded_bet_count, status]
@@ -2810,7 +3200,7 @@ components:
     AdminCreditRequest:
       type: object
       additionalProperties: false
-      required: [user_id, currency, amount_minor, request_id]
+      required: [user_id, currency, amount, request_id]
       properties:
         user_id:
           type: integer
@@ -2821,10 +3211,10 @@ components:
           type: string
           minLength: 1
           description: 任意非空钱包币种代码。
-        amount_minor:
-          type: integer
-          format: int64
-          minimum: 1
+        amount:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'
+          description: 展示单位的正数十进制字符串；后端按币种精度换算。例如 POINTS 的 "100" 入账为 100000 minor，"1.5" 入账为 1500 minor。
         remark:
           type: string
           description: 备注，写入流水。
@@ -2902,14 +3292,24 @@ components:
         threshold_minor: { type: integer, format: int64 }
         reward_currency: { type: string, minLength: 1, description: 任意非空钱包币种代码，与累计投注币种独立配置 }
         reward_minor: { type: integer, format: int64 }
-        progress_minor: { type: integer, format: int64 }
-        completed: { type: boolean }
-        rewarded: { type: boolean }
+        progress_minor: { type: integer, format: int64, description: 中国时区当日、相同 accumulation_currency 且最终状态为 won/lost 的有效投注累计值。 }
+        completed: { type: boolean, description: 当前进度是否达到此档门槛。 }
+        rewarded: { type: boolean, description: 此档奖励是否已经由玩家手动领取并入账。 }
+    BetTaskClaim:
+      type: object
+      required: [task_id, bet_date, reward_currency, reward_minor, balance_after_minor, claimed_at]
+      properties:
+        task_id: { type: string, format: uuid }
+        bet_date: { type: string, format: date, description: 中国时区任务日期。 }
+        reward_currency: { type: string }
+        reward_minor: { type: integer, format: int64, minimum: 1 }
+        balance_after_minor: { type: integer, format: int64 }
+        claimed_at: { type: string, format: date-time }
     BetTaskConfig:
       type: object
       required: [id, accumulation_currency, threshold_minor, reward_currency, reward_minor, enabled]
       properties:
-        id: { type: string }
+        id: { type: string, description: 已有项传原 UUID；新增项传空字符串。 }
         accumulation_currency: { type: string, minLength: 1, description: 任意非空钱包币种代码 }
         threshold_minor: { type: integer, format: int64, minimum: 1 }
         reward_currency: { type: string, minLength: 1, description: 任意非空钱包币种代码，与 accumulation_currency 独立配置 }
