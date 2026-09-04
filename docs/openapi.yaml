@@ -45,6 +45,125 @@ tags:
   - name: RedPackets
     description: 聊天室红包创建、领取和查询。
 paths:
+  /v1/admin/phrases:
+    get:
+      tags: [Admin]
+      summary: 分页查询共享话术
+      description: 允许 admin/operator；不要求操作密码。分类精确匹配，默认包含启用及停用项，按 sort 升序、id 降序。无预置话术。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: category, in: query, schema: { type: string }, description: 去除首尾空白，空值不过滤 }
+        - { name: enabled, in: query, schema: { type: boolean }, description: 只接受 true/false，省略不过滤 }
+        - { name: page, in: query, schema: { type: integer, format: int64, minimum: 0, maximum: 92233720368547758, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 }, description: 0 使用默认20，非零值裁剪到1至100 }
+      responses:
+        '200':
+          description: 筛选后的总条数及当前页，空列表为 []。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, items]
+                properties:
+                  count: { type: integer, format: int64 }
+                  items: { type: array, items: { $ref: '#/components/schemas/CustomerPhrase' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Admin]
+      summary: 幂等新增共享话术
+      description: 允许 admin/operator。不要求操作密码。request_id 必填，同一管理员重试复用 UUID；相同规范化参数返回现存话术，不重复创建和审计。参数不同或已删除返回409。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerPhraseCreate' }
+      responses:
+        '200': { description: 创建或重放结果, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerPhrase' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/admin/phrases/{phraseID}:
+    parameters:
+      - { name: phraseID, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+    put:
+      tags: [Admin]
+      summary: 完整编辑话术
+      description: 允许 admin/operator。category/sort/enabled 省略分别重置为空字符串/0/false；created_at 不变。不要求操作密码。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerPhraseInput' }
+      responses:
+        '200': { description: 已更新, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerPhrase' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Admin]
+      summary: 删除话术
+      description: 允许 admin/operator。不要求操作密码。不影响已发送聊天记录；不存在或重复删除返回404。内部保留删除标记保障创建幂等，不提供恢复接口。
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: 已删除 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/admin/phrases/{phraseID}/enabled:
+    put:
+      tags: [Admin]
+      summary: 启用或停用话术
+      description: 允许 admin/operator。不要求操作密码。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: phraseID, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200': { description: 已更新, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerPhrase' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/admin/phrases/order:
+    put:
+      tags: [Admin]
+      summary: 原子调整全局话术排序
+      description: 允许 admin/operator。不要求操作密码。包含所有分类及停用项；指定ID置前，未指定项按原 sort升序/id降序追加，统一设置sort为0开始连续整数。空数组重编号全部现存话术，不能传null或省略ids。不存在的ID返回404，重复或非正数返回400；失败整体回滚。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ids]
+              properties:
+                ids: { type: array, uniqueItems: true, items: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        '200':
+          description: 排序后的全部话术
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CustomerPhrase' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /v1/admin/security-passwords:
     get:
       tags: [Admin]
@@ -2496,6 +2615,40 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    CustomerPhraseInput:
+      type: object
+      additionalProperties: false
+      required: [title, content]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100, description: 去首尾空白后非空，最多100个UTF-16单位 }
+        content: { type: string, minLength: 1, maxLength: 2000, description: 纯文本，去首尾空白后非空，最多2000个UTF-16单位 }
+        category: { type: string, maxLength: 50, default: '', description: 去首尾空白后最多50个UTF-16单位 }
+        sort: { type: integer, format: int64, minimum: 0, default: 0 }
+        enabled: { type: boolean, default: false }
+    CustomerPhraseCreate:
+      type: object
+      additionalProperties: false
+      required: [title, content, request_id]
+      properties:
+        request_id: { type: string, format: uuid, description: 创建幂等键，重试复用，不同操作生成新UUID }
+        title: { type: string, minLength: 1, maxLength: 100, description: 去首尾空白后非空，最多100个UTF-16单位 }
+        content: { type: string, minLength: 1, maxLength: 2000, description: 纯文本，去首尾空白后非空，最多2000个UTF-16单位 }
+        category: { type: string, maxLength: 50, default: '', description: 去首尾空白后最多50个UTF-16单位 }
+        sort: { type: integer, format: int64, minimum: 0, default: 0 }
+        enabled: { type: boolean, default: false }
+    CustomerPhrase:
+      type: object
+      additionalProperties: false
+      required: [id, title, content, category, sort, enabled, created_at, updated_at]
+      properties:
+        id: { type: integer, format: int64, minimum: 1, description: 自增话术ID，不是用户ID }
+        title: { type: string, minLength: 1, maxLength: 100, description: 去首尾空白后非空，最多100个UTF-16单位 }
+        content: { type: string, minLength: 1, maxLength: 2000, description: 纯文本，去首尾空白后非空，最多2000个UTF-16单位 }
+        category: { type: string, maxLength: 50, default: '', description: 去首尾空白后最多50个UTF-16单位 }
+        sort: { type: integer, format: int64, minimum: 0, default: 0 }
+        enabled: { type: boolean, default: false }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     PointWithdrawalRequest:
       type: object
       required: [request_id, amount_minor]

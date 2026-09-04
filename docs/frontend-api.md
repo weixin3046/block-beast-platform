@@ -1,5 +1,35 @@
 # 前端接口接入
 
+## 后台话术（客服快捷回复）
+
+参照 `block-beast-servers` 的 `GMPhraseService`：全局共享话术库，按配置权限管理；当前项目允许 `admin/operator` 读取和维护，`player` 无权访问。不额外验证一级/二级操作密码。不是公告、自动回复或机器人发言，不关联其他项目。
+
+| 操作 | 接口 | 参数/返回 |
+| --- | --- | --- |
+| 查询 | GET /v1/admin/phrases | category、enabled、page、limit；返回 `{count,items}` |
+| 新增 | POST /v1/admin/phrases | `{request_id,title,content,category,sort,enabled}`；返回话术对象 |
+| 编辑 | PUT /v1/admin/phrases/{phraseID} | `{title,content,category,sort,enabled}`；返回话术对象 |
+| 删除 | DELETE /v1/admin/phrases/{phraseID} | 无请求体；成功204，不存在或重复删除404 |
+| 启停 | PUT /v1/admin/phrases/{phraseID}/enabled | `{enabled:true}` 或 `{enabled:false}`；返回话术对象 |
+| 排序 | PUT /v1/admin/phrases/order | `{ids:[3,1]}`；返回排序后的全部 `{items}` |
+
+所有请求携带后台 Bearer Token。话术对象字段：`id`（数字int64，自增，非用户ID）、`title/content/category`（字符串）、`sort`（非负整数int64）、`enabled`（布尔值）、`created_at/updated_at`（RFC3339时间字符串）。不使用参考项目的 `phraseID/createTimestamp` 字段或 `errCode` 返回格式，错误沿用本项目 `{error:"中文提示"}`。
+
+标题/内容去首尾空白后必填，最长分别100/2000；分类可空、最长50。长度与参考项目JS一致，按UTF-16单位计数（普通中文1，emoji通常2）。文本按纯文本显示，不作为HTML插入。`sort` 默认0，`enabled` 默认false。编辑是完整替换，省略分类、排序或启用状态会重置为默认值。
+
+查询 `page` 从0开始，默认0；`limit` 默认20，0按默认，其他整数裁剪到1–100。`category` 精确匹配，空值不筛选；`enabled` 只能为true/false，省略返回两种状态。`count` 是筛选后总数，`items` 是当前页，默认按sort升序、同sort按id降序。
+
+排序是全局排序，包含所有分类和停用项：请求指定项置前，未指定项按原顺序追加，统一从0连续编号。`ids` 必填且不重复、不含不存在或已删除ID；`[]` 表示保留现有相对顺序并重编号。保存后重新查询当前页。
+
+调用闭环：
+
+1. `POST /v1/admin/auth/login` 登录，打开管理页时 `GET /v1/admin/phrases?page=0&limit=20`。
+2. 新增时生成UUID `request_id`，例如提交 `{"request_id":"48b3f585-33ba-4381-a186-93fe5bcac592","title":"欢迎语","content":"您好，请问有什么可以帮您？","category":"客服","sort":0,"enabled":true}`。成功200；同一管理员同键同规范化参数重放返回当前话术，参数不同或原话术已删除返回409。请求重试复用键，不重复创建或写审计。
+3. 编辑/启停/删除调用上表接口，成功后刷新列表。数据库保留内部删除标记以避免旧创建请求复活话术，不提供恢复接口。初始化没有默认话术。
+4. 客服选用：`GET /v1/admin/phrases?enabled=true&category=客服`，点击条目将 `content` 填入聊天输入框，允许编辑。确认后通过已鉴权 Socket 发送 `{"v":1,"type":"chat.send","room_id":"当前会话UUID","body":"选中的话术正文","request_id":"本条消息的唯一编号"}`；消息重试复用该编号。发送者由连接身份确定，不传话术ID代替正文。完整握手、订阅及确认流程见 [Socket手册](./realtime-api.md)。历史消息通过 `GET /v1/chat/rooms/{roomID}/messages` 查询；当前没有对应的POST发送接口。停用/删除话术不修改已发送消息，也不会触发自动消息。
+
+新增、编辑、启停、删除、排序分别记录 `phrase.create/update/enabled/delete/reorder` 审计，排序和业务变更与审计同事务。参数无效400、无权限403、不存在404、幂等冲突409、未登录401、服务不可用503。部署先执行 `0051_customer_phrases.sql`，再更新API。
+
 完整机器可读的接口定义在 [openapi.yaml](./openapi.yaml)。可直接导入 Swagger UI、Postman、Apifox，或用 OpenAPI Generator 生成 TypeScript 客户端。
 
 本地 API 地址为 `http://localhost:8080`。所有接口使用 JSON，错误统一为：

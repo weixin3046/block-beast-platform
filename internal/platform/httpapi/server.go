@@ -48,6 +48,7 @@ type Server struct {
 	agents             AgentService
 	userAdmin          UserAdminService
 	operations         OperationsService
+	phrases            PhraseService
 	analytics          AnalyticsService
 	gameAdmin          GameAdminService
 	gameRoomAdmin      GameRoomService
@@ -244,6 +245,12 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/withdrawals", server.protectRoles(server.adminWithdrawals, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/withdrawals/{withdrawalID}/reject", server.protectRoles(server.rejectWithdrawal, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/security-passwords", server.protectRoles(server.adminSecurityStatus, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/phrases", server.protectRoles(server.listPhrases, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/phrases", server.protectRoles(server.createPhrase, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/phrases/{phraseID}", server.protectRoles(server.updatePhrase, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("DELETE /v1/admin/phrases/{phraseID}", server.protectRoles(server.deletePhrase, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/phrases/{phraseID}/enabled", server.protectRoles(server.setPhraseEnabled, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/phrases/order", server.protectRoles(server.reorderPhrases, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/security-passwords/{level}", server.protectRoles(server.setAdminSecurity, identity.RoleAdmin))
 	mux.HandleFunc("POST /v1/admin/security-passwords/{level}/verify", server.protectRoles(server.verifyAdminSecurityEndpoint, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
