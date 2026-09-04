@@ -111,24 +111,28 @@ func (s *Service) RoundCountdowns(ctx context.Context) ([]MonitorRound, error) {
 }
 
 type PlayerStatistic struct {
-	UserID       int64  `json:"user_id"`
-	LoginName    string `json:"login_name"`
-	DisplayName  string `json:"display_name"`
-	BetCount     int64  `json:"bet_count"`
-	StakeMinor   int64  `json:"stake_minor"`
-	PayoutMinor  int64  `json:"payout_minor"`
-	DepositMinor int64  `json:"deposit_minor"`
-	CreditMinor  int64  `json:"credit_minor"`
-	BalanceMinor int64  `json:"balance_minor"`
+	Funds        []FundStatistic `json:"funds"`
+	UserID       int64           `json:"user_id"`
+	LoginName    string          `json:"login_name"`
+	DisplayName  string          `json:"display_name"`
+	BetCount     int64           `json:"bet_count"`
+	StakeMinor   int64           `json:"stake_minor"`
+	PayoutMinor  int64           `json:"payout_minor"`
+	DepositMinor int64           `json:"deposit_minor"`
+	CreditMinor  int64           `json:"credit_minor"`
+	BalanceMinor int64           `json:"balance_minor"`
 }
 type CurrencyStatistic struct {
-	Currency     string `json:"currency"`
-	BetCount     int64  `json:"bet_count"`
-	StakeMinor   int64  `json:"stake_minor"`
-	PayoutMinor  int64  `json:"payout_minor"`
-	DepositMinor int64  `json:"deposit_minor"`
-	CreditMinor  int64  `json:"credit_minor"`
-	BalanceMinor int64  `json:"balance_minor"`
+	ClearanceMinor int64  `json:"clearance_minor"`
+	GiftMinor      int64  `json:"gift_minor"`
+	PenaltyMinor   int64  `json:"penalty_minor"`
+	Currency       string `json:"currency"`
+	BetCount       int64  `json:"bet_count"`
+	StakeMinor     int64  `json:"stake_minor"`
+	PayoutMinor    int64  `json:"payout_minor"`
+	DepositMinor   int64  `json:"deposit_minor"`
+	CreditMinor    int64  `json:"credit_minor"`
+	BalanceMinor   int64  `json:"balance_minor"`
 }
 type Dashboard struct {
 	ServerTime time.Time           `json:"server_time"`
@@ -181,7 +185,11 @@ func (s *Service) Dashboard(ctx context.Context, userQuery string, from, to time
 		}
 		result.Global = append(result.Global, v)
 	}
-	return result, g.Err()
+	if err := g.Err(); err != nil {
+		return result, err
+	}
+	g.Close()
+	return result, s.dashboardFunds(ctx, &result, from, to)
 }
 
 type LoginIP struct {

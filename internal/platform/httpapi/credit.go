@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -14,6 +15,7 @@ import (
 
 // CreditService 定义管理员充值与体力消耗能力。
 type CreditService interface {
+	AdjustWallet(context.Context, credit.AdjustmentInput) (credit.AdjustmentResult, error)
 	AdminCredit(ctx context.Context, input credit.AdminCreditInput) (credit.CreditResult, error)
 	ConsumeStamina(ctx context.Context, input credit.ConsumeStaminaInput) (credit.ConsumeResult, error)
 	Balances(ctx context.Context, userID string) ([]credit.BalanceInfo, error)
@@ -158,11 +160,18 @@ func (server *Server) adminCredit(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "credit service is unavailable"})
 		return
 	}
-	var input credit.AdminCreditInput
+	var input struct {
+		credit.AdminCreditInput
+		FirstPassword string `json:"first_password"`
+	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "请求参数无效"})
 		return
 	}
 	if input.UserID == "" || input.Currency == "" || input.Amount == "" || input.RequestID == "" {
@@ -171,6 +180,9 @@ func (server *Server) adminCredit(writer http.ResponseWriter, request *http.Requ
 	}
 	claims, _ := ClaimsFromContext(request.Context())
 	input.OperatorID = claims.Subject
+	if !server.verifyFundsPassword(writer, request, input.FirstPassword) {
+		return
+	}
 	publicUserID := input.UserID
 	internalUserID, err := server.resolvePublicUserID(request.Context(), publicUserID)
 	if err != nil {
@@ -179,25 +191,11 @@ func (server *Server) adminCredit(writer http.ResponseWriter, request *http.Requ
 	}
 	input.UserID = internalUserID
 
-	result, err := server.credits.AdminCredit(request.Context(), input)
-	switch {
-	case errors.Is(err, credit.ErrInvalidAmount), errors.Is(err, credit.ErrInvalidCurrency):
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	case errors.Is(err, credit.ErrUserNotFound):
-		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
-		return
-	case err != nil:
-		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to process credit"})
+	result, err := server.credits.AdminCredit(request.Context(), input.AdminCreditInput)
+	if writeAdjustmentError(writer, err) {
 		return
 	}
-	server.recordAudit(request.Context(), audit.Entry{
-		ActorUserID: claims.Subject,
-		Action:      "admin.credit",
-		TargetType:  "user",
-		TargetID:    publicUserID,
-		Payload:     map[string]any{"currency": input.Currency, "amount": input.Amount, "amount_minor": result.AmountMinor, "credited": result.Credited},
-	})
+	// 成功审计已与余额和流水在应用服务的同一事务提交。
 	server.writePublicJSON(writer, request, http.StatusOK, result)
 }
 

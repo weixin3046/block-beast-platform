@@ -60,10 +60,11 @@ func TestPutConfigMapsVersionConflict(t *testing.T) {
 		nil, readinessChecker{}, nil, nil, nil, nil,
 		WithAuth(NewAuthenticator(testSecret)),
 		WithOperations(stubOperations{configError: operations.ErrConfigVersionConflict}),
+		WithAdminSecurity(&fundsPasswordStub{}),
 	)
 	request := httptest.NewRequest(
 		http.MethodPut, "/v1/admin/configs/lobby.banner",
-		strings.NewReader(`{"value":{"enabled":true},"visibility":"public","expected_version":1}`),
+		strings.NewReader(`{"second_password":"secret","value":{"enabled":true},"visibility":"public","expected_version":1}`),
 	)
 	request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "admin-1", []string{identity.RoleAdmin}))
 	response := httptest.NewRecorder()

@@ -26,6 +26,9 @@ func TestUnifiedLedgerBalancesIdempotencyAndCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
+		pool.Exec(ctx, `DELETE FROM admin_wallet_adjustments WHERE operator_id=$1`, user)
+		pool.Exec(ctx, `DELETE FROM audit_logs WHERE actor_user_id=$1`, user)
+		pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id=$1`, user)
 		pool.Exec(ctx, `DELETE FROM outbox_events WHERE payload->>'user_id'=$1`, user)
 		pool.Exec(ctx, `DELETE FROM point_withdrawals WHERE user_id=$1`, user)
 		pool.Exec(ctx, `DELETE FROM ledger_entries WHERE wallet_id IN(SELECT id FROM wallets WHERE user_id=$1)`, user)
@@ -33,7 +36,13 @@ func TestUnifiedLedgerBalancesIdempotencyAndCursor(t *testing.T) {
 		pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, user)
 	}()
 	s := NewService(pool)
-	input := AdminCreditInput{UserID: user, Currency: "POINTS", Amount: "100", RequestID: uuid.NewString()}
+	if _, err = pool.Exec(ctx, `INSERT INTO roles(id,code,description) VALUES(gen_random_uuid(),'admin','admin') ON CONFLICT(code) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='admin'`, user); err != nil {
+		t.Fatal(err)
+	}
+	input := AdminCreditInput{UserID: user, Currency: "POINTS", Amount: "100", RequestID: uuid.NewString(), OperatorID: user}
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
 	for range 8 {
@@ -51,7 +60,7 @@ func TestUnifiedLedgerBalancesIdempotencyAndCursor(t *testing.T) {
 	if err != nil || balance.AvailableMinor != 100000 || balance.Available != "100.000" {
 		t.Fatalf("balance %+v %v", balance, err)
 	}
-	if _, err = s.AdminCredit(ctx, AdminCreditInput{UserID: user, Currency: "POINTS", Amount: "1.0001", RequestID: uuid.NewString()}); !errors.Is(err, ErrInvalidAmount) {
+	if _, err = s.AdminCredit(ctx, AdminCreditInput{UserID: user, Currency: "POINTS", Amount: "1.0001", RequestID: uuid.NewString(), OperatorID: user}); !errors.Is(err, ErrInvalidAmount) {
 		t.Fatalf("precision %v", err)
 	}
 	withdrawal, err := s.RequestPointWithdrawal(ctx, user, uuid.NewString(), 1500, "")

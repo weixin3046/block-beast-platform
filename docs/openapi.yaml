@@ -45,6 +45,73 @@ tags:
   - name: RedPackets
     description: 聊天室红包创建、领取和查询。
 paths:
+  /v1/admin/security-passwords:
+    get:
+      tags: [Admin]
+      summary: 查询全局操作密码设置状态
+      description: admin/operator 可调用；个人二级密码与此无关，无默认密码。
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 只返回设置状态，不返回密码或哈希。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [first_set, second_set]
+                properties:
+                  first_set: { type: boolean }
+                  second_set: { type: boolean }
+  /v1/admin/security-passwords/{level}:
+    put:
+      tags: [Admin]
+      summary: 管理员设置或重置全局操作密码
+      description: 仅 admin；验证当前管理员登录密码，不要求旧操作密码。新密码非空且 UTF-8 最多 128 字节。连续错误达到 5 次锁定 15 分钟。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: level, in: path, required: true, schema: { type: string, enum: [first, second] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password, login_password]
+              properties:
+                password: { type: string, format: password, writeOnly: true, minLength: 1, description: 新全局操作密码，UTF-8 最多 128 字节 }
+                login_password: { type: string, format: password, writeOnly: true, minLength: 1, description: 当前管理员登录密码，UTF-8 最多 1024 字节 }
+      responses:
+        '204': { description: 已设置并记录不含密码的审计 }
+        '400': { description: 参数无效 }
+        '401': { description: 未登录或登录密码错误 }
+        '403': { description: 非管理员 }
+        '429': { description: 验证锁定，Retry-After 为 900 秒 }
+  /v1/admin/security-passwords/{level}/verify:
+    post:
+      tags: [Admin]
+      summary: 验证全局操作密码
+      description: admin/operator 可调用。仅本次验证，不签发凭证；业务请求仍必须提交操作密码。按账号及用途独立累计失败次数，15 分钟内失败 5 次锁定 15 分钟。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: level, in: path, required: true, schema: { type: string, enum: [first, second] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { type: string, format: password, writeOnly: true, minLength: 1, description: UTF-8 最多 128 字节 }
+      responses:
+        '204': { description: 验证通过 }
+        '400': { description: 参数无效 }
+        '401': { description: 未登录或操作密码错误 }
+        '403': { description: 无后台角色 }
+        '409': { description: 尚未设置该级密码 }
+        '429': { description: 验证锁定，Retry-After 为 900 秒 }
   /v1/users/me/ledger:
     get:
       tags: [Wallets]
@@ -172,8 +239,8 @@ paths:
           application/json:
             schema:
               type: object
-              required: [items]
-              properties: { items: { type: array, minItems: 1, items: { $ref: '#/components/schemas/SpinConfig' } } }
+              required: [items, second_password]
+              properties: { second_password: { type: string, format: password, writeOnly: true, minLength: 1 }, items: { type: array, minItems: 1, items: { $ref: '#/components/schemas/SpinConfig' } } }
       responses:
         '200': { description: 保存后的配置列表 }
   /v1/admin/monitor:
@@ -239,6 +306,14 @@ paths:
       tags: [Operations]
       summary: 跨玩家统一查询资金和体力流水
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: user, in: query, schema: { type: string } }
+        - { name: currency, in: query, schema: { type: string } }
+        - { name: business_type, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
         '200': { description: USDT、积分、玉石、源石和体力统一流水 }
   /v1/admin/refunds-clearances:
@@ -246,6 +321,13 @@ paths:
       tags: [Operations]
       summary: 查询投注退款和玩家清退/下分记录
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: user, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
         '200':
           description: 投注退款（含结算退款和主动取消）、USDT 提现和积分下分明细
@@ -256,6 +338,10 @@ paths:
     get:
       tags: [Operations]
       summary: 玩家统计与排除虚拟账户的全局环境统计
+      description: |
+        global 按币种返回既有投注、充值、余额统计，并新增 clearance_minor（人工下分、积分审核通过和链上最终成功扣款之和）、gift_minor（人工赠分）、penalty_minor（人工扣分）。冻结、驳回、投注退款不计清退。
+        players 每行新增 funds 数组，按 currency 返回 credit_minor、clearance_minor、gift_minor、penalty_minor（均为 int64 最小单位整数）。无资金操作时为空数组。
+        所有这些统计排除虚拟账户；玩家原有跨币种汇总字段仅保留展示，不应作为资金核算依据。
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: user, in: query, schema: { type: string } }
@@ -1335,15 +1421,45 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /v1/admin/wallet-adjustments:
+    post:
+      tags: [Admin]
+      operationId: adminWalletAdjustment
+      summary: 管理员直接上分、清退、赠分或人工扣分
+      description: |
+        允许 admin/operator；必须在本请求内验证后台全局一级密码 first_password。amount 为正数展示金额字符串，由后端换算。
+        credit/reward 增加可用余额，debit/penalty 扣可用余额；不动冻结金额、不触发链上付款。
+        虚拟账户禁止 debit/penalty，所有已登记启用币种均可选择。
+        同一管理员的 request_id 在本接口和旧上分入口间共用，重复返回首次结果；更改用户、币种、操作、金额或备注返回 409。
+        余额、流水、审计、幂等结果和 outbox 同事务提交。资金密码不进入日志、流水或事件。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WalletAdjustmentRequest' }
+      responses:
+        '200':
+          description: 操作成功或幂等重放；余额均为首次操作快照。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WalletAdjustmentResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 可用余额不足、未设置全局一级密码或幂等参数冲突。 }
+        '429': { description: 验证锁定，Retry-After 为 900 秒。 }
+        '503': { description: 资金或后台操作密码服务不可用。 }
   /v1/admin/credits:
     post:
       tags: [Admin]
       operationId: adminCredit
-      summary: 管理员手动充值（积分/USDT/体力）
+      summary: 管理员手动上分（已启用的任意币种）
       description: |
-        为指定用户充值积分、USDT 或体力。前端提交展示单位的十进制字符串 amount，后端按币种精度换算为最小单位。按 request_id 幂等，重复请求返回首次结果不重复入账。
+        为指定用户增加平台余额。前端提交展示单位的十进制字符串 amount，后端按币种精度换算为最小单位。按 request_id 幂等，重复请求返回首次结果不重复入账。
         所有币种统一写入 ledger_entries，并在同一事务生成钱包 outbox 事件；币种必须已登记且启用。
-        用户尚无该币种钱包时随充值创建。仅限 operator/admin 角色，调用写入审计日志。
+        用户尚无该币种钱包时随充值创建。允许 admin/operator 角色，必须提交后台全局 first_password；与统一资金操作共用校验、事务、审计和幂等键。
       security:
         - bearerAuth: []
       requestBody:
@@ -1353,11 +1469,12 @@ paths:
             schema:
               $ref: '#/components/schemas/AdminCreditRequest'
             example:
-              user_id: 100009
+              user_id: "100009"
               currency: POINTS
               amount: "100"
               remark: 活动补偿
               request_id: admin-20260723-0001
+              first_password: 后台全局一级密码
       responses:
         '200':
           description: 充值结果（credited=false 表示重复请求未重复入账）。
@@ -1375,6 +1492,9 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/Unavailable'
+        '409':
+          description: 未设置全局一级密码或幂等参数冲突。
+        '429': { description: 验证锁定，Retry-After 为 900 秒。 }
   /v1/stamina/consume:
     post:
       tags: [Stamina]
@@ -1579,7 +1699,13 @@ paths:
         - name: agentID
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: integer, format: int64, minimum: 100000 }
+          description: 公开数字用户 ID，不是内部 UUID。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommissionGrantRequest' }
       responses:
         '201': { description: 已补发 }
   /v1/chat/customer-service:
@@ -1598,6 +1724,8 @@ paths:
       tags: [Chat]
       summary: 查询当前账号可访问的聊天房间
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
       responses:
         '200':
           description: 房间列表。
@@ -1616,6 +1744,8 @@ paths:
       tags: [Chat]
       summary: 查询房间消息
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         '200':
           description: 消息列表（按时间倒序）。
@@ -1769,17 +1899,40 @@ paths:
       parameters:
         - { name: period_type, in: query, required: true, schema: { type: string, enum: [daily, weekly] } }
         - { name: currency, in: query, required: true, schema: { type: string } }
-      responses: { '200': { description: 奖励档位 } }
+      responses:
+        '200':
+          description: 奖励档位。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaderboardRewardRuleSet' }
     put:
       tags: [Operations]
       summary: 原子替换某周期和排行币种的奖励档位
       security: [{ bearerAuth: [] }]
-      responses: { '200': { description: 已保存 }, '400': { $ref: '#/components/responses/BadRequest' }, '409': { $ref: '#/components/responses/Conflict' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaderboardRewardRuleSetUpdate' }
+      responses:
+        '200':
+          description: 已保存。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaderboardRewardRuleSet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /v1/admin/leaderboard-rewards:
     get:
       tags: [Operations]
       summary: 查询已发放的排行榜奖励
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: period_type, in: query, schema: { type: string, enum: [daily, weekly] } }
+        - { name: currency, in: query, schema: { type: string } }
+        - { name: user, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses: { '200': { description: 发奖明细 } }
   /v1/chat/rooms/{roomID}/red-packets:
     post:
@@ -1890,8 +2043,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [items]
+              required: [items, second_password]
               properties:
+                second_password: { type: string, format: password, writeOnly: true, minLength: 1 }
                 items:
                   type: array
                   minItems: 1
@@ -1924,8 +2078,9 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [value, visibility, expected_version]
+              required: [value, visibility, expected_version, second_password]
               properties:
+                second_password: { type: string, format: password, writeOnly: true, minLength: 1 }
                 value: {}
                 visibility: { type: string, enum: [public, internal] }
                 expected_version: { type: integer, format: int64, minimum: 0 }
@@ -1947,7 +2102,8 @@ paths:
         - name: userID
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: integer, format: int64, minimum: 100000 }
+          description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
         content:
@@ -2027,7 +2183,7 @@ paths:
               type: object
               required: [parent_user_id]
               properties:
-                parent_user_id: { type: string, format: uuid }
+                parent_user_id: { type: string, pattern: '^[0-9]+$', description: 公开用户 ID 字符串，例如 "100009"，不是 UUID 或 JSON 数字 }
       responses:
         '201': { description: 已绑定 }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -2048,7 +2204,8 @@ paths:
         - name: agentID
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: integer, format: int64, minimum: 100000 }
+          description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
         content:
@@ -2145,7 +2302,8 @@ paths:
         - name: userID
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: integer, format: int64, minimum: 100000 }
+          description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
         content:
@@ -2168,7 +2326,8 @@ paths:
         - name: userID
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: integer, format: int64, minimum: 100000 }
+          description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
         content:
@@ -2186,13 +2345,25 @@ paths:
       tags: [Wallets]
       summary: 幂等申请积分下分
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PointWithdrawalRequest' }
       responses:
-        '201': { description: 已冻结积分并创建申请 }
+        '201':
+          description: 已冻结积分并创建申请；重试返回原申请。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PointWithdrawal' }
         '409': { $ref: '#/components/responses/Conflict' }
     get:
       tags: [Wallets]
       summary: 查询本人的积分下分申请
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [requested, approved, rejected] } }
+        - { name: account_id, in: query, schema: { type: string, pattern: '^[0-9]+$' } }
       responses:
         '200': { description: 积分下分列表 }
   /v1/admin/point-withdrawals:
@@ -2200,6 +2371,8 @@ paths:
       tags: [Admin, Wallets]
       summary: 后台查询积分下分申请
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [requested, approved, rejected] } }
       responses:
         '200': { description: 积分下分列表 }
   /v1/admin/point-withdrawals/{withdrawalID}/review:
@@ -2323,6 +2496,61 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    PointWithdrawalRequest:
+      type: object
+      required: [request_id, amount_minor]
+      properties:
+        account_id: { type: string, pattern: '^[0-9]+$', description: 可省略，正常登录取 Token 主体；仅鉴权关闭时使用公开用户 ID 字符串 }
+        request_id: { type: string, minLength: 1 }
+        amount_minor: { type: integer, format: int64, minimum: 1, description: POINTS 最小单位整数，1.5 分传 1500，不使用 amount 字段 }
+        remark: { type: string }
+    PointWithdrawal:
+      type: object
+      required: [id, user_id, client_request_id, amount_minor, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: integer, format: int64, minimum: 100000 }
+        client_request_id: { type: string }
+        amount_minor: { type: integer, format: int64 }
+        status: { type: string, enum: [requested, approved, rejected] }
+        created_at: { type: string, format: date-time }
+    CommissionGrantRequest:
+      type: object
+      required: [request_id, currency, amount_minor]
+      properties:
+        request_id: { type: string, minLength: 1 }
+        currency: { type: string }
+        amount_minor: { type: integer, format: int64, minimum: 1 }
+        remark: { type: string }
+    LeaderboardRewardRule:
+      type: object
+      additionalProperties: false
+      required: [rank_from, rank_to, reward_currency, reward_minor, enabled]
+      properties:
+        rank_from: { type: integer, minimum: 1 }
+        rank_to: { type: integer, minimum: 1, description: 不小于 rank_from，档位不得重叠且按名次递增排列 }
+        reward_currency: { type: string, minLength: 1 }
+        reward_minor: { type: integer, format: int64, minimum: 1 }
+        enabled: { type: boolean }
+    LeaderboardRewardRuleSet:
+      type: object
+      additionalProperties: false
+      required: [period_type, currency, version, rules]
+      properties:
+        period_type: { type: string, enum: [daily, weekly] }
+        currency: { type: string, minLength: 1, description: 排行币种 }
+        version: { type: integer, format: int64, minimum: 0, description: 查询返回的版本号，初次配置为 0，不是 expected_version }
+        rules: { type: array, items: { $ref: '#/components/schemas/LeaderboardRewardRule' }, description: 完整替换档位，空数组清空奖励配置 }
+    LeaderboardRewardRuleSetUpdate:
+      type: object
+      additionalProperties: false
+      required: [period_type, currency, version, rules, second_password]
+      properties:
+        second_password: { type: string, format: password, writeOnly: true, minLength: 1 }
+        period_type: { type: string, enum: [daily, weekly] }
+        currency: { type: string, minLength: 1, description: 排行币种 }
+        version: { type: integer, format: int64, minimum: 0, description: 查询返回的版本号，初次配置为 0，不是 expected_version }
+        rules: { type: array, items: { $ref: '#/components/schemas/LeaderboardRewardRule' }, description: 完整替换档位，空数组清空奖励配置 }
     UnifiedLedgerEntry:
       type: object
       required: [id, currency, decimals, business_type, business_id, entry_type, amount_minor, amount, available_delta_minor, frozen_delta_minor, available_after_minor, frozen_after_minor, available_after, frozen_after, remark, occurred_at]
@@ -2382,6 +2610,11 @@ components:
       type: object
       required: [id, login_name, display_name, status, created_at]
       properties:
+        invitation_code: { type: integer, format: int64, description: 当前用户详情为邀请码；用户列表未加载时为 0 }
+        agent_level: { type: integer, description: 当前用户详情为代理等级；用户列表未加载时为 0 }
+        avatar_url: { type: string, description: 未设置或列表未加载时为空字符串 }
+        roles: { type: array, items: { type: string }, description: 仅加载角色的用户详情返回 }
+        secondary_password_set: { type: boolean, description: 仅本人详情返回是否设置二级密码 }
         id:
           type: integer
           format: int64
@@ -2584,6 +2817,10 @@ components:
       additionalProperties: false
       required: [client_request_id, destination_address, chain_code, currency, amount_minor]
       properties:
+        account_id:
+          type: string
+          pattern: '^[0-9]+$'
+          description: 可省略；正常登录取 Token 主体，仅鉴权关闭的本地模式使用此公开用户 ID 字符串。
         client_request_id:
           type: string
           minLength: 1
@@ -2883,8 +3120,9 @@ components:
     HashConfigUpdate:
       type: object
       additionalProperties: false
-      required: [expected_version, rooms]
+      required: [expected_version, rooms, second_password]
       properties:
+        second_password: { type: string, format: password, writeOnly: true, minLength: 1 }
         expected_version: { type: integer, format: int64, minimum: 1 }
         rooms:
           type: array
@@ -3143,7 +3381,7 @@ components:
       required: [id, record_type, user_id, login_name, currency, amount_minor, balance_after_minor, status, occurred_at]
       properties:
         id: { type: string }
-        record_type: { type: string, enum: [bet_refund, withdrawal, point_withdrawal] }
+        record_type: { type: string, enum: [bet_refund, withdrawal, point_withdrawal, admin_debit] }
         user_id: { type: integer, format: int64, minimum: 100000 }
         login_name: { type: string }
         currency: { type: string }
@@ -3197,31 +3435,63 @@ components:
         status:
           type: string
           enum: [cancelled]
+    WalletAdjustmentRequest:
+      type: object
+      additionalProperties: false
+      required: [user_id, currency, action, amount, request_id, first_password]
+      properties:
+        user_id: { type: string, pattern: '^[0-9]+$', description: 公开用户 ID 字符串 }
+        currency: { type: string, minLength: 1, description: 已登记且启用的币种 }
+        action: { type: string, enum: [credit, debit, reward, penalty] }
+        amount: { type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: 正数展示金额，不接受负数、科学计数法和超精度数值 }
+        request_id: { type: string, minLength: 1, maxLength: 128 }
+        remark: { type: string, description: 可选备注，UTF-8 编码不超过 2000 字节 }
+        first_password: { type: string, format: password, writeOnly: true, minLength: 1 }
+    WalletAdjustmentResult:
+      type: object
+      required: [operation_id, user_id, currency, action, amount_minor, delta_minor, balance_before_minor, balance_after_minor, frozen_minor, duplicate, occurred_at]
+      properties:
+        operation_id: { type: string, format: uuid }
+        user_id: { type: integer, format: int64 }
+        currency: { type: string }
+        action: { type: string, enum: [credit, debit, reward, penalty] }
+        amount_minor: { type: integer, format: int64, description: 正数业务金额 }
+        delta_minor: { type: integer, format: int64, description: 可用余额变动，上分/赠分为正，下分/扣分为负 }
+        balance_before_minor: { type: integer, format: int64 }
+        balance_after_minor: { type: integer, format: int64 }
+        frozen_minor: { type: integer, format: int64, description: 本次操作时未变动的冻结余额 }
+        duplicate: { type: boolean, description: true 表示重放首次结果，未重复变更余额 }
+        occurred_at: { type: string, format: date-time }
     AdminCreditRequest:
       type: object
       additionalProperties: false
-      required: [user_id, currency, amount, request_id]
+      required: [user_id, currency, amount, request_id, first_password]
       properties:
+        first_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: 后台全局一级操作密码，必须在本次请求内提交。
         user_id:
-          type: integer
-          format: int64
-          minimum: 100000
-          description: 目标公开用户 ID。
+          type: string
+          pattern: '^[0-9]+$'
+          description: 目标公开用户 ID 的十进制字符串，例如 "100009"；Go 请求字段为 string，不能传 JSON 数字。
         currency:
           type: string
           minLength: 1
-          description: 任意非空钱包币种代码。
+          description: 已登记且启用的平台币种代码。
         amount:
           type: string
           pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'
           description: 展示单位的正数十进制字符串；后端按币种精度换算。例如 POINTS 的 "100" 入账为 100000 minor，"1.5" 入账为 1500 minor。
         remark:
           type: string
-          description: 备注，写入流水。
+          description: 备注，写入流水，UTF-8 编码不超过 2000 字节。
         request_id:
           type: string
           minLength: 1
-          description: 幂等键；同一 request_id 不重复入账。
+          maxLength: 128
+          description: 同一管理员下的幂等键，与统一上下分接口共用；修改业务参数后重用返回 409。
     CreditResult:
       type: object
       required: [user_id, currency, amount_minor, balance_after_minor, credited, occurred_at]
@@ -3250,9 +3520,9 @@ components:
       required: [user_id, amount_minor, activity_id]
       properties:
         user_id:
-          type: integer
-          format: int64
-          minimum: 100000
+          type: string
+          pattern: '^[0-9]+$'
+          description: 公开用户 ID 字符串，例如 "100009"；不能传 JSON 数字。
         amount_minor:
           type: integer
           format: int64
@@ -3343,7 +3613,7 @@ components:
       type: object
       required: [code, title, enabled, cost_currency, cost_minor, sort_order, prizes]
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string, description: 已有项传原 UUID；新增项省略或传空字符串，后端生成 UUID }
         code: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,31}$' }
         title: { type: string }
         enabled: { type: boolean }
@@ -3364,7 +3634,7 @@ components:
           minimum: 100000
         business_type:
           type: string
-          description: 业务类型，如 admin_credit / checkin_reward / bet_task_reward / activity_consume。
+          description: 业务类型，如 admin_credit（上分）/ admin_debit（清退）/ admin_reward（赠分）/ admin_penalty（人工扣分）/ bet_task_reward / activity_consume。
         business_id:
           type: string
         amount_minor:
@@ -3377,7 +3647,8 @@ components:
         remark:
           type: string
         operator_id:
-          type: string
+          type: integer
+          format: int64
           description: 操作人 ID（管理员操作时存在）。
         occurred_at:
           type: string

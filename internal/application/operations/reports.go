@@ -152,6 +152,10 @@ func (s *Service) ListRefundClearances(ctx context.Context, user, status string,
 			FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id
 			WHERE le.entry_type IN ('refund','bet_refund')
 			UNION ALL
+			SELECT le.id::text,'admin_debit',w.user_id,w.currency,-le.amount_minor,
+				le.balance_after_minor,'completed',''::text,le.occurred_at
+			FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id WHERE le.business_type='admin_debit'
+			UNION ALL
 			SELECT wd.id::text,'withdrawal',wd.user_id,w.currency,wd.amount_minor,0,wd.status,''::text,wd.created_at
 			FROM withdrawals wd JOIN wallets w ON w.id=wd.wallet_id
 			UNION ALL

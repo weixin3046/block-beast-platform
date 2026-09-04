@@ -36,6 +36,7 @@ type Server struct {
 	sessions           SessionService
 	passwords          PasswordChangeService
 	secondaryPasswords SecondaryPasswordService
+	adminSecurity      AdminSecurityService
 	auditor            AuditRecorder
 	chainWebhook       *chainWebhookConfig
 	withdrawals        WithdrawalService
@@ -242,7 +243,11 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/withdrawals/{withdrawalID}/approve", server.protectRoles(server.approveWithdrawal, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/withdrawals", server.protectRoles(server.adminWithdrawals, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/withdrawals/{withdrawalID}/reject", server.protectRoles(server.rejectWithdrawal, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/security-passwords", server.protectRoles(server.adminSecurityStatus, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/security-passwords/{level}", server.protectRoles(server.setAdminSecurity, identity.RoleAdmin))
+	mux.HandleFunc("POST /v1/admin/security-passwords/{level}/verify", server.protectRoles(server.verifyAdminSecurityEndpoint, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/wallet-adjustments", server.protectRoles(server.adminWalletAdjustment, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/users", server.protectRoles(server.adminUsers, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/status", server.protectRoles(server.setUserStatus, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/agent-level", server.protectRoles(server.setAgentLevel, identity.RoleAdmin, identity.RoleOperator))
@@ -265,14 +270,14 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/admin/virtual-accounts/{userID}/automation", server.protectRoles(server.setVirtualAutomation, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/configs", server.protectRoles(server.adminConfigs, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/leaderboard-reward-rules", server.protectRoles(server.leaderboardRules, identity.RoleAdmin, identity.RoleOperator))
-	mux.HandleFunc("PUT /v1/admin/leaderboard-reward-rules", server.protectRoles(server.replaceLeaderboardRules, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/leaderboard-reward-rules", server.protectRoles(server.secondPassword(server.replaceLeaderboardRules), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/leaderboard-rewards", server.protectRoles(server.leaderboardRewards, identity.RoleAdmin, identity.RoleOperator))
-	mux.HandleFunc("PUT /v1/admin/configs/{key}", server.protectRoles(server.putConfig, identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/configs/{key}", server.protectRoles(server.secondPassword(server.putConfig), identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/tasks/bet-configs", server.protectRoles(server.adminBetTaskConfigs, identity.RoleAdmin))
-	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs", server.protectRoles(server.replaceBetTaskConfigs, identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs", server.protectRoles(server.secondPassword(server.replaceBetTaskConfigs), identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/game-types", server.protectRoles(server.adminGameTypes, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/hash/config", server.protectRoles(server.adminHashConfig, identity.RoleAdmin, identity.RoleOperator))
-	mux.HandleFunc("PUT /v1/admin/hash/config", server.protectRoles(server.updateHashConfig, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/hash/config", server.protectRoles(server.secondPassword(server.updateHashConfig), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/game-rooms", server.protectRoles(server.adminGameRooms, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/rounds", server.protectRoles(server.adminRounds, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/point-withdrawals", server.protect(server.requestPointWithdrawal))
@@ -285,7 +290,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/activities/spins", server.protect(server.spinConfigs))
 	mux.HandleFunc("POST /v1/activities/spins/{spinID}/play", server.protect(server.playConfiguredSpin))
 	mux.HandleFunc("GET /v1/admin/spins", server.protectRoles(server.adminSpinConfigs, identity.RoleAdmin))
-	mux.HandleFunc("PUT /v1/admin/spins", server.protectRoles(server.replaceSpinConfigs, identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/spins", server.protectRoles(server.secondPassword(server.replaceSpinConfigs), identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/wallets/{accountID}/all", server.protect(server.allBalances))
 	mux.HandleFunc("GET /v1/points/{accountID}/ledger", server.protect(server.pointsLedger))
 	mux.HandleFunc("GET /v1/stamina/{accountID}/ledger", server.protect(server.staminaLedger))

@@ -302,19 +302,153 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 - `GET /v1/admin/users/{userID}/login-ips` 返回玩家用过的 IP，并在每个 IP 下嵌套该地址登录过的其他用户；也可用 `GET /v1/admin/login-ips/{ip}/users` 直接反查。
 - `POST /v1/admin/virtual-accounts` 使用登录名和密码创建可登录的虚拟账户；`PUT /v1/admin/virtual-accounts/{userID}/automation` 保存挂机玩法、币种、单注和间隔配置。虚拟账户可投注并进入排行榜，但不计入看板全局充值、流水和余额统计，也禁止下分。
 
-管理员（operator/admin 角色）可调用 `POST /v1/admin/credits` 为用户充值任意币种：
+### 请求参数类型约定（以 Go 实际解码类型为准）
+
+用户 ID 在不同接口中的 JSON 类型并不完全相同，不要全局统一转为数字或字符串：
+
+| 接口/位置 | 字段 | 必须使用的类型 |
+| --- | --- | --- |
+| `POST /v1/bets` 请求体 | `account_id` | number 整数，例如 `100009` |
+| 管理员上分、统一上下分、`POST /v1/stamina/consume` 请求体 | `user_id` | string，例如 `"100009"` |
+| `POST /v1/agents/bind` 请求体 | `parent_user_id` | string，例如 `"100009"`，不是 UUID |
+| 积分清退/链上提现请求体（仅本地关闭鉴权时回退） | `account_id` | string；正常登录省略，由 Token 确定本人 |
+| 用户/代理管理路径 | `{userID}`、`{agentID}` | 公开数字 ID，例如 `/100009/roles`，不是内部 UUID |
+| 轮次、投注、提现单、上传文件路径 | 对应资源 ID | UUID 字符串，不要套用用户 ID 规则 |
+| 金额 | `amount` | 展示金额 string，例如 `"1.5"`，目前用于管理员资金操作 |
+| 金额 | `amount_minor`、`stake_minor`、`reward_minor` 等 | 最小单位整数，不能传小数字符串；不能将所有资金接口都改传 amount |
+
+排行榜奖励配置使用 `version`（整数）与 `rules`（数组），每档 `rank_from/rank_to` 为整数、`reward_minor` 为最小单位整数、`enabled` 为 boolean。任务/转盘配置的金额也仍是最小单位整数。
+
+注意两个保留现状的例外：审计日志查询 `actor_user_id` 目前按内部 UUID 筛选；平台配置响应 `updated_by` 目前仍为内部 UUID 字符串。其他经公开 ID 转换的流水响应 `operator_id` 是公开数字 ID。这里仅对齐文档，没有改变这些接口的实际行为。
+
+### 后台直接上分、下分、赠分、人工扣分
+
+统一调用 `POST /v1/admin/wallet-adjustments`。`admin` 和 `operator` 均可调用；使用后台全局一级密码，不是个人或目标玩家的二级密码。支持所有已登记启用币种。平台扣分不会触发链上付款。
+
+调用顺序：
+
+1. `POST /v1/admin/auth/login` 登录，后续携带后台 Token。
+2. 查询 `GET /v1/admin/security-passwords` 的 `first_set`；未设置时由 `admin` 按下文设置全局一级密码。
+3. `GET /v1/admin/users?q=用户名` 选择目标用户。列表的 `id` 是公开数字 ID，请转换为字符串作为写接口的 `user_id`。
+4. `GET /v1/currencies` 选择币种；`GET /v1/wallets/{目标公开ID}/all` 展示可用、冻结余额。
+5. 管理员确认用户、币种、操作和金额，输入后台全局一级密码；生成 `request_id`，提交下面的请求。不需要先调用密码验证接口，资金接口会自行验证。
+6. 200 后刷新余额、`GET /v1/admin/ledger?user=100009&currency=POINTS`、看板；人工清退也可在 `GET /v1/admin/refunds-clearances` 查询。网络超时重试必须保持同一管理员、请求编号和业务参数，不能自动换编号。
+
+| 字段 | JSON 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| user_id | string | 是 | 公开用户 ID，如 `"100009"`，不接受数字或内部 UUID |
+| currency | string | 是 | 币种代码，后端去空白并转大写 |
+| action | string | 是 | `credit` 上分、`debit` 下分/清退、`reward` 赠分、`penalty` 人工扣分 |
+| amount | string | 是 | 正数展示金额；如 `"100.5"`，POINTS 内部为 100500；后端转换，不能传负数、科学计数法或超精度金额 |
+| request_id | string | 是 | 1–128 字符，建议 UUID，同一管理员所有人工资金操作共用幂等空间 |
+| first_password | string | 是 | 后台全局一级密码；每次提交，不存入本地持久化存储或日志 |
+| remark | string | 否 | 备注，UTF-8 编码不超过 2000 字节 |
 
 ```json
 {
-  "user_id": 100009,
+  "user_id": "100009",
   "currency": "POINTS",
-  "amount": "100",
-  "remark": "活动补偿",
-  "request_id": "admin-20260723-0001"
+  "action": "debit",
+  "amount": "100.5",
+  "request_id": "admin-debit-001",
+  "first_password": "后台全局一级密码",
+  "remark": "人工清退"
 }
 ```
 
-`request_id` 是幂等键，重复请求返回首次结果（`credited=false`），不会重复入账。
+返回：`operation_id`（UUID）、`user_id`（公开数字 ID）、`currency`、`action`、`amount_minor`（正数）、`delta_minor`（增减带符号）、`balance_before_minor`、`balance_after_minor`（操作前后可用余额）、`frozen_minor`（冻结余额）、`duplicate`、`occurred_at`。金额字段均为最小单位整数，时间为 RFC3339。重复请求 `duplicate=true`，返回首次操作快照，不代表当前余额。
+
+- 下分/人工扣分仅扣可用余额，不动冻结，不取消投注。余额不足 409；虚拟账户禁止两种扣款，返回 403，允许上分/赠分。
+- 同一请求编号修改用户、币种、操作、金额或备注返回 409；等值金额（如 "1" 与 "1.0"）视为相同。
+- 未设置全局一级密码 409；密码错误 401；无管理员权限 403；参数/精度错误 400。
+- 新流水类型：`admin_credit` 上分、`admin_debit` 清退、`admin_reward` 赠分、`admin_penalty` 人工扣分。业务编号 `business_id` 对应 `operation_id`。
+- 看板 `global[].credit_minor` 为人工上分；总充值由链上 `deposit_minor` 加人工 `credit_minor` 展示。新增 `clearance_minor` 为人工下分+积分审核成功扣款+链上最终成功扣款（不含冻结、驳回和投注退款），`gift_minor` 为人工赠分，`penalty_minor` 为人工扣分，全部按币种，排除虚拟账户。人工扣分不计游戏输赢。
+- `players[].funds[]` 按币种返回 `currency/credit_minor/clearance_minor/gift_minor/penalty_minor`；既有玩家汇总字段保留，不要用跨币种总数做资金核算。
+- 金额、流水、成功审计、幂等结果和 outbox 同一事务，失败全部回滚；不在任何持久化记录中保存操作密码。
+
+### 旧上分入口与提现的边界
+
+`POST /v1/admin/credits` 保留，但现在允许 admin/operator 且必须提交 `first_password`；其他字段为上表去掉 `action`。等价于统一接口的 `action=credit`，两者共用幂等空间。返回原 `CreditResult` 字段，`credited=false` 表示重放。
+
+发布时先执行所有待应用迁移（包含 `0049` 和 `0050_admin_security_passwords.sql`），再更新 API。旧上分入口同样需要改传 `first_password`；不再接受 `secondary_password`。
+
+玩家积分清退申请、链上提现仍保留原申请→冻结→审核流程，与后台直接上下分分开。不要用后台 Token 代玩家调用申请接口，也不要对同一笔提款既做人工下分又批准提现，避免重复扣款。链上提现仅在服务商最终确认后计入清退，审核成功不代表到账。
+
+### 积分下分/清退调用顺序
+
+1. **玩家端，玩家 Token**：查询 `GET /v1/wallets/{本人公开ID}/all`，确认 `POINTS` 可用余额。
+2. **玩家端**：`POST /v1/point-withdrawals` 提交申请。例如下分 `1.5` 宝石：
+
+   ```json
+   { "request_id": "point-withdraw-001", "amount_minor": 1500, "remark": "申请下分" }
+   ```
+
+   | 字段 | JSON 类型 | 必填 | 说明 |
+   | --- | --- | --- | --- |
+   | `request_id` | string | 是 | 幂等标识，网络重试复用。 |
+   | `amount_minor` | number（整数，对应 Go int64） | 是 | 大于 0 的最小单位整数。POINTS 精度 3，下分 100 传 `100000`，下分 1.5 传 `1500`；这里尚未改为展示金额字符串。 |
+   | `remark` | string | 否 | 申请备注；当前申请列表响应不返回此字段。 |
+   | `account_id` | string | 否 | 正常登录时不要传，由 Token 确定本人；只供鉴权关闭的本地开发回退使用。 |
+
+   不传 `currency`，这个接口固定操作 `POINTS`；不传 `amount` 或二级密码字段。当前没有在下分接口中自动验证二级密码的链路。
+3. **服务端**：同一事务将金额从可用余额转入冻结余额，记录申请和流水。返回 201，申请字段为 `id`（UUID string）、`user_id`（公开数字 ID）、`client_request_id`（string，对应请求中的 `request_id`）、`amount_minor`（整数）、`status="requested"`、`created_at`（时间字符串）。重复申请返回原申请，不再冻结。
+4. **后台端，后台 Token**：`GET /v1/admin/point-withdrawals?status=requested` 查询待审核申请。`status` 为可选 string，可取 `requested/approved/rejected`，不传返回全部状态；当前固定最多 50 条，未实现用户筛选和翻页，不能依赖 `user`、`limit`、`offset` 参数生效。
+5. **后台端**：使用申请的 `id` 调用 `POST /v1/admin/point-withdrawals/{withdrawalID}/review`。路径参数为申请 UUID string，不是用户 ID。请求体二选一：
+
+   ```json
+   { "approved": true }
+   ```
+
+   ```json
+   { "approved": false }
+   ```
+
+   `approved` 必须明确传 JSON boolean，不是 `"true"` 或 `1`。通过：扣除已冻结积分，状态变为 `approved`，不再次扣可用余额；驳回：解冻回到可用余额，状态变为 `rejected`。不需要重新传用户、金额、币种或审核人，审核接口不接收备注。200 响应为 `{"status":"processed"}`，这个值只是“审核已处理”，不是申请最终状态。
+6. **审核后**：后台重新查申请列表、`GET /v1/wallets/{用户公开ID}/all` 和 `GET /v1/admin/ledger?user=100009&currency=POINTS`；玩家用 `GET /v1/point-withdrawals` 查看自己的申请。审核仅允许 `requested` 状态，重复审核返回 409，不会重复扣款；网络超时先查状态再决定是否重试。
+
+积分下分流水的 `business_type` 分别为 `point_withdrawal`（冻结）、`point_withdrawal_debit`（通过并扣除冻结额）、`point_withdrawal_unfreeze`（驳回解冻）。不要把冻结与通过重复统计为两次下分。
+
+### 链上资产下分/提现调用顺序
+
+1. **玩家端，玩家 Token**：`GET /v1/assets` 查询链和资产，该接口已过滤停用资产，响应没有 `enabled` 字段；从列表选择 `support_withdraw=true` 的资产。`GET /v1/currencies` 读取启用的平台币种及精度，确认包含该资产的 `token_code`，再查询本人钱包余额。
+2. **玩家端**：`POST /v1/withdrawals` 提交申请，请求参数如下：
+
+   | 字段 | JSON 类型 | 必填 | 说明 |
+   | --- | --- | --- | --- |
+   | `client_request_id` | string | 是 | 幂等标识；注意与积分申请的 `request_id` 字段名不同。 |
+   | `chain_code` | string | 是 | 所选资产返回的链代码，不自行硬编码。 |
+   | `currency` | string | 是 | 使用所选资产的 `token_code`，例如 `USDT`。 |
+   | `destination_address` | string | 是 | 收款地址，必须符合所选链的校验规则。 |
+   | `destination_memo` | string | 按链要求 | 不需要时省略；需要备注/标签的网络按要求提供。 |
+   | `amount_minor` | number（整数，对应 Go int64） | 是 | 平台最小单位，不是网络最小单位。USDT 平台精度 6，提现 100 USDT 传 `100000000`。不能传展示字符串 `amount`。 |
+   | `account_id` | string | 否 | 正常鉴权时省略，仅本地关闭鉴权时回退使用。 |
+
+   正确请求体形状（链和地址必须替换为实际选择值）：
+
+   ```json
+   {
+     "client_request_id": "chain-withdraw-001",
+     "chain_code": "所选链代码",
+     "currency": "USDT",
+     "destination_address": "所选链的有效收款地址",
+     "amount_minor": 100000000
+   }
+   ```
+
+3. **服务端**：检查余额、虚拟账号限制、链/资产支持、地址、最低/单笔/每日限额及精度；冻结金额后返回 201。响应主键为 `withdrawal_id`（UUID string），不是积分申请的 `id`；并包含 `client_request_id`、收款地址、链、币种、整数 `amount_minor`、string `status` 和时间 `created_at`。
+4. **后台端，后台 Token**：`GET /v1/admin/withdrawals?status=requested` 查询待审核列表；`GET /v1/withdrawals/{withdrawalID}` 查详情。后台列表只实现可选 string `status` 过滤，固定最多 50 条，不支持用户筛选或翻页。当前链上提现 DTO 不返回所属用户 ID，不能假设列表有 `user_id`；需要按用户辅助核对时，可用 `GET /v1/admin/refunds-clearances?user=100009&status=requested&limit=50&offset=0`，筛出 `record_type="withdrawal"`，其 `id` 对应提现 UUID。
+5. **后台通过**：`POST /v1/admin/withdrawals/{withdrawalID}/approve`，不需要请求体，200 返回提现对象，`status="approved"`。金额此时仍冻结，后续由 Worker 出金。
+6. **后台驳回**：`POST /v1/admin/withdrawals/{withdrawalID}/reject`，建议传 `{"reason":"收款信息需要核实"}`；`reason` 为可选 string。200 返回提现对象，`status="cancelled"`，金额解冻退回原钱包。两种审批均只允许 `requested` 状态；重复审批返回 409。
+7. **跟踪结果**：查询提现详情，正常路径为 `requested → approved → broadcasted → confirmed`；`confirmed` 才代表服务商确认成功并扣除冻结额。出金失败为 `failed` 并解冻；后台驳回为 `cancelled`。发生审批超时先查当前状态，不要再发一笔新申请，也不要人工另扣一次余额。
+
+链上提现详情可能额外返回 `provider_order_id`、`tx_hash`、`failure_reason`（均为可选 string）。审核完刷新用户钱包、统一流水和退款/清退明细；后台不能用 `GET /v1/users/me/ledger` 查看玩家，该路径始终是当前 Token 本人的流水。
+
+### 上下分共同约定与错误处理
+
+- 参数类型以本节实际 Go 接口为准：上分金额是展示字符串；两种下分申请金额仍是整数 `amount_minor`，不能混用。前端构造下分整数时使用十进制定点处理，不用浮点乘法再取整；超过 JavaScript 安全整数范围时不能直接经 `Number` 序列化，也不能擅自把接口整数改成字符串。
+- 通常 400 表示参数、金额/精度或资产不支持；401 表示登录无效；403 表示权限不足或虚拟账号禁止下分；404 表示用户/钱包/申请不存在；409 表示余额不足、每日限额或状态冲突；500/503 表示服务异常/暂不可用。以实际接口响应为准，可直接展示中文 `error`。
+- 写请求超时不是失败的证明。上分/申请复用原幂等标识并核对结果；审核先重新查询状态，已经通过或驳回就停止重试。前端提交期间禁用按钮，防止连续点击生成多笔不同标识的操作。
+- 冻结、扣款、解冻、写流水由后端事务完成，前端不再调用其他接口手动“补扣/补回”。钱包通知用于触发查询刷新，不用推送金额自行累加余额。
 
 用户管理：
 
@@ -417,3 +551,30 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 创建时总金额立即从发送者可用余额扣除并进入红包托管。金额必须至少等于份数，最多 100 份；发送者不能领取自己的红包。每次领取至少一个最小货币单位，最后一份获得全部剩余金额。默认 24 小时过期，Worker 将未领取余额退回发送者原币种钱包。创建、领取、退款均在同一事务中更新钱包、写不可变账本和 outbox 事件。
 
 游戏开奖结果的数据源由后端玩法规则决定：K 线玩法使用 OKX `candle1m` WebSocket 实时数据并由 REST 补偿，TRON 哈希玩法使用官方 TronGrid FullNode HTTP API。前端不得自行计算或替代开奖结果。
+
+
+## 后台全局操作密码（与个人二级密码独立）
+
+后台角色保持 `admin`（全部后台权限）和 `operator`（含上下分权限）；玩家角色 `player` 不受影响。不新增超级管理员角色或硬编码特权账号。
+
+1. 登录后调用 `GET /v1/admin/security-passwords`，返回 `{"first_set":false,"second_set":false}`。
+2. 未设置或需要重置时，仅 `admin` 调用 `PUT /v1/admin/security-passwords/first` 或 `/second`，提交 `{"login_password":"当前管理员登录密码","password":"新全局操作密码"}`，成功 204。不要求旧操作密码，没有默认密码。
+3. 可选预校验：`POST /v1/admin/security-passwords/first/verify` 或 `/second/verify`，提交 `{"password":"待验证密码"}`，成功 204。不会签发凭证，也不能代替业务接口校验。
+4. 资金操作每次提交 `first_password`；下表配置更新在原 JSON 请求体最外层追加 `second_password`，不得放进 items/value。一级和二级密码分别配置、独立验证。
+
+| 接口 | 密码字段 | 允许角色 |
+| --- | --- | --- |
+| POST /v1/admin/wallet-adjustments、POST /v1/admin/credits | first_password | admin/operator |
+| PUT /v1/admin/hash/config | second_password | admin/operator |
+| PUT /v1/admin/leaderboard-reward-rules | second_password | admin/operator |
+| PUT /v1/admin/configs/{key} | second_password | admin |
+| PUT /v1/admin/tasks/bet-configs | second_password | admin |
+| PUT /v1/admin/spins | second_password | admin |
+
+任务配置示例：`{"second_password":"后台全局二级密码","items":[原有任务配置对象]}`。其他参数类型和业务限制不变；查询配置不返回密码。
+
+操作密码必须为非空字符串，不能全空白，UTF-8 最多 128 字节；不限制必须数字。存储使用 Argon2id 哈希，审计仅记录修改人、级别和版本。密码不进入普通配置、响应、资金幂等记录或日志，前端不要持久化保存。
+
+状态码：参数错误 400、密码错误 401、权限不足 403、未设置 409、验证锁定 429（Retry-After: 900）、服务不可用 503。按账号和用途 first/second/manage 分开计算，15 分钟内失败 5 次锁定 15 分钟，成功验证清零；一个账号不会锁死其他账号。重置密码不会提前解除已触发的验证锁定。
+
+个人 `/v1/users/me/secondary-password` 的设置和验证流程完全不变，不用于上述后台操作。只修改本后端接口与文档，不关联或修改其他前台、后台项目。

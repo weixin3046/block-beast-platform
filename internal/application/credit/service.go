@@ -214,70 +214,20 @@ type CreditResult struct {
 	OccurredAt        time.Time `json:"occurred_at"`
 }
 
-// AdminCredit 幂等处理管理员手动充值：锁钱包、加余额、写统一流水。
-// 所有币种统一写入 ledger_entries，与钱包及 outbox 位于同一事务。
+// AdminCredit 保留原上分入口，资金处理统一进入 AdjustWallet。
 func (service *Service) AdminCredit(ctx context.Context, input AdminCreditInput) (CreditResult, error) {
-	input.Currency = strings.ToUpper(strings.TrimSpace(input.Currency))
-	if !validCurrency(input.Currency) {
-		return CreditResult{}, ErrInvalidCurrency
-	}
+	// 保持原接口的基础参数错误语义。
 	if input.UserID == "" || input.RequestID == "" {
 		return CreditResult{}, ErrUserNotFound
+	}
+	if !validCurrency(input.Currency) {
+		return CreditResult{}, ErrInvalidCurrency
 	}
 	if !wallet.ValidDisplayAmount(input.Amount) {
 		return CreditResult{}, ErrInvalidAmount
 	}
-	tx, err := service.pool.Begin(ctx)
-	if err != nil {
-		return CreditResult{}, err
-	}
-	defer tx.Rollback(ctx)
-
-	// 幂等检查：同一 request_id 已入账则直接返回。
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "admin_credit:"+input.UserID+":"+input.Currency+":"+input.RequestID); err != nil {
-		return CreditResult{}, err
-	}
-	if existing, err := findLedgerByBizID(ctx, tx, input.UserID, input.Currency, BizAdminCredit, input.RequestID); err == nil {
-		return existing, tx.Commit(ctx)
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return CreditResult{}, err
-	}
-
-	decimals, err := wallet.ResolveDecimals(ctx, tx, input.Currency, true)
-	if errors.Is(err, wallet.ErrUnknownCurrency) || errors.Is(err, wallet.ErrCurrencyDisabled) {
-		return CreditResult{}, fmt.Errorf("%w: %v", ErrInvalidCurrency, err)
-	}
-	if err != nil {
-		return CreditResult{}, err
-	}
-	input.AmountMinor, err = wallet.ParseDisplayAmount(input.Amount, decimals)
-	if err != nil {
-		return CreditResult{}, fmt.Errorf("%w: amount allows at most %d decimal places", ErrInvalidAmount, decimals)
-	}
-
-	balanceAfter, err := addBalance(ctx, tx, input.UserID, input.Currency, input.AmountMinor)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return CreditResult{}, ErrUserNotFound
-	}
-	if err != nil {
-		return CreditResult{}, err
-	}
-
-	result := CreditResult{
-		UserID:            input.UserID,
-		Currency:          input.Currency,
-		AmountMinor:       input.AmountMinor,
-		BalanceAfterMinor: balanceAfter,
-		Credited:          true,
-		OccurredAt:        time.Now().UTC(),
-	}
-	if err := writeLedger(ctx, tx, input.UserID, input.Currency, BizAdminCredit, input.RequestID, input.AmountMinor, balanceAfter, input.Remark, input.OperatorID); err != nil {
-		return CreditResult{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return CreditResult{}, err
-	}
-	return result, nil
+	result, err := service.AdjustWallet(ctx, AdjustmentInput{UserID: input.UserID, Currency: input.Currency, Action: "credit", Amount: input.Amount, Remark: input.Remark, RequestID: input.RequestID, OperatorID: input.OperatorID})
+	return CreditResult{UserID: result.UserID, Currency: result.Currency, AmountMinor: result.AmountMinor, BalanceAfterMinor: result.BalanceAfterMinor, Credited: !result.Duplicate, OccurredAt: result.OccurredAt}, err
 }
 
 // ConsumeStaminaInput 是参加活动消耗体力的请求。

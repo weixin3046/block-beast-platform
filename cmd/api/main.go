@@ -10,6 +10,7 @@ import (
 	"syscall"   // 系统信号常量（SIGINT、SIGTERM）
 	"time"      // 时间、超时设置
 
+	"github.com/block-beast/platform/internal/application/adminsecurity"
 	"github.com/block-beast/platform/internal/application/agent"
 	"github.com/block-beast/platform/internal/application/audit"   // 审计应用服务
 	"github.com/block-beast/platform/internal/application/auth"    // 登录认证应用服务
@@ -133,7 +134,7 @@ func main() {
 	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
-	options = append(options, httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
+	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
 	operationsService := operations.NewService(pool)
 	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithAnalytics(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService), httpapi.WithHashConfig(operationsService), httpapi.WithPublicUserResolver(identityRepository))
 	if cfg.PQPAAPISecret == "" {
