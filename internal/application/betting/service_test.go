@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/block-beast/platform/internal/application/operations"
 	"os"
 	"strings"
 	"testing"
@@ -90,6 +91,16 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 	if found.BetID != first.BetID || found.Status != "accepted" || found.Currency != "USDT" {
 		t.Fatalf("found bet = %#v", found)
 	}
+	if found.Decimals != 6 || found.Stake != "0.002500" || found.Payout != "0.000000" || second.Stake != found.Stake {
+		t.Fatalf("bet display precision: %+v", found)
+	}
+	adminBets, err := operations.NewService(pool).ListAdminBets(ctx, operations.BetQuery{GameType: "test-" + gameTypeID})
+	if err != nil || len(adminBets) != 1 {
+		t.Fatalf("admin bets: %+v %v", adminBets, err)
+	}
+	if adminBets[0].Stake != found.Stake || adminBets[0].Payout != found.Payout || adminBets[0].Decimals != 6 {
+		t.Fatalf("admin precision: %+v", adminBets[0])
+	}
 	publicBets, err := service.ListPublicBets(ctx, PublicBetQuery{GameType: "test-" + gameTypeID, Currency: "usdt", Status: "accepted", PlayerType: "real", Limit: 10})
 	if err != nil {
 		t.Fatalf("list public bets: %v", err)
@@ -98,6 +109,9 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatalf("public bets = %#v", publicBets)
 	}
 	virtualBets, err := service.ListPublicBets(ctx, PublicBetQuery{PlayerType: "virtual", Limit: 10})
+	if publicBets[0].Stake != found.Stake || publicBets[0].Payout != found.Payout {
+		t.Fatal("public precision differs")
+	}
 	if err != nil {
 		t.Fatalf("list virtual bets: %v", err)
 	}

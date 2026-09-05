@@ -184,7 +184,7 @@ func (hub *Hub) sendChatMessage(ctx context.Context, item *client, claims identi
 
 func chatCommandError(err error) string {
 	switch {
-	case errors.Is(err, chat.ErrInvalidMessage), errors.Is(err, chat.ErrInvalidRequestID), errors.Is(err, chat.ErrRoomAccessDenied), errors.Is(err, chat.ErrRoomNotFound):
+	case errors.Is(err, chat.ErrChatMuted), errors.Is(err, chat.ErrInvalidMessage), errors.Is(err, chat.ErrInvalidRequestID), errors.Is(err, chat.ErrRoomAccessDenied), errors.Is(err, chat.ErrRoomNotFound):
 		return err.Error()
 	default:
 		return "unable to send chat message"

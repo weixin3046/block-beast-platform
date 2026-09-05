@@ -6,9 +6,14 @@ import (
 	"math/big"
 	"strings"
 	"time"
+
+	"github.com/block-beast/platform/internal/domain/wallet"
 )
 
 type AdminBet struct {
+	Decimals         int             `json:"decimals"`
+	Stake            string          `json:"stake"`
+	Payout           string          `json:"payout"`
 	BetID            string          `json:"bet_id"`
 	UserID           int64           `json:"user_id"`
 	LoginName        string          `json:"login_name"`
@@ -45,8 +50,9 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 			gt.code,gt.name,r.sequence,w.currency,COALESCE(b.game_room_id::text,''),
 			COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),b.selection,b.stake_minor,
 			COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-			b.payout_minor,b.status,b.created_at,b.settled_at
+			b.payout_minor,b.status,b.created_at,b.settled_at,c.decimals
 		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
+		JOIN currencies c ON c.code=w.currency
 		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
 		LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
 		WHERE ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%')
@@ -63,10 +69,16 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 		if err := rows.Scan(&v.BetID, &v.UserID, &v.LoginName, &v.DisplayName, &v.IsVirtual,
 			&v.GameType, &v.GameName, &v.RoundSequence, &v.Currency, &v.GameRoomID, &v.GameRoomCode,
 			&v.GameRoomName, &v.PlayMode, &v.Selection, &v.StakeMinor, &v.PayoutMultiplier,
-			&v.PayoutDivisor, &v.PayoutMinor, &v.Status, &v.CreatedAt, &v.SettledAt); err != nil {
+			&v.PayoutDivisor, &v.PayoutMinor, &v.Status, &v.CreatedAt, &v.SettledAt, &v.Decimals); err != nil {
 			return nil, err
 		}
 		v.PayoutRate = payoutRate(v.PayoutMultiplier, v.PayoutDivisor)
+		if v.Stake, err = wallet.FormatDisplayAmount(v.StakeMinor, v.Decimals); err != nil {
+			return nil, err
+		}
+		if v.Payout, err = wallet.FormatDisplayAmount(v.PayoutMinor, v.Decimals); err != nil {
+			return nil, err
+		}
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -81,6 +93,10 @@ func payoutRate(multiplier, divisor int64) string {
 }
 
 type LedgerRecord struct {
+	DisplayName       string    `json:"display_name"`
+	Decimals          int       `json:"decimals"`
+	Amount            string    `json:"amount"`
+	BalanceAfter      string    `json:"balance_after"`
 	ID                string    `json:"id"`
 	UserID            int64     `json:"user_id"`
 	LoginName         string    `json:"login_name"`
@@ -101,8 +117,9 @@ type LedgerQuery struct {
 
 func (s *Service) ListAdminLedger(ctx context.Context, q LedgerQuery) ([]LedgerRecord, error) {
 	normalizePage(&q.Limit, &q.Offset)
-	rows, err := s.pool.Query(ctx, `SELECT le.id::text,u.public_id,COALESCE(u.login_name,''),w.currency,le.business_type,le.business_id,le.entry_type,le.amount_minor,le.balance_after_minor,le.remark,le.occurred_at
+	rows, err := s.pool.Query(ctx, `SELECT le.id::text,u.public_id,COALESCE(u.login_name,''),w.currency,le.business_type,le.business_id,le.entry_type,le.amount_minor,le.balance_after_minor,le.remark,le.occurred_at,u.display_name,c.decimals
         FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id JOIN users u ON u.id=w.user_id
+        JOIN currencies c ON c.code=w.currency
         WHERE ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%') AND ($2='' OR w.currency=$2) AND ($3='' OR le.business_type=$3)
         AND ($4::timestamptz IS NULL OR le.occurred_at >= $4) AND ($5::timestamptz IS NULL OR le.occurred_at < $5)
         ORDER BY le.occurred_at DESC,le.id DESC LIMIT $6 OFFSET $7`, q.User, q.Currency, q.BusinessType, nullTime(q.From), nullTime(q.To), q.Limit, q.Offset)
@@ -113,7 +130,13 @@ func (s *Service) ListAdminLedger(ctx context.Context, q LedgerQuery) ([]LedgerR
 	out := []LedgerRecord{}
 	for rows.Next() {
 		var v LedgerRecord
-		if err := rows.Scan(&v.ID, &v.UserID, &v.LoginName, &v.Currency, &v.BusinessType, &v.BusinessID, &v.EntryType, &v.AmountMinor, &v.BalanceAfterMinor, &v.Remark, &v.OccurredAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.UserID, &v.LoginName, &v.Currency, &v.BusinessType, &v.BusinessID, &v.EntryType, &v.AmountMinor, &v.BalanceAfterMinor, &v.Remark, &v.OccurredAt, &v.DisplayName, &v.Decimals); err != nil {
+			return nil, err
+		}
+		if v.Amount, err = wallet.FormatDisplayAmount(v.AmountMinor, v.Decimals); err != nil {
+			return nil, err
+		}
+		if v.BalanceAfter, err = wallet.FormatDisplayAmount(v.BalanceAfterMinor, v.Decimals); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

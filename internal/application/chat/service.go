@@ -15,6 +15,7 @@ import (
 
 var ErrRoomNotFound = errors.New("chat room not found")
 var ErrRoomAccessDenied = errors.New("chat room access denied")
+var ErrChatMuted = errors.New("账号已被禁言")
 var ErrInvalidMessage = errors.New("message must contain 1-2000 characters")
 var ErrInvalidRequestID = errors.New("client_request_id is required")
 
@@ -24,10 +25,13 @@ const (
 )
 
 type Room struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	ServiceType string    `json:"service_type,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	CustomerUserID         *int64    `json:"customer_user_id,omitempty"`
+	CustomerDisplayName    *string   `json:"customer_display_name,omitempty"`
+	CustomerInvitationCode *int64    `json:"customer_invitation_code,omitempty"`
+	ID                     string    `json:"id"`
+	Type                   string    `json:"type"`
+	ServiceType            string    `json:"service_type,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
 }
 
 type CustomerServiceRooms struct {
@@ -107,8 +111,9 @@ func (service *Service) ListRooms(ctx context.Context, userID string, staff bool
 		limit = 50
 	}
 	rows, err := service.pool.Query(ctx, `
-		SELECT DISTINCT r.id::text,r.room_type,COALESCE(r.service_type,''),r.created_at
+		SELECT DISTINCT r.id::text,r.room_type,COALESCE(r.service_type,''),r.created_at,u.public_id,u.display_name,u.invitation_code
 		FROM chat_rooms r
+		LEFT JOIN users u ON u.id=r.customer_user_id AND r.room_type='customer_service'
 		LEFT JOIN chat_room_members m ON m.room_id=r.id AND m.user_id=$1
 		WHERE r.room_type IN ('global','game') OR m.user_id IS NOT NULL OR ($2 AND r.room_type='customer_service')
 		ORDER BY r.created_at DESC LIMIT $3`, userID, staff, limit)
@@ -119,7 +124,7 @@ func (service *Service) ListRooms(ctx context.Context, userID string, staff bool
 	items := make([]Room, 0)
 	for rows.Next() {
 		var item Room
-		if err := rows.Scan(&item.ID, &item.Type, &item.ServiceType, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Type, &item.ServiceType, &item.CreatedAt, &item.CustomerUserID, &item.CustomerDisplayName, &item.CustomerInvitationCode); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -180,6 +185,13 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 		return Message{}, false, err
 	}
 	defer tx.Rollback(ctx)
+	var muted bool
+	if err := tx.QueryRow(ctx, `SELECT chat_muted FROM users WHERE id=$1 FOR SHARE`, senderUserID).Scan(&muted); err != nil {
+		return Message{}, false, err
+	}
+	if muted {
+		return Message{}, false, ErrChatMuted
+	}
 	messageID := uuid.NewString()
 	var item Message
 	var senderPublicID *int64

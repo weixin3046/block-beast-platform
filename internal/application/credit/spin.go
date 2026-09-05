@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"github.com/block-beast/platform/internal/domain/wallet"
+	"math"
 	"math/big"
 	"time"
 
@@ -25,17 +27,24 @@ type SpinPrize struct {
 }
 
 type SpinResult struct {
-	ID             string    `json:"id"`
-	SpinID         string    `json:"spin_id"`
-	PrizeID        string    `json:"prize_id"`
-	PrizeLabel     string    `json:"prize_label"`
-	RewardCurrency string    `json:"reward_currency"`
-	RewardMinor    int64     `json:"reward_minor"`
-	CostCurrency   string    `json:"cost_currency"`
-	CostMinor      int64     `json:"cost_minor"`
-	CostBalance    int64     `json:"cost_balance"`
-	RewardBalance  int64     `json:"reward_balance"`
-	CreatedAt      time.Time `json:"created_at"`
+	CostDecimals         int       `json:"cost_decimals"`
+	RewardDecimals       int       `json:"reward_decimals"`
+	Cost                 string    `json:"cost"`
+	Reward               string    `json:"reward"`
+	CostAvailable        string    `json:"cost_available"`
+	RewardAvailable      string    `json:"reward_available"`
+	CostBalanceAfterSpin int64     `json:"cost_balance_after_spin_minor"`
+	ID                   string    `json:"id"`
+	SpinID               string    `json:"spin_id"`
+	PrizeID              string    `json:"prize_id"`
+	PrizeLabel           string    `json:"prize_label"`
+	RewardCurrency       string    `json:"reward_currency"`
+	RewardMinor          int64     `json:"reward_minor"`
+	CostCurrency         string    `json:"cost_currency"`
+	CostMinor            int64     `json:"cost_minor"`
+	CostBalance          int64     `json:"cost_balance"`
+	RewardBalance        int64     `json:"reward_balance"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 func (service *Service) LuckySpin(ctx context.Context, userID, spinID, requestID string) (SpinResult, error) {
@@ -49,6 +58,9 @@ func (service *Service) LuckySpin(ctx context.Context, userID, spinID, requestID
 	defer tx.Rollback(ctx)
 
 	if existing, err := findSpin(ctx, tx, userID, requestID); err == nil {
+		if err := formatSpin(ctx, tx, &existing); err != nil {
+			return SpinResult{}, err
+		}
 		return existing, tx.Commit(ctx)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return SpinResult{}, err
@@ -95,6 +107,9 @@ func (service *Service) LuckySpin(ctx context.Context, userID, spinID, requestID
 		prize.Currency, prize.AmountMinor, config.CostCurrency, config.CostMinor, costBalance, rewardBalance).Scan(&result.CreatedAt); err != nil {
 		return SpinResult{}, err
 	}
+	if err := formatSpin(ctx, tx, &result); err != nil {
+		return SpinResult{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return SpinResult{}, err
 	}
@@ -105,7 +120,7 @@ func choosePrize(prizes []SpinPrize) (SpinPrize, bool) {
 	var total int64
 	for _, prize := range prizes {
 		if prize.ID == "" || prize.Label == "" || prize.AmountMinor <= 0 ||
-			prize.Weight <= 0 || !validCurrency(prize.Currency) {
+			prize.Weight <= 0 || total > math.MaxInt64-prize.Weight || !validCurrency(prize.Currency) {
 			return SpinPrize{}, false
 		}
 		total += prize.Weight
@@ -137,4 +152,32 @@ func findSpin(ctx context.Context, tx pgx.Tx, userID, requestID string) (SpinRes
 		&result.RewardMinor, &result.CostCurrency, &result.CostMinor, &result.CostBalance, &result.RewardBalance, &result.CreatedAt,
 	)
 	return result, err
+}
+
+func formatSpin(ctx context.Context, tx pgx.Tx, r *SpinResult) error {
+	if err := tx.QueryRow(ctx, `SELECT decimals FROM currencies WHERE code=$1`, r.CostCurrency).Scan(&r.CostDecimals); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx, `SELECT decimals FROM currencies WHERE code=$1`, r.RewardCurrency).Scan(&r.RewardDecimals); err != nil {
+		return err
+	}
+	r.CostBalanceAfterSpin = r.CostBalance
+	if r.CostCurrency == r.RewardCurrency {
+		r.CostBalanceAfterSpin = r.RewardBalance
+	}
+	return formatSpinValues(r)
+}
+func formatSpinValues(r *SpinResult) error {
+	var err error
+	for _, p := range []struct {
+		minor    int64
+		decimals int
+		out      *string
+	}{{r.CostMinor, r.CostDecimals, &r.Cost}, {r.RewardMinor, r.RewardDecimals, &r.Reward}, {r.CostBalanceAfterSpin, r.CostDecimals, &r.CostAvailable}, {r.RewardBalance, r.RewardDecimals, &r.RewardAvailable}} {
+		*p.out, err = wallet.FormatDisplayAmount(p.minor, p.decimals)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

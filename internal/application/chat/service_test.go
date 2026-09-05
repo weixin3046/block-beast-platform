@@ -69,6 +69,31 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	if err != nil || sameRooms.Deposit.ID != room.ID || sameRooms.Withdrawal.ID != rooms.Withdrawal.ID {
 		t.Fatalf("idempotent rooms = %+v, err = %v", sameRooms, err)
 	}
+	listed, err := service.ListRooms(ctx, userID, false, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range listed {
+		if item.ID == room.ID {
+			found = true
+			if item.CustomerUserID == nil || *item.CustomerUserID < 100000 || item.CustomerDisplayName == nil || *item.CustomerDisplayName != "chat user" || item.CustomerInvitationCode == nil {
+				t.Fatalf("customer identity: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("own customer room missing")
+	}
+	otherRooms, err := service.ListRooms(ctx, otherUserID, false, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range otherRooms {
+		if item.ID == room.ID {
+			t.Fatal("other player's customer room leaked")
+		}
+	}
 	first, created, err := service.SendMessage(ctx, room.ID, userID, "request-1", "hello", false)
 	if err != nil || !created {
 		t.Fatalf("send message = %+v/%v/%v", first, created, err)
@@ -104,5 +129,17 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	}
 	if strings.Contains(eventPayload, "sender_user_id") || !strings.Contains(eventPayload, `"display_name": "chat user"`) {
 		t.Fatalf("event payload = %s", eventPayload)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE users SET chat_muted=true WHERE id=$1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = service.SendMessage(ctx, room.ID, userID, "muted-message", "not sent", false); !errors.Is(err, ErrChatMuted) {
+		t.Fatal("mute not enforced", err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE users SET chat_muted=false WHERE id=$1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = service.SendMessage(ctx, room.ID, userID, "unmuted-message", "sent", false); err != nil {
+		t.Fatal("unmute failed", err)
 	}
 }

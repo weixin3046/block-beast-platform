@@ -3,6 +3,7 @@ package leaderboard
 import (
 	"context"
 	"errors"
+	"github.com/block-beast/platform/internal/domain/wallet"
 	"strings"
 	"time"
 
@@ -25,15 +26,24 @@ type Reward struct {
 	AmountMinor int64  `json:"amount_minor"`
 }
 type Entry struct {
-	Rank                int     `json:"rank"`
-	UserID              int64   `json:"user_id"`
-	DisplayName         string  `json:"display_name"`
-	AvatarURL           string  `json:"avatar_url"`
-	IsVirtual           bool    `json:"is_virtual"`
-	EffectiveStakeMinor int64   `json:"effective_stake_minor"`
-	Reward              *Reward `json:"reward,omitempty"`
+	TotalPayoutMinor    *int64    `json:"total_payout_minor,omitempty"`
+	NetWinMinor         *int64    `json:"net_win_minor,omitempty"`
+	AvailableMinor      *int64    `json:"available_minor,omitempty"`
+	TotalBet            string    `json:"total_bet"`
+	TotalPayout         *string   `json:"total_payout,omitempty"`
+	NetWin              *string   `json:"net_win,omitempty"`
+	Available           *string   `json:"available,omitempty"`
+	FirstBetAt          time.Time `json:"first_bet_at"`
+	Rank                int       `json:"rank"`
+	UserID              int64     `json:"user_id"`
+	DisplayName         string    `json:"display_name"`
+	AvatarURL           string    `json:"avatar_url"`
+	IsVirtual           bool      `json:"is_virtual"`
+	EffectiveStakeMinor int64     `json:"effective_stake_minor"`
+	Reward              *Reward   `json:"reward,omitempty"`
 }
 type Board struct {
+	Decimals    int        `json:"decimals"`
 	Period      string     `json:"period"`
 	PeriodType  string     `json:"period_type"`
 	Currency    string     `json:"currency"`
@@ -157,8 +167,8 @@ func (s *Service) refreshPeriod(ctx context.Context, kind string, start time.Tim
 	if _, err = tx.Exec(ctx, `DELETE FROM leaderboard_entries WHERE period_id=$1`, id); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO leaderboard_entries(period_id,currency,user_id,public_user_id,display_name,avatar_url,is_virtual,effective_stake_minor,first_effective_at)
-		SELECT $1,w.currency,b.user_id,u.public_id,u.display_name,COALESCE(u.avatar_url,''),u.is_virtual,sum(b.stake_minor),min(b.created_at)
+	_, err = tx.Exec(ctx, `INSERT INTO leaderboard_entries(period_id,currency,user_id,public_user_id,display_name,avatar_url,is_virtual,effective_stake_minor,first_effective_at,total_payout_minor,available_minor)
+		SELECT $1,w.currency,b.user_id,u.public_id,u.display_name,COALESCE(u.avatar_url,''),u.is_virtual,sum(b.stake_minor),min(b.created_at),sum(b.payout_minor),max(w.available_minor)
 		FROM bets b JOIN wallets w ON w.id=b.wallet_id JOIN users u ON u.id=b.user_id JOIN leaderboard_periods p ON p.id=$1
 		WHERE b.status IN ('won','lost') AND b.created_at>=p.starts_at AND b.created_at<p.ends_at
 		GROUP BY w.currency,b.user_id,u.public_id,u.display_name,u.avatar_url,u.is_virtual`, id)
@@ -262,6 +272,9 @@ func (s *Service) List(ctx context.Context, period, currency string, limit int) 
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
+	if err := s.pool.QueryRow(ctx, `SELECT decimals FROM currencies WHERE code=$1`, currency).Scan(&o.Decimals); err != nil {
+		return Board{}, ErrInvalidCurrency
+	}
 	var id string
 	err := s.pool.QueryRow(ctx, `SELECT id::text,status,refreshed_at FROM leaderboard_periods WHERE period_type=$1 AND starts_at=$2`, kind, start).Scan(&id, &o.Status, &o.RefreshedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -270,7 +283,7 @@ func (s *Service) List(ctx context.Context, period, currency string, limit int) 
 	if err != nil {
 		return Board{}, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT e.rank,e.public_user_id,e.display_name,e.avatar_url,e.is_virtual,e.effective_stake_minor,d.reward_currency,d.reward_minor FROM leaderboard_entries e LEFT JOIN leaderboard_reward_distributions d ON d.period_id=e.period_id AND d.leaderboard_currency=e.currency AND d.user_id=e.user_id WHERE e.period_id=$1 AND e.currency=$2 ORDER BY e.rank LIMIT $3`, id, currency, limit)
+	rows, err := s.pool.Query(ctx, `SELECT e.rank,e.public_user_id,e.display_name,e.avatar_url,e.is_virtual,e.effective_stake_minor,e.total_payout_minor,e.available_minor,e.first_effective_at,d.reward_currency,d.reward_minor FROM leaderboard_entries e LEFT JOIN leaderboard_reward_distributions d ON d.period_id=e.period_id AND d.leaderboard_currency=e.currency AND d.user_id=e.user_id WHERE e.period_id=$1 AND e.currency=$2 ORDER BY e.rank LIMIT $3`, id, currency, limit)
 	if err != nil {
 		return Board{}, err
 	}
@@ -279,11 +292,24 @@ func (s *Service) List(ctx context.Context, period, currency string, limit int) 
 		var e Entry
 		var c *string
 		var a *int64
-		if err := rows.Scan(&e.Rank, &e.UserID, &e.DisplayName, &e.AvatarURL, &e.IsVirtual, &e.EffectiveStakeMinor, &c, &a); err != nil {
+		if err := rows.Scan(&e.Rank, &e.UserID, &e.DisplayName, &e.AvatarURL, &e.IsVirtual, &e.EffectiveStakeMinor, &e.TotalPayoutMinor, &e.AvailableMinor, &e.FirstBetAt, &c, &a); err != nil {
 			return Board{}, err
 		}
 		if c != nil {
 			e.Reward = &Reward{Currency: *c, AmountMinor: *a}
+		}
+		e.TotalBet, _ = wallet.FormatDisplayAmount(e.EffectiveStakeMinor, o.Decimals)
+		if e.TotalPayoutMinor != nil {
+			v := *e.TotalPayoutMinor - e.EffectiveStakeMinor
+			e.NetWinMinor = &v
+			t, _ := wallet.FormatDisplayAmount(*e.TotalPayoutMinor, o.Decimals)
+			e.TotalPayout = &t
+			n, _ := wallet.FormatDisplayAmount(v, o.Decimals)
+			e.NetWin = &n
+		}
+		if e.AvailableMinor != nil {
+			v, _ := wallet.FormatDisplayAmount(*e.AvailableMinor, o.Decimals)
+			e.Available = &v
 		}
 		o.Items = append(o.Items, e)
 	}

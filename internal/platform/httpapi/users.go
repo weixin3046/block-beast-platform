@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/block-beast/platform/internal/application/audit"
 	"github.com/block-beast/platform/internal/application/auth"
@@ -249,6 +250,20 @@ func WithUserAdmin(service UserAdminService) Option {
 }
 
 func (server *Server) adminUsers(writer http.ResponseWriter, request *http.Request) {
+	if server.userControls != nil {
+		q := request.URL.Query()
+		currencies := []string{}
+		for _, v := range q["currency"] {
+			currencies = append(currencies, strings.Split(v, ",")...)
+		}
+		items, err := server.userControls.SearchUsers(request.Context(), operations.UserSearch{Status: q.Get("status"), Query: q.Get("q"), UserType: q.Get("user_type"), Currencies: currencies, Minimum: q.Get("available_min"), Maximum: q.Get("available_max"), Limit: queryLimit(request, 50), Offset: queryOffset(request)})
+		if err != nil {
+			userControlError(writer, err)
+			return
+		}
+		writeJSON(writer, 200, items)
+		return
+	}
 	items, err := server.userAdmin.ListUsers(request.Context(), request.URL.Query().Get("status"), request.URL.Query().Get("q"), 50)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list users"})

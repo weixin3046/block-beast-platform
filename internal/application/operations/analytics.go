@@ -116,13 +116,22 @@ type PlayerStatistic struct {
 	LoginName    string          `json:"login_name"`
 	DisplayName  string          `json:"display_name"`
 	BetCount     int64           `json:"bet_count"`
-	StakeMinor   int64           `json:"stake_minor"`
-	PayoutMinor  int64           `json:"payout_minor"`
-	DepositMinor int64           `json:"deposit_minor"`
-	CreditMinor  int64           `json:"credit_minor"`
-	BalanceMinor int64           `json:"balance_minor"`
+	StakeMinor   int64           `json:"-"`
+	PayoutMinor  int64           `json:"-"`
+	DepositMinor int64           `json:"-"`
+	CreditMinor  int64           `json:"-"`
+	BalanceMinor int64           `json:"-"`
 }
 type CurrencyStatistic struct {
+	Decimals       int    `json:"decimals"`
+	Stake          string `json:"stake"`
+	Payout         string `json:"payout"`
+	Deposit        string `json:"deposit"`
+	Credit         string `json:"credit"`
+	Clearance      string `json:"clearance"`
+	Gift           string `json:"gift"`
+	Penalty        string `json:"penalty"`
+	Balance        string `json:"balance"`
 	ClearanceMinor int64  `json:"clearance_minor"`
 	GiftMinor      int64  `json:"gift_minor"`
 	PenaltyMinor   int64  `json:"penalty_minor"`
@@ -151,7 +160,7 @@ func (s *Service) Dashboard(ctx context.Context, userQuery string, from, to time
 		limit = 50
 	}
 	result := Dashboard{ServerTime: time.Now().UTC(), Players: []PlayerStatistic{}, Global: []CurrencyStatistic{}}
-	rows, err := s.pool.Query(ctx, `SELECT u.public_id,COALESCE(u.login_name,''),u.display_name,count(DISTINCT b.id),COALESCE(sum(b.stake_minor),0),COALESCE(sum(b.payout_minor),0),COALESCE((SELECT sum(d.amount_minor) FROM deposits d JOIN chain_addresses ca ON ca.id=d.chain_address_id WHERE ca.user_id=u.id AND d.status='credited' AND d.confirmed_at BETWEEN $2 AND $3),0),COALESCE((SELECT sum(le.amount_minor) FROM ledger_entries le JOIN wallets cw ON cw.id=le.wallet_id WHERE cw.user_id=u.id AND le.business_type='admin_credit' AND le.occurred_at BETWEEN $2 AND $3),0),COALESCE((SELECT sum(w2.available_minor+w2.frozen_minor) FROM wallets w2 WHERE w2.user_id=u.id),0) FROM users u LEFT JOIN bets b ON b.user_id=u.id AND b.created_at BETWEEN $2 AND $3 WHERE u.is_virtual=false AND ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%') GROUP BY u.id ORDER BY COALESCE(sum(b.stake_minor),0) DESC LIMIT $4`, userQuery, from, to, limit)
+	rows, err := s.pool.Query(ctx, `SELECT u.public_id,COALESCE(u.login_name,''),u.display_name,count(b.id),0,0,0,0,0 FROM users u LEFT JOIN bets b ON b.user_id=u.id AND b.created_at >= $2 AND b.created_at < $3 WHERE NOT u.is_virtual AND ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%') GROUP BY u.id ORDER BY count(b.id) DESC,u.public_id LIMIT $4`, userQuery, from, to, limit)
 	if err != nil {
 		return result, err
 	}
@@ -166,29 +175,7 @@ func (s *Service) Dashboard(ctx context.Context, userQuery string, from, to time
 	if err := rows.Err(); err != nil {
 		return result, err
 	}
-	g, err := s.pool.Query(ctx, `SELECT c.currency,
-		(SELECT count(*) FROM bets b JOIN wallets w ON w.id=b.wallet_id JOIN users u ON u.id=b.user_id WHERE u.is_virtual=false AND w.currency=c.currency AND b.created_at BETWEEN $1 AND $2),
-		COALESCE((SELECT sum(b.stake_minor) FROM bets b JOIN wallets w ON w.id=b.wallet_id JOIN users u ON u.id=b.user_id WHERE u.is_virtual=false AND w.currency=c.currency AND b.created_at BETWEEN $1 AND $2),0),
-		COALESCE((SELECT sum(b.payout_minor) FROM bets b JOIN wallets w ON w.id=b.wallet_id JOIN users u ON u.id=b.user_id WHERE u.is_virtual=false AND w.currency=c.currency AND b.created_at BETWEEN $1 AND $2),0),
-		COALESCE((SELECT sum(le.amount_minor) FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id JOIN users u ON u.id=w.user_id WHERE u.is_virtual=false AND w.currency=c.currency AND le.business_type='deposit' AND le.occurred_at BETWEEN $1 AND $2),0),
-		COALESCE((SELECT sum(le.amount_minor) FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id JOIN users u ON u.id=w.user_id WHERE u.is_virtual=false AND w.currency=c.currency AND le.business_type='admin_credit' AND le.occurred_at BETWEEN $1 AND $2),0),
-		COALESCE((SELECT sum(w.available_minor+w.frozen_minor) FROM wallets w JOIN users u ON u.id=w.user_id WHERE u.is_virtual=false AND w.currency=c.currency),0)
-	FROM (SELECT DISTINCT currency FROM wallets) c ORDER BY c.currency`, from, to)
-	if err != nil {
-		return result, err
-	}
-	defer g.Close()
-	for g.Next() {
-		var v CurrencyStatistic
-		if err := g.Scan(&v.Currency, &v.BetCount, &v.StakeMinor, &v.PayoutMinor, &v.DepositMinor, &v.CreditMinor, &v.BalanceMinor); err != nil {
-			return result, err
-		}
-		result.Global = append(result.Global, v)
-	}
-	if err := g.Err(); err != nil {
-		return result, err
-	}
-	g.Close()
+	rows.Close()
 	return result, s.dashboardFunds(ctx, &result, from, to)
 }
 

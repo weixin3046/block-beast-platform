@@ -45,6 +45,86 @@ tags:
   - name: RedPackets
     description: 聊天室红包创建、领取和查询。
 paths:
+  /v1/admin/users/{userID}/password:
+    put:
+      tags: [Admin]
+      summary: 后台重置用户登录密码
+      description: 仅admin，必须验证后台全局二级操作密码。交易密码指个人secondary-password，与后台全局密码独立；重置撤销刷新会话，已签发访问令牌仍在原有效期内，不承诺立即踢出。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: integer, format: int64, minimum: 100000 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [new_password, second_password]
+              properties:
+                new_password: { type: string, format: password, writeOnly: true, minLength: 12, description: UTF-8最多128字节，不能全空白 }
+                second_password: { type: string, format: password, writeOnly: true, minLength: 1 }
+      responses:
+        '204': { description: 已更新并记录审计 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 后台操作密码未设置 }
+        '429': { description: 后台操作密码验证已锁定 }
+  /v1/admin/users/{userID}/secondary-password:
+    put:
+      tags: [Admin]
+      summary: 后台重置用户个人交易密码
+      description: 仅admin，必须验证后台全局二级操作密码。交易密码指个人secondary-password，与后台全局密码独立；重置撤销刷新会话，已签发访问令牌仍在原有效期内，不承诺立即踢出。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: integer, format: int64, minimum: 100000 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [new_password, second_password]
+              properties:
+                new_password: { type: string, format: password, writeOnly: true, minLength: 1, description: UTF-8最多128字节，不能全空白 }
+                second_password: { type: string, format: password, writeOnly: true, minLength: 1 }
+      responses:
+        '204': { description: 已更新并记录审计 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 后台操作密码未设置 }
+        '429': { description: 后台操作密码验证已锁定 }
+  /v1/admin/users/{userID}/mute:
+    put:
+      tags: [Admin]
+      summary: 设置或解除全局聊天禁言
+      description: admin/operator 可操作；operator 不能操作后台账号。禁言不等于禁用，不影响登录及投注；实际 Socket 发消息时检查。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: integer, format: int64, minimum: 100000 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [muted]
+              properties:
+                muted: { type: boolean }
+      responses:
+        '204': { description: 已更新并记录审计 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 后台操作密码未设置 }
+        '429': { description: 后台操作密码验证已锁定 }
   /v1/admin/phrases:
     get:
       tags: [Admin]
@@ -434,7 +514,11 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
-        '200': { description: USDT、积分、玉石、源石和体力统一流水 }
+        '200':
+          description: 按币种精度返回展示金额的统一流水
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AdminLedgerRecord' } }
   /v1/admin/refunds-clearances:
     get:
       tags: [Operations]
@@ -458,9 +542,7 @@ paths:
       tags: [Operations]
       summary: 玩家统计与排除虚拟账户的全局环境统计
       description: |
-        global 按币种返回既有投注、充值、余额统计，并新增 clearance_minor（人工下分、积分审核通过和链上最终成功扣款之和）、gift_minor（人工赠分）、penalty_minor（人工扣分）。冻结、驳回、投注退款不计清退。
-        players 每行新增 funds 数组，按 currency 返回 credit_minor、clearance_minor、gift_minor、penalty_minor（均为 int64 最小单位整数）。无资金操作时为空数组。
-        所有这些统计排除虚拟账户；玩家原有跨币种汇总字段仅保留展示，不应作为资金核算依据。
+        global和players[].funds均按币种统计并返回decimals及展示金额字符串。删除players顶层错误的跨币种金额汇总字段；余额为当前可用加冻结，不是期末余额。统计排除虚拟账户。user只筛选players，不筛选global。from包含、to不包含；默认最近24小时。投注按下单时间，资金流水按发生时间统计。
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: user, in: query, schema: { type: string } }
@@ -468,7 +550,7 @@ paths:
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
       responses:
-        '200': { description: 玩家和按币种汇总的投注、派奖、充值、赠分与余额统计 }
+        '200': { description: 按币种统计, content: { application/json: { schema: { $ref: '#/components/schemas/AdminDashboard' } } } }
   /v1/admin/users/{userID}/login-ips:
     get:
       tags: [Operations]
@@ -2398,6 +2480,12 @@ paths:
       summary: 后台查询用户
       security: [{ bearerAuth: [] }]
       parameters:
+        - { name: user_type, in: query, schema: { type: string, enum: [real, virtual] } }
+        - { name: currency, in: query, schema: { type: string }, description: 逗号分隔或重复参数，如USDT,JADE；返回对应钱包，任一币种命中余额条件即匹配用户 }
+        - { name: available_min, in: query, schema: { type: string }, description: 展示单位的非负金额，不是minor }
+        - { name: available_max, in: query, schema: { type: string }, description: 展示单位的非负金额，不跨币种相加 }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0, minimum: 0 } }
         - name: status
           in: query
           schema: { type: string, enum: [active, disabled, bet_banned] }
@@ -2615,6 +2703,55 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    CurrencyStatistic:
+      type: object
+      required: [currency, decimals, bet_count]
+      properties:
+        currency: { type: string }
+        decimals: { type: integer }
+        bet_count: { type: integer, format: int64 }
+        stake_minor: { type: integer, format: int64 }
+        stake: { type: string, description: 按decimals格式化的展示金额 }
+        payout_minor: { type: integer, format: int64 }
+        payout: { type: string, description: 按decimals格式化的展示金额 }
+        deposit_minor: { type: integer, format: int64 }
+        deposit: { type: string, description: 按decimals格式化的展示金额 }
+        credit_minor: { type: integer, format: int64 }
+        credit: { type: string, description: 按decimals格式化的展示金额 }
+        clearance_minor: { type: integer, format: int64 }
+        clearance: { type: string, description: 按decimals格式化的展示金额 }
+        gift_minor: { type: integer, format: int64 }
+        gift: { type: string, description: 按decimals格式化的展示金额 }
+        penalty_minor: { type: integer, format: int64 }
+        penalty: { type: string, description: 按decimals格式化的展示金额 }
+        balance_minor: { type: integer, format: int64 }
+        balance: { type: string, description: 按decimals格式化的展示金额 }
+    AdminUserBalance:
+      type: object
+      properties:
+        currency: { type: string }
+        decimals: { type: integer }
+        available_minor: { type: integer, format: int64 }
+        frozen_minor: { type: integer, format: int64 }
+        available: { type: string }
+        frozen: { type: string }
+    AdminDashboard:
+      type: object
+      required: [server_time, players, global]
+      properties:
+        server_time: { type: string, format: date-time }
+        global: { type: array, items: { $ref: '#/components/schemas/CurrencyStatistic' } }
+        players:
+          type: array
+          items:
+            type: object
+            required: [user_id, login_name, display_name, bet_count, funds]
+            properties:
+              user_id: { type: integer, format: int64 }
+              login_name: { type: string }
+              display_name: { type: string }
+              bet_count: { type: integer, format: int64 }
+              funds: { type: array, items: { $ref: '#/components/schemas/CurrencyStatistic' } }
     CustomerPhraseInput:
       type: object
       additionalProperties: false
@@ -2763,8 +2900,14 @@ components:
       type: object
       required: [id, login_name, display_name, status, created_at]
       properties:
-        invitation_code: { type: integer, format: int64, description: 当前用户详情为邀请码；用户列表未加载时为 0 }
-        agent_level: { type: integer, description: 当前用户详情为代理等级；用户列表未加载时为 0 }
+        is_virtual: { type: boolean }
+        chat_muted: { type: boolean }
+        balances: { type: array, items: { $ref: '#/components/schemas/AdminUserBalance' } }
+        invitation_code: { type: integer, format: int64, description: 邀请码，与公开用户ID不同 }
+        agent_level: { type: integer, description: 代理等级，0表示非代理 }
+        parent_user_id: { type: integer, format: int64, description: 用户列表返回直接上级公开ID，无上级省略 }
+        parent_display_name: { type: string }
+        parent_invitation_code: { type: integer, format: int64 }
         avatar_url: { type: string, description: 未设置或列表未加载时为空字符串 }
         roles: { type: array, items: { type: string }, description: 仅加载角色的用户详情返回 }
         secondary_password_set: { type: boolean, description: 仅本人详情返回是否设置二级密码 }
@@ -2832,6 +2975,7 @@ components:
       type: object
       required: [period, period_type, currency, starts_at, ends_at, status, items]
       properties:
+        decimals: { type: integer }
         period: { type: string, enum: [today, yesterday, this_week, last_week] }
         period_type: { type: string, enum: [daily, weekly] }
         currency: { type: string }
@@ -2850,6 +2994,14 @@ components:
               display_name: { type: string }
               avatar_url: { type: string }
               is_virtual: { type: boolean }
+              total_bet: { type: string, description: 已格式化的有效投注总额 }
+              total_payout_minor: { type: integer, format: int64, description: 周期内有效投注的含本金派奖；历史未保存时省略 }
+              total_payout: { type: string }
+              net_win_minor: { type: integer, format: int64, description: 派奖减有效投注本金 }
+              net_win: { type: string }
+              available_minor: { type: integer, format: int64, description: 榜单刷新时可用余额快照，仅本人或后台可见，历史未知时省略 }
+              available: { type: string }
+              first_bet_at: { type: string, format: date-time, description: 周期内首笔有效投注下单时间 }
               effective_stake_minor: { type: integer, format: int64 }
               reward:
                 type: object
@@ -2886,6 +3038,9 @@ components:
       type: object
       required: [id, type, created_at]
       properties:
+        customer_user_id: { type: integer, format: int64, description: 客服会话列表中的玩家公开ID }
+        customer_display_name: { type: string }
+        customer_invitation_code: { type: integer, format: int64 }
         id: { type: string, format: uuid }
         type: { type: string, enum: [global, game, customer_service, direct] }
         service_type:
@@ -3408,6 +3563,9 @@ components:
       type: object
       required: [bet_id, client_request_id, round_id, account_id, game_type, game_name, round_sequence, currency, selection, stake_minor, payout_multiplier, payout_divisor, payout_rate, status, payout_minor, placed_at]
       properties:
+        decimals: { type: integer }
+        stake: { type: string, description: 投注额展示值 }
+        payout: { type: string, description: 派奖额展示值 }
         bet_id:
           type: string
           format: uuid
@@ -3476,6 +3634,9 @@ components:
       type: object
       required: [bet_id, player, round_id, game_type, game_name, round_sequence, currency, selection, stake_minor, payout_multiplier, payout_divisor, payout_rate, status, payout_minor, placed_at]
       properties:
+        decimals: { type: integer }
+        stake: { type: string, description: 投注额展示值 }
+        payout: { type: string, description: 派奖额展示值 }
         bet_id: { type: string, format: uuid }
         player: { $ref: '#/components/schemas/PublicBetPlayer' }
         round_id: { type: string, format: uuid }
@@ -3526,9 +3687,30 @@ components:
         - type: object
           required: [payout_minor]
           properties:
+            decimals: { type: integer }
+            stake: { type: string, description: 投注额展示值，不再除以精度 }
+            payout: { type: string, description: 派奖额展示值，包含返还本金 }
             status: { type: string, enum: [accepted, cancelled, won, lost, refunded] }
             payout_minor: { type: integer, format: int64 }
             settled_at: { type: string, format: date-time }
+    AdminLedgerRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: integer, format: int64 }
+        login_name: { type: string }
+        display_name: { type: string }
+        currency: { type: string }
+        decimals: { type: integer }
+        business_type: { type: string }
+        business_id: { type: string }
+        entry_type: { type: string }
+        amount_minor: { type: integer, format: int64 }
+        balance_after_minor: { type: integer, format: int64 }
+        amount: { type: string, description: 带正负号的展示金额，正值不加加号 }
+        balance_after: { type: string, description: 该笔流水后的余额展示值 }
+        remark: { type: string }
+        occurred_at: { type: string, format: date-time }
     RefundClearanceRecord:
       type: object
       required: [id, record_type, user_id, login_name, currency, amount_minor, balance_after_minor, status, occurred_at]
@@ -3742,6 +3924,13 @@ components:
       type: object
       required: [id, spin_id, prize_id, prize_label, reward_currency, reward_minor, cost_currency, cost_minor, cost_balance, reward_balance, created_at]
       properties:
+        cost_decimals: { type: integer }
+        reward_decimals: { type: integer }
+        cost: { type: string, description: 展示单位扣费 }
+        reward: { type: string, description: 展示单位派奖 }
+        cost_balance_after_spin_minor: { type: integer, format: int64, description: 整次抽奖结束后消耗币种余额快照 }
+        cost_available: { type: string, description: 格式化的最终消耗币种余额 }
+        reward_available: { type: string, description: 格式化的最终奖励币种余额 }
         id: { type: string, format: uuid }
         spin_id: { type: string, format: uuid }
         prize_id: { type: string }

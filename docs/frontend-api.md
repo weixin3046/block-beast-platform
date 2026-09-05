@@ -1,5 +1,63 @@
 # 前端接口接入
 
+## 文档反馈修复（0053）
+
+本人投注、公共投注列表以及下单/取消响应也新增 `decimals`、`stake`、`payout`，含完整公共投注对象的Socket事件使用相同字段。展示投入和派奖时直接使用 `stake/payout`，不要把 `*_minor` 当作完整币种金额，也不要按固定100或1000转换所有币种。
+
+- `GET /v1/admin/bets` 新增 `decimals`（整数）、`stake`、`payout`（十进制字符串）。页面直接显示字符串，原 `*_minor` 保留用于兼容；例如 USDT 的 `payout_minor=198500` 对应 `payout="0.198500"`。
+- `GET /v1/admin/ledger` 新增 `display_name`、`decimals`、`amount`、`balance_after`。积分 `amount_minor=68` 对应 `amount="0.068"`；余额 `500250` 对应 `balance_after="500.250"`。这些字符串已经由后端转换，页面不再除以1000或1000000。
+- `GET /v1/admin/users` 新增 `parent_user_id`、`parent_display_name`、`parent_invitation_code`，无直接上级时省略。设置代理等级不自动绑定上级。
+- 上下分客服先调用 `GET /v1/chat/rooms`，按 `service_type=deposit/withdrawal` 分组；使用 `customer_display_name`、`customer_user_id`、`customer_invitation_code` 展示玩家，而不是房间UUID。选中后用房间 `id` 查询历史及订阅Socket；公开用户ID与邀请码不可混用。普通用户只能看到自己的客服会话，工作人员可查看客服会话列表。
+- `0053_spin_default_amounts.sql` 修正仍与默认编码、名称、币种、旧金额完全匹配的幸运转盘奖项：例如“68 宝石”改为68000最小单位（积分3位），不修改钱包或历史奖励。自定义奖项不按名称推算金额；配置仍以 `amount_minor` 最小单位保存，权重仍必须大于0。部署需执行0052、0053迁移并更新API，页面使用新增展示字段。
+
+## 用户管理、统计及金额口径补充（0052）
+
+- 重置他人登录密码：`PUT /v1/admin/users/{userID}/password`，`{"new_password":"至少12字符的新密码","second_password":"后台全局二级操作密码"}`。仅admin；新密码UTF-8最多128字节，不可全空白。
+- 重置个人交易密码：`PUT /v1/admin/users/{userID}/secondary-password`，同上字段，新密码1–128字节；交易密码即用户个人二级密码，不是后台全局操作密码。仅admin。
+- 两种重置均撤销目标刷新会话，不保存明文、不返回密码；现有访问令牌仍在原有效期内，不能把刷新会话撤销解释为立即踢出全部连接。后台自己改登录密码仍可走原个人改密接口。
+- 禁言：`PUT /v1/admin/users/{userID}/mute`，`{"muted":true}`；解除传false。admin/operator可操作，operator不能禁言后台账号。全局聊天禁言独立于账号status，Socket发消息时检查，返回“账号已被禁言”；仍可登录、投注、读历史消息。
+- 用户搜索：`GET /v1/admin/users?q=100006&currency=USDT,JADE&user_type=real&available_min=1.5&available_max=10000&limit=50&offset=0`。`user_type`可选real/virtual，省略全部；q支持公开用户ID、登录名、昵称。币种可逗号分隔或重复传currency，任一所选钱包满足余额范围即匹配用户，余额筛选为展示单位、不得跨币种相加。返回数组，每个用户新增`is_virtual/chat_muted/balances`，balances含currency、decimals、available_minor、frozen_minor、available、frozen。未传币种返回全部钱包。
+- 代理等级：读取用户列表的`agent_level`，不要根据`roles`是否存在agent角色判断。1–6表示代理，0表示非代理；设置等级不等于创建上下级关系。修复列表此前漏查代理等级的问题，调整等级不再清空已有佣金比例。
+
+### 看板 /v1/admin/dashboard 每个字段的含义
+
+`server_time`为生成响应时服务端时间。`players`为筛选后的真实用户，含`user_id`公开ID、`login_name`账号、`display_name`昵称、`bet_count`统计期间全部投注单数、`funds`按币种统计数组。`global`为全部真实用户按币种汇总，不受user筛选或玩家limit影响。
+
+`global[]`和`players[].funds[]`结构一致：
+
+| 字段 | 含义 |
+| --- | --- |
+| currency / decimals | 平台币种及小数精度 |
+| bet_count | 时间范围内创建的投注单数，含取消、退款及待结算；不是有效投注单数 |
+| stake_minor / stake | 上述投注本金总额（含取消和退款），前者最小单位整数，后者展示字符串 |
+| payout_minor / payout | 上述投注当前已记录的游戏派奖总额，含本金，不是净盈利 |
+| deposit_minor / deposit | 时间范围内链上充值入账，不含后台上分 |
+| credit_minor / credit | 时间范围内后台人工上分 |
+| clearance_minor / clearance | 人工下分、积分提现审核扣款、链上提现最终成功扣款；不含冻结、拒绝和投注退款 |
+| gift_minor / gift | 后台人工赠分，不代表全部任务/转盘/排行榜奖励 |
+| penalty_minor / penalty | 后台人工扣分，返回正数；不是投注输款 |
+| balance_minor / balance | 当前可用余额加冻结余额，不受from/to影响，不是历史期末余额 |
+
+from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下单时间归属，资金按流水发生时间归属。所有统计排除虚拟账户。各币种金额独立；不要把字符串或minor跨币种相加，也不要把payout当net_win。此次删除`players`顶层的stake_minor/payout_minor/deposit_minor/credit_minor/balance_minor（此前错误混合币种）；改读funds同名字段。没有资金操作但存在钱包时也返回该币种零统计。
+
+### 排行榜新增字段及时间
+
+`GET /v1/leaderboards?period=today&currency=USDT`的周期字段原本在根对象：`period`今天/昨天/本周/上周，`period_type`日/周，`starts_at/ends_at`中国时区周期对应的时间边界，`refreshed_at`快照刷新时间。新增根`decimals`；items新增`total_bet`（有效投注展示金额）、`total_payout_minor/total_payout`（有效投注含本金派奖）、`net_win_minor/net_win`（派奖减有效投注）、`first_bet_at`（周期内首笔有效投注时间）、`available_minor/available`（刷新时可用余额快照）。余额仅向本人或后台返回，不公开其他玩家余额。历史冻结榜单没有保存的派奖/余额字段省略，不使用0或当前余额冒充历史数据。周期排名仍按effective_stake_minor降序，不改成净赢排序。
+
+### 投注与转盘的金额单位
+
+USDT精度6：实际投1000 USDT应传`stake_minor=1000000000`，倍率1.985中奖得到`payout_minor=1985000000`，即1985 USDT。若传1000 minor，实际投注0.001 USDT，派奖1985 minor=0.001985 USDT。派奖包含本金，最终余额=扣款后余额+派奖；相对投注前净增985 USDT，而非1985 USDT。小于最小单位的赔率结果按整数除法向下截断，不是截断到3位。
+
+转盘配置的`cost_minor`及奖项`amount_minor`分别用各自币种的最小单位；`label`只是文案，不能替代金额。例如奖励10 USDT需配置amount_minor=10000000。抽奖响应新增cost_decimals/reward_decimals、cost/reward展示字符串、cost_available/reward_available最终余额展示、cost_balance_after_spin_minor最终消耗币种余额。原cost_balance仍是扣费后的中间快照；消耗与奖励同币种时，以reward_balance或cost_balance_after_spin_minor作为最终余额，不要用cost_balance覆盖钱包。
+
+### 转盘权重和排行榜密码报错
+
+每个转盘奖项weight必须是大于0的整数，相对概率=weight/全部奖项weight总和；不要求总和100。第2个奖项报错时检查prizes[1].weight：0、未传、空值、负数或把0.2当20%均不正确。不要把金额、概率百分数字符串当权重。未改变此规则为允许0；不参与抽奖的奖项应从本次配置中移除。
+
+排行榜保存使用`PUT /v1/admin/leaderboard-reward-rules`，示例：`{"second_password":"后台全局二级操作密码","period_type":"daily","currency":"USDT","version":0,"rules":[{"rank_from":1,"rank_to":1,"reward_currency":"USDT","reward_minor":1000000,"enabled":true}]}`。version取GET最新版本，不总是0。second_password放最外层，不是个人交易密码、first_password或password；先由admin在全局密码管理中设置second。缺字段/空值/类型错误400，未设置409，错误密码401，锁定429。此轮把缺字段及空值改成明确中文提示。
+
+发布必须先执行0052迁移；不修改历史钱包余额，不自动重新派奖。
+
 ## 后台话术（客服快捷回复）
 
 参照 `block-beast-servers` 的 `GMPhraseService`：全局共享话术库，按配置权限管理；当前项目允许 `admin/operator` 读取和维护，`player` 无权访问。不额外验证一级/二级操作密码。不是公告、自动回复或机器人发言，不关联其他项目。
@@ -393,7 +451,7 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 - 未设置全局一级密码 409；密码错误 401；无管理员权限 403；参数/精度错误 400。
 - 新流水类型：`admin_credit` 上分、`admin_debit` 清退、`admin_reward` 赠分、`admin_penalty` 人工扣分。业务编号 `business_id` 对应 `operation_id`。
 - 看板 `global[].credit_minor` 为人工上分；总充值由链上 `deposit_minor` 加人工 `credit_minor` 展示。新增 `clearance_minor` 为人工下分+积分审核成功扣款+链上最终成功扣款（不含冻结、驳回和投注退款），`gift_minor` 为人工赠分，`penalty_minor` 为人工扣分，全部按币种，排除虚拟账户。人工扣分不计游戏输赢。
-- `players[].funds[]` 按币种返回 `currency/credit_minor/clearance_minor/gift_minor/penalty_minor`；既有玩家汇总字段保留，不要用跨币种总数做资金核算。
+- `players[].funds[]` 按币种返回完整投注、资金和余额统计及展示字符串；0052起移除玩家顶层跨币种金额汇总，详见本文开头字段说明。
 - 金额、流水、成功审计、幂等结果和 outbox 同一事务，失败全部回滚；不在任何持久化记录中保存操作密码。
 
 ### 旧上分入口与提现的边界

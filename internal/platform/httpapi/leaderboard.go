@@ -33,6 +33,19 @@ func (server *Server) leaderboard(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list leaderboard"})
 		return
 	}
+	claims, _ := ClaimsFromContext(request.Context())
+	var viewerID int64
+	if !isStaff(claims) && server.userAdmin != nil {
+		if u, e := server.userAdmin.CurrentUser(request.Context(), claims.Subject); e == nil {
+			viewerID = u.ID
+		}
+	}
+	for i := range item.Items {
+		if !isStaff(claims) && item.Items[i].UserID != viewerID {
+			item.Items[i].Available = nil
+			item.Items[i].AvailableMinor = nil
+		}
+	}
 	server.writePublicJSON(writer, request, http.StatusOK, item)
 }
 func (server *Server) leaderboardRules(writer http.ResponseWriter, request *http.Request) {

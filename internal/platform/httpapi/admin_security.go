@@ -123,7 +123,11 @@ func (s *Server) secondPassword(next http.HandlerFunc) http.HandlerFunc {
 		}
 		var password string
 		if err := json.Unmarshal(body["second_password"], &password); err != nil {
-			securityError(w, adminsecurity.ErrInvalid)
+			writeJSON(w, 400, map[string]string{"error": "请在请求体最外层提交字符串 second_password（二级操作密码）"})
+			return
+		}
+		if password == "" {
+			writeJSON(w, 400, map[string]string{"error": "请填写后台全局二级操作密码 second_password"})
 			return
 		}
 		if !s.verifyAdminSecurity(w, r, "second", password) {

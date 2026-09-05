@@ -40,6 +40,9 @@ type PlaceBetRequest struct {
 }
 
 type PlacedBet struct {
+	Decimals                    int             `json:"decimals"`
+	Stake                       string          `json:"stake"`
+	Payout                      string          `json:"payout"`
 	BetID                       string          `json:"bet_id"`
 	ClientRequestID             string          `json:"client_request_id"`
 	RoundID                     string          `json:"round_id"`
@@ -74,6 +77,9 @@ type PublicPlayer struct {
 }
 
 type PublicBet struct {
+	Decimals         int             `json:"decimals"`
+	Stake            string          `json:"stake"`
+	Payout           string          `json:"payout"`
 	BetID            string          `json:"bet_id"`
 	Player           PublicPlayer    `json:"player"`
 	RoundID          string          `json:"round_id"`
@@ -159,9 +165,10 @@ const placedBetSelect = `
 		gt.code,gt.name,r.sequence,w.currency,
 		COALESCE(b.game_room_id::text,''),COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),
 		b.selection,b.stake_minor,COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-		b.status,b.payout_minor,debit.balance_after_minor,b.balance_after_settlement_minor,b.created_at,b.settled_at
+		b.status,b.payout_minor,debit.balance_after_minor,b.balance_after_settlement_minor,b.created_at,b.settled_at,c.decimals
 	FROM bets b
 	JOIN wallets w ON w.id=b.wallet_id
+	JOIN currencies c ON c.code=w.currency
 	JOIN rounds r ON r.id=b.round_id
 	JOIN game_types gt ON gt.id=r.game_type_id
 	LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
@@ -178,11 +185,17 @@ func scanPlacedBet(row rowScanner) (PlacedBet, error) {
 		&bet.GameType, &bet.GameName, &bet.RoundSequence, &bet.Currency,
 		&bet.GameRoomID, &bet.GameRoomCode, &bet.GameRoomName, &bet.PlayMode,
 		&bet.Selection, &bet.StakeMinor, &bet.PayoutMultiplier, &bet.PayoutDivisor,
-		&bet.Status, &bet.PayoutMinor, &bet.BalanceAfterBetMinor, &bet.BalanceAfterSettlementMinor, &bet.PlacedAt, &bet.SettledAt)
+		&bet.Status, &bet.PayoutMinor, &bet.BalanceAfterBetMinor, &bet.BalanceAfterSettlementMinor, &bet.PlacedAt, &bet.SettledAt, &bet.Decimals)
 	if err != nil {
 		return PlacedBet{}, err
 	}
 	bet.PayoutRate = formatPayoutRate(bet.PayoutMultiplier, bet.PayoutDivisor)
+	if bet.Stake, err = wallet.FormatDisplayAmount(bet.StakeMinor, bet.Decimals); err != nil {
+		return PlacedBet{}, err
+	}
+	if bet.Payout, err = wallet.FormatDisplayAmount(bet.PayoutMinor, bet.Decimals); err != nil {
+		return PlacedBet{}, err
+	}
 	return bet, nil
 }
 
@@ -239,10 +252,11 @@ const publicBetSelect = `
 			b.round_id::text,gt.code,gt.name,r.sequence,w.currency,
 			COALESCE(b.game_room_id::text,''),COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),
 			b.selection,b.stake_minor,COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-			b.status,b.payout_minor,b.created_at,b.settled_at
+			b.status,b.payout_minor,b.created_at,b.settled_at,c.decimals
 		FROM bets b
 		JOIN users u ON u.id=b.user_id
 		JOIN wallets w ON w.id=b.wallet_id
+		JOIN currencies c ON c.code=w.currency
 		JOIN rounds r ON r.id=b.round_id
 		JOIN game_types gt ON gt.id=r.game_type_id
 		LEFT JOIN game_rooms gr ON gr.id=b.game_room_id`
@@ -253,10 +267,17 @@ func scanPublicBet(row rowScanner) (PublicBet, error) {
 		&item.RoundID, &item.GameType, &item.GameName, &item.RoundSequence, &item.Currency, &item.GameRoomID,
 		&item.GameRoomCode, &item.GameRoomName, &item.PlayMode, &item.Selection, &item.StakeMinor,
 		&item.PayoutMultiplier, &item.PayoutDivisor, &item.Status,
-		&item.PayoutMinor, &item.PlacedAt, &item.SettledAt); err != nil {
+		&item.PayoutMinor, &item.PlacedAt, &item.SettledAt, &item.Decimals); err != nil {
 		return PublicBet{}, err
 	}
 	item.PayoutRate = formatPayoutRate(item.PayoutMultiplier, item.PayoutDivisor)
+	var err error
+	if item.Stake, err = wallet.FormatDisplayAmount(item.StakeMinor, item.Decimals); err != nil {
+		return PublicBet{}, err
+	}
+	if item.Payout, err = wallet.FormatDisplayAmount(item.PayoutMinor, item.Decimals); err != nil {
+		return PublicBet{}, err
+	}
 	return item, nil
 }
 

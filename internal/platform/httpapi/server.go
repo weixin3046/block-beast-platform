@@ -47,6 +47,7 @@ type Server struct {
 	providerAssets     ProviderAssetReader
 	agents             AgentService
 	userAdmin          UserAdminService
+	userControls       UserControlService
 	operations         OperationsService
 	phrases            PhraseService
 	analytics          AnalyticsService
@@ -255,6 +256,9 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/security-passwords/{level}/verify", server.protectRoles(server.verifyAdminSecurityEndpoint, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/credits", server.protectRoles(server.adminCredit, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/wallet-adjustments", server.protectRoles(server.adminWalletAdjustment, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/users/{userID}/password", server.protectRoles(server.secondPassword(server.resetUserPassword), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/users/{userID}/secondary-password", server.protectRoles(server.secondPassword(server.resetUserPassword), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/users/{userID}/mute", server.protectRoles(server.setUserMuted, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/users", server.protectRoles(server.adminUsers, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/status", server.protectRoles(server.setUserStatus, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/agent-level", server.protectRoles(server.setAgentLevel, identity.RoleAdmin, identity.RoleOperator))
