@@ -16,6 +16,11 @@
 安装 Docker Engine、Docker Compose v2、Git，并只向公网开放 SSH、HTTP 和
 HTTPS 端口。不要向公网开放 5432、4222、8222、8080 或 8081。
 
+PostgreSQL 的 `5432` 仅绑定宿主机 `127.0.0.1`，供 Navicat 等工具经 SSH 隧道访问。
+Navicat 常规页填写主机 `127.0.0.1`、端口 `5432`，数据库名、用户和密码分别使用
+生产环境的 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`；SSH 页配置服务器登录信息。
+不要把映射改为 `0.0.0.0`。首次增加此映射会重建数据库容器并短暂中断连接，须保留原命名数据卷。
+
 ## 2. 创建生产配置
 
 在仓库根目录执行：

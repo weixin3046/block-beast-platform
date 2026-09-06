@@ -28,6 +28,9 @@ services:
   postgres:
     image: postgres:17-bookworm
     restart: unless-stopped
+    # Database clients must connect through SSH, never the public interface.
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
