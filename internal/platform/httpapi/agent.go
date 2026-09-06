@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	agentapp "github.com/block-beast/platform/internal/application/agent"
 	"github.com/block-beast/platform/internal/application/audit"
@@ -157,6 +158,43 @@ func (server *Server) agentRelation(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	server.writePublicJSON(writer, request, http.StatusOK, relation)
+}
+
+// adminAgentRelation reads a target player's direct parent without changing the
+// authenticated subject or allowing the player endpoint to inspect other users.
+func (server *Server) adminAgentRelation(writer http.ResponseWriter, request *http.Request) {
+	publicID, err := strconv.ParseInt(request.PathValue("userID"), 10, 64)
+	if err != nil || publicID < 100000 {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid user id"})
+		return
+	}
+	if server.agents == nil || server.publicUsers == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "agent service is unavailable"})
+		return
+	}
+	userID, err := server.resolvePublicUserID(request.Context(), request.PathValue("userID"))
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		return
+	}
+	relation, err := server.agents.GetRelation(request.Context(), userID)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "查询代理关系失败"})
+		return
+	}
+	var parentID *int64
+	if relation.ParentUserID != "" {
+		id, err := server.publicUsers.PublicUserID(request.Context(), relation.ParentUserID)
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to read agent relation"})
+			return
+		}
+		parentID = &id
+	}
+	writeJSON(writer, http.StatusOK, struct {
+		UserID       int64  `json:"user_id"`
+		ParentUserID *int64 `json:"parent_user_id"`
+	}{publicID, parentID})
 }
 
 func WithAgents(service AgentService) Option { return func(server *Server) { server.agents = service } }

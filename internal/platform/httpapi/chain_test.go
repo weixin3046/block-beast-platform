@@ -44,7 +44,7 @@ func signedWebhookRequest(t *testing.T, body string) *http.Request {
 }
 
 func webhookServer(creditor DepositCreditor) *Server {
-	return New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
+	return newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
 		WithChainDeposits(webhookAPIKey, webhookSecret, 5*time.Minute, creditor))
 }
 
@@ -83,7 +83,7 @@ func TestChainDepositWebhookMapsResults(t *testing.T) {
 		t.Fatalf("unknown address = %d %q, want PQPA ACK", response.Code, response.Body.String())
 	}
 
-	unconfigured := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+	unconfigured := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
 	response = httptest.NewRecorder()
 	unconfigured.Handler().ServeHTTP(response, signedWebhookRequest(t, `{}`))
 	if response.Code != http.StatusServiceUnavailable {
@@ -125,22 +125,22 @@ func (stub stubWithdrawalService) ListUserWithdrawals(_ context.Context, _ strin
 func TestWithdrawalEndpointsRequireAuthAndOwnership(t *testing.T) {
 	authenticator := NewAuthenticator(testSecret)
 	stub := stubWithdrawalService{
-		requestResult: chainapp.Withdrawal{WithdrawalID: "w1", UserID: "user-1", Status: "requested"},
-		findResult:    chainapp.Withdrawal{WithdrawalID: "w1", UserID: "user-1", Status: "requested"},
+		requestResult: chainapp.Withdrawal{Currency: "USDT", WithdrawalID: "w1", UserID: "user-1", Status: "requested"},
+		findResult:    chainapp.Withdrawal{Currency: "USDT", WithdrawalID: "w1", UserID: "user-1", Status: "requested"},
 	}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
 		WithAuth(authenticator), WithWithdrawals(stub))
 
 	// 无令牌创建提现。
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount_minor":100}`)))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount":0.0001}`)))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("no token status = %d, want 401", response.Code)
 	}
 
 	// 有令牌创建提现：身份取自令牌而非请求体。
 	token := issueTestToken(t, "user-1", []string{identity.RolePlayer})
-	request := httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount_minor":100}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c1","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount":0.0001}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -167,9 +167,9 @@ func TestWithdrawalEndpointsRequireAuthAndOwnership(t *testing.T) {
 
 	// 余额不足映射 409。
 	stub.requestErr = wallet.ErrInsufficientFunds
-	insufficientServer := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
+	insufficientServer := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
 		WithAuth(authenticator), WithWithdrawals(stub))
-	request = httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c2","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount_minor":999999}`))
+	request = httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(`{"client_request_id":"c2","destination_address":"0x1","chain_code":"POLYGON","currency":"USDT","amount":0.999999}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response = httptest.NewRecorder()
 	insufficientServer.Handler().ServeHTTP(response, request)
@@ -191,14 +191,14 @@ func TestWithdrawalEndpointMapsRiskErrors(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			server := New(
+			server := newAmountTestServer(
 				config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)),
 				nil, readinessChecker{}, nil, nil, nil, nil,
 				WithAuth(NewAuthenticator(testSecret)),
 				WithWithdrawals(stubWithdrawalService{requestErr: testCase.err}),
 			)
 			request := httptest.NewRequest(http.MethodPost, "/v1/withdrawals", strings.NewReader(
-				`{"client_request_id":"c1","destination_address":"0x1111111111111111111111111111111111111111","chain_code":"POLYGON","currency":"USDT","amount_minor":100}`,
+				`{"client_request_id":"c1","destination_address":"0x1111111111111111111111111111111111111111","chain_code":"POLYGON","currency":"USDT","amount":0.0001}`,
 			))
 			request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "user-1", []string{identity.RolePlayer}))
 			response := httptest.NewRecorder()

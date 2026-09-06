@@ -144,14 +144,16 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 {
 	"client_request_id": "request-001",
 	"round_id": "轮次 UUID",
-	"account_id": "用户 UUID",
+	"account_id": 100009,
 	"currency": "USDT",
 	"selection": { "color": "red" },
-	"stake_minor": 2500
+	"stake": 2.5
 }
 ```
 
 ## 本地代码格式化
+
+前端金额请求使用实际币种数量，响应只返回金额字符串；详见 [金额协议](docs/amount-contract.md)。数据库及内部事件仍使用最小单位整数。
 
 团队统一使用 `gofmt`。`.editorconfig` 统一 IDE 的缩进、UTF-8、LF 换行符和文件末尾换行；`.gitattributes` 确保 Git 提交时采用 LF。
 

@@ -95,7 +95,7 @@ func (service *Service) ListAllCommissions(ctx context.Context, status string, l
 
 func (service *Service) TeamSummary(ctx context.Context, agentID string) (TeamSummary, error) {
 	var summary TeamSummary
-	if err := service.pool.QueryRow(ctx, `SELECT count(*) FROM agent_relations WHERE parent_user_id=$1`, agentID).Scan(&summary.DirectPlayers); err != nil {
+	if err := service.pool.QueryRow(ctx, `SELECT count(*) FROM agent_relations ar JOIN users u ON u.id=ar.user_id WHERE ar.parent_user_id=$1 AND NOT u.is_virtual`, agentID).Scan(&summary.DirectPlayers); err != nil {
 		return TeamSummary{}, err
 	}
 	rows, err := service.pool.Query(ctx, `
@@ -106,7 +106,8 @@ func (service *Service) TeamSummary(ctx context.Context, agentID string) (TeamSu
 		FROM bets
 		JOIN wallets ON wallets.id=bets.wallet_id
 		JOIN agent_relations ON agent_relations.user_id=bets.user_id
-		WHERE agent_relations.parent_user_id=$1
+		JOIN users ON users.id=bets.user_id
+		WHERE agent_relations.parent_user_id=$1 AND NOT users.is_virtual AND NOT bets.is_simulated
 		GROUP BY wallets.currency`, agentID)
 	if err != nil {
 		return TeamSummary{}, err

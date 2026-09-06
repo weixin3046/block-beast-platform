@@ -51,7 +51,9 @@ func TestPostgresOutboxPublishesEachEventOnce(t *testing.T) {
 	if eventCount != 1 {
 		t.Fatalf("event count = %d, want 1", eventCount)
 	}
-	if !containsEvent(outbox.Pending(100), event.ID) {
+	// Other integration cases may leave more than one page of pending events.
+	// This test verifies append/publish idempotency, not first-page ordering.
+	if !containsEvent(outbox.Pending(0), event.ID) {
 		t.Fatal("pending events must include the appended event")
 	}
 
@@ -62,7 +64,7 @@ func TestPostgresOutboxPublishesEachEventOnce(t *testing.T) {
 	if err := outbox.MarkPublished(event.ID, publishedAt); err != nil {
 		t.Fatalf("repeat mark published: %v", err)
 	}
-	if containsEvent(outbox.Pending(100), event.ID) {
+	if containsEvent(outbox.Pending(0), event.ID) {
 		t.Fatal("published event must not be pending")
 	}
 

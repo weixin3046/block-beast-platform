@@ -29,6 +29,7 @@ var ErrHashRoomConflict = errors.New("only one hash rate room may be used in the
 var ErrBetCancellationClosed = errors.New("bet can only be cancelled before betting closes")
 
 type PlaceBetRequest struct {
+	RobotPlanID     string          `json:"-"`
 	ClientRequestID string          `json:"client_request_id"`
 	RoundID         string          `json:"round_id"`
 	AccountID       string          `json:"account_id"`
@@ -306,6 +307,38 @@ func (service *Service) CancelBet(ctx context.Context, betID, userID string) (Pl
 	if err != nil {
 		return PlacedBet{}, err
 	}
+	var simulated bool
+	if err = tx.QueryRow(ctx, `SELECT is_simulated FROM bets WHERE id=$1`, betID).Scan(&simulated); err != nil {
+		return PlacedBet{}, err
+	}
+	if simulated {
+		if bet.Status == "accepted" && time.Now().UTC().Before(betClosesAt) {
+			_, err = tx.Exec(ctx, `UPDATE bets SET status='cancelled',settled_at=now(),balance_after_settlement_minor=(SELECT available_minor FROM wallets WHERE id=$2) WHERE id=$1`, betID, walletID)
+			if err != nil {
+				return PlacedBet{}, err
+			}
+			publicBet, err := scanPublicBet(tx.QueryRow(ctx, publicBetSelect+` WHERE b.id=$1`, betID))
+			if err != nil {
+				return PlacedBet{}, err
+			}
+			payload, err := json.Marshal(struct {
+				Bet PublicBet `json:"bet"`
+			}{Bet: publicBet})
+			if err != nil {
+				return PlacedBet{}, err
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES($1,'bet',$2,$3,$4)`, uuid.NewString(), betID, events.BetCancelled, payload); err != nil {
+				return PlacedBet{}, err
+			}
+		} else if bet.Status != "cancelled" {
+			return PlacedBet{}, ErrBetCancellationClosed
+		}
+		result, err := findBet(ctx, tx, userID, bet.ClientRequestID)
+		if err != nil {
+			return PlacedBet{}, err
+		}
+		return result, tx.Commit(ctx)
+	}
 	if bet.Status == "cancelled" {
 		bet, err = cancelledBetResult(ctx, tx, bet.AccountID, bet.ClientRequestID, bet.BetID)
 		if err != nil {
@@ -374,6 +407,24 @@ func cancelledBetResult(ctx context.Context, tx pgx.Tx, userID, clientRequestID,
 }
 
 func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (PlacedBet, error) {
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	defer tx.Rollback(ctx)
+	bet, err := service.placeBetTx(ctx, tx, request, false)
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	return bet, tx.Commit(ctx)
+}
+
+// PlaceRobotBetTx is internal-only and must be committed with plan progression.
+func (service *Service) PlaceRobotBetTx(ctx context.Context, tx pgx.Tx, request PlaceBetRequest) (PlacedBet, error) {
+	return service.placeBetTx(ctx, tx, request, true)
+}
+
+func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request PlaceBetRequest, requireRobot bool) (PlacedBet, error) {
 	request.Currency = strings.ToUpper(strings.TrimSpace(request.Currency))
 	request.PlayMode = strings.ToLower(strings.TrimSpace(request.PlayMode))
 	if request.StakeMinor <= 0 {
@@ -383,23 +434,21 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		return PlacedBet{}, ErrInvalidSelection
 	}
 
-	tx, err := service.pool.Begin(ctx)
-	if err != nil {
-		return PlacedBet{}, err
-	}
-	defer tx.Rollback(ctx)
-
 	existing, err := findBet(ctx, tx, request.AccountID, request.ClientRequestID)
 	if err == nil {
-		return existing, tx.Commit(ctx)
+		return existing, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, err
 	}
 
 	var userStatus string
-	if err := tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1 FOR UPDATE`, request.AccountID).Scan(&userStatus); err != nil {
+	var simulated bool
+	if err := tx.QueryRow(ctx, `SELECT status,is_virtual FROM users WHERE id=$1 FOR UPDATE`, request.AccountID).Scan(&userStatus, &simulated); err != nil {
 		return PlacedBet{}, err
+	}
+	if requireRobot && !simulated {
+		return PlacedBet{}, ErrBettingBanned
 	}
 	if userStatus == "disabled" {
 		return PlacedBet{}, ErrAccountDisabled
@@ -482,7 +531,7 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 
 	existing, err = findBet(ctx, tx, request.AccountID, request.ClientRequestID)
 	if err == nil {
-		return existing, tx.Commit(ctx)
+		return existing, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, err
@@ -501,7 +550,7 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 	if err != nil {
 		return PlacedBet{}, err
 	}
-	if availableMinor < request.StakeMinor {
+	if !simulated && availableMinor < request.StakeMinor {
 		return PlacedBet{}, wallet.ErrInsufficientFunds
 	}
 
@@ -517,34 +566,36 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		StakeMinor:      request.StakeMinor,
 		Status:          "accepted",
 	}
-	availableMinor -= request.StakeMinor
-	_, err = tx.Exec(ctx, `
+	if !simulated {
+		availableMinor -= request.StakeMinor
+		_, err = tx.Exec(ctx, `
 		UPDATE wallets
 		SET available_minor = $2, version = version + 1, updated_at = now()
 		WHERE id = $1`, walletID, availableMinor)
-	if err != nil {
-		return PlacedBet{}, err
+		if err != nil {
+			return PlacedBet{}, err
+		}
 	}
-
 	err = tx.QueryRow(ctx, `
 		INSERT INTO bets (id, client_request_id, round_id, user_id, wallet_id, game_room_id, play_mode,
-			selection, stake_minor, status, payout_multiplier_snapshot, payout_divisor_snapshot)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9, 'accepted', $10, $11)
+			selection, stake_minor, status, payout_multiplier_snapshot, payout_divisor_snapshot,is_simulated,robot_plan_id)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9, 'accepted', $10, $11,$12,NULLIF($13,'')::uuid)
 		RETURNING created_at`, bet.BetID, bet.ClientRequestID, bet.RoundID, bet.AccountID, walletID,
-		bet.GameRoomID, bet.PlayMode, bet.Selection, bet.StakeMinor, payoutMultiplier, payoutDivisor).
+		bet.GameRoomID, bet.PlayMode, bet.Selection, bet.StakeMinor, payoutMultiplier, payoutDivisor, simulated, request.RobotPlanID).
 		Scan(&bet.PlacedAt)
 	if err != nil {
 		return PlacedBet{}, err
 	}
 
-	_, err = tx.Exec(ctx, `
+	if !simulated {
+		_, err = tx.Exec(ctx, `
 		INSERT INTO ledger_entries (
 			id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor
 		) VALUES ($1, $2, 'bet', $3, 'bet_debit', $4, $5)`, uuid.NewString(), walletID, bet.BetID, -bet.StakeMinor, availableMinor)
-	if err != nil {
-		return PlacedBet{}, err
+		if err != nil {
+			return PlacedBet{}, err
+		}
 	}
-
 	publicBet, err := scanPublicBet(tx.QueryRow(ctx, publicBetSelect+` WHERE b.id=$1`, bet.BetID))
 	if err != nil {
 		return PlacedBet{}, err
@@ -567,9 +618,6 @@ func (service *Service) PlaceBet(ctx context.Context, request PlaceBetRequest) (
 		return PlacedBet{}, err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return PlacedBet{}, err
-	}
 	return bet, nil
 }
 

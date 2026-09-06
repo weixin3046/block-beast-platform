@@ -1,5 +1,7 @@
 # WebSocket v1 前端接口手册
 
+金额字段已统一为实际币种金额字符串，详见[金额协议](./amount-contract.md)。API和Realtime进程需同步升级。
+
 本文档描述当前后端已经实现的 WebSocket v1 协议。玩家端和管理后台可以按本文档直接完成连接、订阅、聊天、事件消费、断线恢复和 HTTP 状态对账。
 
 > WebSocket 不属于 OpenAPI 的请求/响应模型，因此不会显示在 Swagger UI 中。HTTP 接口仍以 `docs/openapi.yaml` 为准。
@@ -291,12 +293,12 @@ WebSocket 事件是状态变化通知，不是可回放日志：
       "game_room_name": "高额返水 1.94 倍",
       "play_mode": "road",
       "selection": {"pick": "odd"},
-      "stake_minor": 100,
+      "stake": "0.100",
       "payout_multiplier": 1940,
       "payout_divisor": 1000,
       "payout_rate": "1.94",
       "status": "accepted",
-      "payout_minor": 0,
+      "payout": "0.000",
       "placed_at": "2026-08-29T10:00:20Z"
     }
   },
@@ -333,12 +335,12 @@ WebSocket 事件是状态变化通知，不是可回放日志：
       "game_room_name": "高额返水 1.94 倍",
       "play_mode": "road",
       "selection": {"pick": "odd"},
-      "stake_minor": 100,
+      "stake": "0.100",
       "payout_multiplier": 1940,
       "payout_divisor": 1000,
       "payout_rate": "1.94",
       "status": "cancelled",
-      "payout_minor": 0,
+      "payout": "0.000",
       "placed_at": "2026-08-29T10:00:20Z",
       "settled_at": "2026-08-29T10:00:21Z"
     }
@@ -347,7 +349,7 @@ WebSocket 事件是状态变化通知，不是可回放日志：
 }
 ```
 
-前端按 `payload.bet.bet_id` 替换公开投注列表中的原记录。广播载荷不包含退款后余额；发起取消的玩家从 HTTP 取消响应读取 `balance_after_refund_minor`。
+前端按 `payload.bet.bet_id` 替换公开投注列表中的原记录。广播载荷不包含退款后余额；发起取消的玩家从 HTTP 取消响应读取 `balance_after_refund`。
 
 ### 6.2 `game.round.closed`
 
@@ -397,14 +399,13 @@ WebSocket 事件是状态变化通知，不是可回放日志：
     "outcome": ["7", "big", "odd"],
     "won_bet_count": 12,
     "lost_bet_count": 18,
-    "payout_minor": 245000,
     "settled_at": "2026-08-29T10:00:34Z"
   },
   "occurred_at": "2026-08-29T10:00:34Z"
 }
 ```
 
-`payout_minor` 是该轮次所有中奖投注的总派奖，不是当前用户的派奖。玩家端收到后应重新查询自己的投注和钱包；管理端可刷新轮次统计。
+轮次结算事件不再包含跨币种总派奖。玩家收到后查询本人投注和钱包，按币种读取payout。
 
 ### 6.5 `game.round.cancelled`
 
@@ -477,7 +478,7 @@ payload 不含充值金额和最新余额。收到后重新查询充值记录和
 
 `wallet.ledger.committed` 自数据库迁移 0045 起由统一账本触发器写入 outbox，再经 Worker 和实时网关发送给该钱包所属用户。投注扣款、结算入账、充值、奖励和提现产生新流水时均会发送；历史搬迁不补发旧事件。
 
-payload 字段：`user_id`（内部路由 ID，不作玩家公开展示）、`currency`、`ledger_id`、`business_id`、`business_type`、`available_delta_minor`、`frozen_delta_minor`、`available_after_minor`、`frozen_after_minor`。金额均为最小单位整数；前端收到后建议重新查询全部钱包余额接口，直接使用其中的 `available/frozen` 字符串。
+payload 字段：`user_id`（内部路由 ID，不作玩家公开展示）、`currency`、`ledger_id`、`business_id`、`business_type`、`available_delta`、`frozen_delta`、`available_after`、`frozen_after`。金额均为实际金额十进制字符串；前端收到后建议重新查询全部钱包余额接口，直接使用其中的 `available/frozen` 字符串。
 
 这是变更通知，不是另一次发奖指令。与原投注/充值等业务事件可能同时到达，按事件 ID 去重，并以 HTTP 查询为最终状态；不能对多个事件重复累加余额，重连后也必须重新查询。
 
@@ -533,8 +534,8 @@ payload 字段：`user_id`（内部路由 ID，不作玩家公开展示）、`cu
       "client_request_id": "packet-001",
       "currency": "USDT",
       "greeting": "恭喜发财",
-      "total_minor": 10000,
-      "remaining_minor": 10000,
+      "total": "10.000000",
+      "remaining": "10.000000",
       "packet_count": 10,
       "claimed_count": 0,
       "status": "active",
@@ -562,7 +563,7 @@ payload 字段：`user_id`（内部路由 ID，不作玩家公开展示）、`cu
       "red_packet_id": "92a42a95-f3c3-4468-a014-ae59e43ce3bb",
       "user_id": "4bf2af91-13c5-4774-a1fd-2b0767b4e82f",
       "currency": "USDT",
-      "amount_minor": 860,
+      "amount": "0.860000",
       "claimed_at": "2026-08-29T10:11:00Z"
     },
     "broadcast": true
@@ -581,7 +582,8 @@ payload 字段：`user_id`（内部路由 ID，不作玩家公开展示）、`cu
   "payload": {
     "room_id": "f39ac19d-20a0-42d7-a876-87aa3618635e",
     "red_packet_id": "92a42a95-f3c3-4468-a014-ae59e43ce3bb",
-    "refund_minor": 3200,
+    "refund": "3.200",
+    "currency": "POINTS",
     "broadcast": true
   },
   "occurred_at": "2026-08-30T10:10:01Z"

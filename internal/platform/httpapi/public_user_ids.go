@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -29,8 +30,8 @@ func (server *Server) writePublicJSON(writer http.ResponseWriter, request *http.
 		writeJSON(writer, status, value)
 		return
 	}
-	var document any
-	if err := json.Unmarshal(payload, &document); err != nil {
+	document, err := readAmountJSON(bytes.NewReader(payload))
+	if err != nil {
 		writeJSON(writer, status, value)
 		return
 	}

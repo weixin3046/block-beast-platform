@@ -2,87 +2,188 @@ package virtualbot
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
-	"strings"
-	"time"
-
+	"errors"
+	"fmt"
 	"github.com/block-beast/platform/internal/application/betting"
 	"github.com/block-beast/platform/internal/domain/game"
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"math"
+	"math/big"
+	"strconv"
+	"strings"
 )
 
 type Service struct {
 	pool *pgxpool.Pool
 	bets *betting.Service
-	now  func() time.Time
 }
 
 func NewService(pool *pgxpool.Pool, bets *betting.Service) *Service {
-	return &Service{pool: pool, bets: bets, now: time.Now}
+	return &Service{pool: pool, bets: bets}
+}
+func randomBetween(min, max int64) (int64, error) {
+	if min < 0 || max < min || max-min == math.MaxInt64 {
+		return 0, ErrInvalidPlan
+	}
+	n, e := rand.Int(rand.Reader, big.NewInt(max-min+1))
+	if e != nil {
+		return 0, e
+	}
+	return min + n.Int64(), nil
 }
 
+// Each plan advances by block-round sequence, never by elapsed seconds.
+// A plan row lock, simulated bet and next sequence share one transaction.
 func (s *Service) RunDue(ctx context.Context, limit int) (int, error) {
-	if limit <= 0 || limit > 100 {
+	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	rows, err := s.pool.Query(ctx, `SELECT a.user_id::text,a.currency,a.stake_minor,a.game_type_codes FROM virtual_account_automations a JOIN users u ON u.id=a.user_id WHERE u.is_virtual=true AND u.status='active' AND a.enabled=true AND (a.last_run_at IS NULL OR a.last_run_at + make_interval(secs=>a.interval_seconds) <= now()) ORDER BY a.updated_at LIMIT $1`, limit)
-	if err != nil {
-		return 0, err
+	rows, e := s.pool.Query(ctx, `SELECT p.id::text FROM robot_plans p JOIN users u ON u.id=p.user_id
+ WHERE p.enabled AND NOT p.deleted AND u.is_virtual AND u.status='active'
+ AND (p.last_checked_at IS NULL OR p.last_checked_at<now()-interval '1 second')
+ ORDER BY p.last_checked_at NULLS FIRST,p.id LIMIT $1`, limit)
+	if e != nil {
+		return 0, e
 	}
-	type due struct {
-		id, currency string
-		stake        int64
-		codes        []string
-	}
-	items := []due{}
+	ids := []string{}
 	for rows.Next() {
-		var v due
-		if err := rows.Scan(&v.id, &v.currency, &v.stake, &v.codes); err != nil {
+		var id string
+		if e = rows.Scan(&id); e != nil {
 			rows.Close()
-			return 0, err
+			return 0, e
 		}
-		items = append(items, v)
+		ids = append(ids, id)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return 0, err
-	}
+	e = rows.Err()
 	rows.Close()
-	placed := 0
-	for _, item := range items {
-		for _, code := range item.codes {
-			var roundID string
-			var raw json.RawMessage
-			err := s.pool.QueryRow(ctx, `SELECT r.id::text,gt.rules FROM rounds r JOIN game_types gt ON gt.id=r.game_type_id WHERE gt.code=$1 AND gt.enabled=true AND r.status='open' AND r.bet_closes_at>now() ORDER BY r.sequence LIMIT 1`, code).Scan(&roundID, &raw)
-			if err != nil {
-				continue
-			}
-			rules, err := game.ParseRules(raw)
-			if err != nil || len(rules.Outcomes) == 0 {
-				continue
-			}
-			value := rules.Outcomes[int(s.now().UnixNano()%int64(len(rules.Outcomes)))]
-			selection := selectionJSON(rules.MatchField, value)
-			_, err = s.bets.PlaceBet(ctx, betting.PlaceBetRequest{ClientRequestID: "virtual-" + uuid.NewString(), RoundID: roundID, AccountID: item.id, Currency: item.currency, Selection: selection, StakeMinor: item.stake})
-			if err == nil {
-				placed++
-			}
+	if e != nil {
+		return 0, e
+	}
+	count := 0
+	for _, id := range ids {
+		n, e := s.runPlan(ctx, id)
+		if e != nil {
+			return count, e
 		}
-		_, _ = s.pool.Exec(ctx, `UPDATE virtual_account_automations SET last_run_at=now() WHERE user_id=$1`, item.id)
+		count += n
 	}
-	return placed, nil
+	return count, nil
 }
-
-func selectionJSON(field, value string) json.RawMessage {
-	if strings.TrimSpace(field) == "" {
-		field = "pick"
+func (s *Service) runPlan(ctx context.Context, id string) (int, error) {
+	tx, e := s.pool.Begin(ctx)
+	if e != nil {
+		return 0, e
 	}
-	parts := strings.Split(field, ".")
-	var node any = value
-	for i := len(parts) - 1; i >= 0; i-- {
-		node = map[string]any{parts[i]: node}
+	defer tx.Rollback(ctx)
+	v, e := scanPlan(tx.QueryRow(ctx, planSelect+` WHERE p.id=$1 AND p.enabled AND NOT p.deleted AND u.is_virtual AND u.status='active'
+ AND (p.last_checked_at IS NULL OR p.last_checked_at<now()-interval '1 second') FOR UPDATE OF p SKIP LOCKED`, id))
+	if errors.Is(e, ErrPlanNotFound) {
+		return 0, nil
 	}
-	raw, _ := json.Marshal(node)
-	return raw
+	if e != nil {
+		return 0, e
+	}
+	finish := func(status, message string, n int) (int, error) {
+		_, e := tx.Exec(ctx, `UPDATE robot_plans SET last_checked_at=now(),last_status=$2,last_error=$3 WHERE id=$1`, id, status, message)
+		if e != nil {
+			return 0, e
+		}
+		return n, tx.Commit(ctx)
+	}
+	var round string
+	var seq int64
+	e = tx.QueryRow(ctx, `SELECT r.id::text,r.sequence FROM rounds r JOIN game_types gt ON gt.id=r.game_type_id
+ WHERE gt.code=$1 AND gt.enabled AND r.status='open' AND r.bet_closes_at>now() ORDER BY r.sequence DESC LIMIT 1`, v.GameType).Scan(&round, &seq)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return finish("waiting_round", "暂无可投注轮次", 0)
+	}
+	if e != nil {
+		return 0, e
+	}
+	step, e := strconv.ParseInt(strings.TrimPrefix(v.GameType, "hash_"), 10, 64)
+	if e != nil || step <= 0 {
+		return finish("failed", "游戏类型无效", 0)
+	}
+	if v.NextRoundSequence != nil && *v.NextRoundSequence > seq {
+		return finish("waiting_round", "", 0)
+	}
+	skip, e := randomBetween(int64(v.SkipMin), int64(v.SkipMax))
+	if e != nil {
+		return 0, e
+	}
+	if seq > math.MaxInt64-step*skip {
+		return finish("failed", "期号超出范围", 0)
+	}
+	if _, e = tx.Exec(ctx, `UPDATE robot_plans SET next_round_sequence=$2,last_seen_sequence=$3 WHERE id=$1`, id, seq+step*skip, seq); e != nil {
+		return 0, e
+	}
+	// New/missed plans schedule forward instead of backfilling old periods.
+	if v.NextRoundSequence == nil || *v.NextRoundSequence < seq {
+		return finish("scheduled", "", 0)
+	}
+	idx, e := randomBetween(0, int64(len(v.Selections)-1))
+	if e != nil {
+		return 0, e
+	}
+	pick := v.Selections[idx]
+	amount, e := randomBetween(v.MinStakeMinor, v.MaxStakeMinor)
+	if e != nil {
+		return 0, e
+	}
+	selection, _ := json.Marshal(map[string]string{"pick": pick.Pick})
+	sub, e := tx.Begin(ctx)
+	if e != nil {
+		return 0, e
+	}
+	var user string
+	e = sub.QueryRow(ctx, `SELECT id::text FROM users WHERE public_id=$1 AND is_virtual`, v.UserID).Scan(&user)
+	if e != nil {
+		return 0, e
+	}
+	if _, e = sub.Exec(ctx, `INSERT INTO wallets(id,user_id,currency) SELECT gen_random_uuid(),$1,code FROM currencies WHERE code=$2 AND enabled ON CONFLICT(user_id,currency) DO NOTHING`, user, v.Currency); e != nil {
+		return 0, e
+	}
+	if _, e = validatePlanDB(ctx, sub, v.PlanInput); e != nil {
+		if re := sub.Rollback(ctx); re != nil {
+			return 0, re
+		}
+		if !errors.Is(e, ErrInvalidPlan) {
+			return 0, e
+		}
+		return finish("failed", "房间、币种、玩法或金额配置已失效", 0)
+	}
+	bet, e := s.bets.PlaceRobotBetTx(ctx, sub, betting.PlaceBetRequest{RobotPlanID: id, ClientRequestID: "robot-" + id + "-" + round, RoundID: round, AccountID: user, Currency: v.Currency,
+		GameRoomID: v.GameRoomID, PlayMode: pick.PlayMode, Selection: selection, StakeMinor: amount})
+	if e != nil {
+		if re := sub.Rollback(ctx); re != nil {
+			return 0, re
+		}
+		message := ""
+		switch {
+		case errors.Is(e, game.ErrBettingClosed):
+			message = "本期已封盘"
+		case errors.Is(e, betting.ErrStakeOutsideLimits):
+			message = "投注金额超过房间限额"
+		case errors.Is(e, betting.ErrHashRoomConflict):
+			message = "同一玩家本期已使用其他赔率房间"
+		case errors.Is(e, betting.ErrAccountDisabled), errors.Is(e, betting.ErrBettingBanned):
+			message = "账号已禁用或禁止投注"
+		case errors.Is(e, betting.ErrHashRoomRequired):
+			message = "房间或玩法不可用"
+		}
+		if message == "" {
+			return 0, fmt.Errorf("robot plan %s: %w", id, e)
+		}
+		return finish("failed", message, 0)
+	}
+	if e = sub.Commit(ctx); e != nil {
+		return 0, e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE robot_plans SET last_bet_id=$2 WHERE id=$1`, id, bet.BetID); e != nil {
+		return 0, e
+	}
+	return finish("placed", "", 1)
 }

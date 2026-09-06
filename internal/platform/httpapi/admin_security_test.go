@@ -74,7 +74,7 @@ func TestAdminSecurityRoles(t *testing.T) {
 	}
 }
 func TestSensitiveConfigsRequireSecondPassword(t *testing.T) {
-	for _, path := range []string{"/v1/admin/hash/config", "/v1/admin/configs/test", "/v1/admin/tasks/bet-configs", "/v1/admin/spins", "/v1/admin/leaderboard-reward-rules"} {
+	for _, path := range []string{"/v1/admin/hash/config", "/v1/admin/configs/test", "/v1/admin/tasks/bet-configs", "/v1/admin/tasks/bet-configs/94000000-0000-4000-8000-000000000001", "/v1/admin/spins", "/v1/admin/spins/94000000-0000-4000-8000-000000000001", "/v1/admin/leaderboard-reward-rules"} {
 		stub := &securityStub{err: adminsecurity.ErrLocked}
 		s := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithAdminSecurity(stub))
 		for _, body := range []string{`{}`, `{"first_password":"wrong-level"}`, `{"second_password":"secret"}`} {

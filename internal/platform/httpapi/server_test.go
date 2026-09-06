@@ -19,9 +19,9 @@ import (
 )
 
 func TestPlaceBetCreatesBet(t *testing.T) {
-	placer := &recordingBetPlacer{bet: betting.PlacedBet{BetID: "bet-1", PlacedAt: time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil, nil, nil, nil)
-	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":100009,"currency":"USDT","selection":{"color":"red"},"stake_minor":2500}`))
+	placer := &recordingBetPlacer{bet: betting.PlacedBet{Currency: "USDT", BetID: "bet-1", PlacedAt: time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)}}
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), placer, readinessChecker{}, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":100009,"currency":"USDT","selection":{"color":"red"},"stake":0.0025}`))
 	response := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(response, request)
@@ -45,8 +45,8 @@ func TestPlaceBetCreatesBet(t *testing.T) {
 }
 
 func TestPlaceBetRejectsStringAccountID(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), &recordingBetPlacer{}, readinessChecker{}, nil, nil, nil, nil)
-	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":"100009","currency":"POINTS","selection":{"pick":"odd"},"stake_minor":1000}`))
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), &recordingBetPlacer{}, readinessChecker{}, nil, nil, nil, nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/bets", strings.NewReader(`{"client_request_id":"request-1","round_id":"round-1","account_id":"100009","currency":"POINTS","selection":{"pick":"odd"},"stake":1}`))
 	response := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(response, request)
@@ -57,7 +57,7 @@ func TestPlaceBetRejectsStringAccountID(t *testing.T) {
 }
 
 func TestCORSAllowsConfiguredOriginAndRejectsUnknownPreflight(t *testing.T) {
-	server := New(config.Config{APIAllowedOrigins: []string{"https://player.example"}}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+	server := newAmountTestServer(config.Config{APIAllowedOrigins: []string{"https://player.example"}}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
 
 	request := httptest.NewRequest(http.MethodOptions, "/v1/bets", nil)
 	request.Header.Set("Origin", "https://player.example")
@@ -77,7 +77,7 @@ func TestCORSAllowsConfiguredOriginAndRejectsUnknownPreflight(t *testing.T) {
 }
 
 func TestCORSAllowsAnyOriginWhenConfigured(t *testing.T) {
-	server := New(config.Config{APIAllowedOrigins: []string{"*"}}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+	server := newAmountTestServer(config.Config{APIAllowedOrigins: []string{"*"}}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodOptions, "/v1/platform", nil)
 	request.Header.Set("Origin", "http://frontend.example")
 	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
@@ -89,7 +89,7 @@ func TestCORSAllowsAnyOriginWhenConfigured(t *testing.T) {
 }
 
 func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil, nil, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{err: errors.New("database unavailable")}, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	response := httptest.NewRecorder()
 
@@ -102,7 +102,7 @@ func TestReadyReturnsServiceUnavailableWhenDependencyFails(t *testing.T) {
 
 func TestBalanceReturnsWalletBalance(t *testing.T) {
 	wallets := &recordingWalletReader{balance: wallet.AccountBalance{AccountID: "player-1", Currency: "USDT", AvailableMinor: 7_500, FrozenMinor: 250}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, wallets, nil, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, wallets, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/wallets/player-1?currency=USDT", nil)
 	response := httptest.NewRecorder()
 
@@ -118,7 +118,7 @@ func TestBalanceReturnsWalletBalance(t *testing.T) {
 
 func TestRoundReturnsRound(t *testing.T) {
 	rounds := &recordingRoundReader{round: game.Round{RoundID: "round-1", GameType: "dice", Status: game.RoundOpen}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds/round-1", nil)
 	response := httptest.NewRecorder()
 
@@ -134,7 +134,7 @@ func TestRoundReturnsRound(t *testing.T) {
 
 func TestOpenRoundsListsBoundedGameTypeRounds(t *testing.T) {
 	rounds := &recordingRoundReader{rounds: []game.Round{{RoundID: "round-1", GameType: "dice", Status: game.RoundOpen}}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds?game_type=dice&limit=25", nil)
 	response := httptest.NewRecorder()
 
@@ -150,7 +150,7 @@ func TestOpenRoundsListsBoundedGameTypeRounds(t *testing.T) {
 
 func TestHashTrendsReturnsSharedResults(t *testing.T) {
 	rounds := &recordingRoundReader{trend: game.HashTrend{GameType: "hash_29", Items: []game.HashTrendItem{{Sequence: 116, Digit: 5, Size: "big", Parity: "odd"}}}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/hash/trends?game_type=hash_29&limit=50", nil)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -163,7 +163,7 @@ func TestHashTrendsReturnsSharedResults(t *testing.T) {
 }
 
 func TestFixedHashAdminWriteRoutesAreNotExposed(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
 	for _, target := range []string{
 		"/v1/admin/game-rooms",
 		"/v1/admin/game-types",
@@ -179,7 +179,7 @@ func TestFixedHashAdminWriteRoutesAreNotExposed(t *testing.T) {
 }
 
 func TestOpenRoundsRejectsInvalidLimit(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, &recordingRoundReader{}, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, &recordingRoundReader{}, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds?game_type=dice&limit=101", nil)
 	response := httptest.NewRecorder()
 
@@ -194,7 +194,7 @@ func TestRoundStateReturnsCurrentAndPrevious(t *testing.T) {
 	current := game.Round{RoundID: "current", GameType: "play_hash", Status: game.RoundOpen}
 	previous := game.Round{RoundID: "previous", GameType: "play_hash", Status: game.RoundSettled, Outcome: []string{"5"}}
 	rounds := &recordingRoundReader{state: game.RoundState{Current: &current, Previous: &previous}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, rounds, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/rounds/state?game_type=play_hash", nil)
 	response := httptest.NewRecorder()
 
@@ -215,8 +215,8 @@ func TestRoundStateReturnsCurrentAndPrevious(t *testing.T) {
 }
 
 func TestBetReturnsBet(t *testing.T) {
-	bets := &recordingBetReader{bet: betting.PlacedBet{BetID: "bet-1", Status: "accepted"}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets, nil)
+	bets := &recordingBetReader{bet: betting.PlacedBet{Currency: "USDT", BetID: "bet-1", Status: "accepted"}}
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/bets/bet-1", nil)
 	response := httptest.NewRecorder()
 
@@ -232,11 +232,11 @@ func TestBetReturnsBet(t *testing.T) {
 
 func TestPublicBetsSupportsPlayerTypeAndPagination(t *testing.T) {
 	bets := &recordingBetReader{publicBets: []betting.PublicBet{{
-		BetID:  "bet-public-1",
+		BetID: "bet-public-1", Currency: "USDT",
 		Player: betting.PublicPlayer{UserID: 100009, DisplayName: "虚拟玩家", AvatarURL: "/v1/avatars/100009", IsVirtual: true},
 		Status: "accepted",
 	}}}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets, nil, WithAuth(NewAuthenticator(testSecret)))
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, bets, nil, WithAuth(NewAuthenticator(testSecret)))
 	request := httptest.NewRequest(http.MethodGet, "/v1/bets/public-feed?player_type=virtual&game_type=hash_9&currency=usdt&status=accepted&limit=20&offset=40", nil)
 	request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "player-1", []string{"player"}))
 	response := httptest.NewRecorder()
@@ -255,7 +255,7 @@ func TestPublicBetsSupportsPlayerTypeAndPagination(t *testing.T) {
 }
 
 func TestPublicBetsRequiresAuthentication(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, &recordingBetReader{}, nil, WithAuth(NewAuthenticator(testSecret)))
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, &recordingBetReader{}, nil, WithAuth(NewAuthenticator(testSecret)))
 	request := httptest.NewRequest(http.MethodGet, "/v1/bets/public-feed", nil)
 	response := httptest.NewRecorder()
 
@@ -267,7 +267,7 @@ func TestPublicBetsRequiresAuthentication(t *testing.T) {
 }
 
 func TestPublicBetsRejectsInvalidPlayerType(t *testing.T) {
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, &recordingBetReader{}, nil)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, &recordingBetReader{}, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/bets/public-feed?player_type=robot", nil)
 	response := httptest.NewRecorder()
 
@@ -280,7 +280,7 @@ func TestPublicBetsRejectsInvalidPlayerType(t *testing.T) {
 
 func TestCancelRoundReturnsRefundedBetCount(t *testing.T) {
 	canceller := &recordingRoundCanceller{refundedBetCount: 2}
-	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, canceller)
+	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, canceller)
 	request := httptest.NewRequest(http.MethodPost, "/v1/rounds/round-1/cancel", nil)
 	response := httptest.NewRecorder()
 

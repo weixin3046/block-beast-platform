@@ -245,22 +245,35 @@ func (s *Service) UsersByLoginIP(ctx context.Context, ip string) ([]LoginIPUser,
 }
 
 type VirtualAccount struct {
-	UserID          int64    `json:"user_id"`
-	LoginName       string   `json:"login_name"`
-	DisplayName     string   `json:"display_name"`
-	Enabled         bool     `json:"automation_enabled"`
-	Currency        string   `json:"currency"`
-	StakeMinor      int64    `json:"stake_minor"`
-	GameTypeCodes   []string `json:"game_type_codes"`
-	IntervalSeconds int      `json:"interval_seconds"`
+	AvatarURL       string          `json:"avatar_url"`
+	GameRoomID      *string         `json:"game_room_id"`
+	PlayMode        string          `json:"play_mode"`
+	UserStatus      string          `json:"user_status"`
+	RunStatus       string          `json:"run_status"`
+	LastRunAt       *time.Time      `json:"last_run_at"`
+	LastFinishedAt  *time.Time      `json:"last_finished_at"`
+	NextRunAt       *time.Time      `json:"next_run_at"`
+	LastResults     json.RawMessage `json:"last_results"`
+	UserID          int64           `json:"user_id"`
+	LoginName       string          `json:"login_name"`
+	DisplayName     string          `json:"display_name"`
+	Enabled         bool            `json:"automation_enabled"`
+	Currency        string          `json:"currency"`
+	StakeMinor      int64           `json:"stake_minor"`
+	GameTypeCodes   []string        `json:"game_type_codes"`
+	IntervalSeconds int             `json:"interval_seconds"`
 }
 type VirtualAccountInput struct {
+	ActorUserID     string           `json:"-"`
+	AvatarURL       string           `json:"avatar_url"`
 	LoginName       string           `json:"login_name"`
 	DisplayName     string           `json:"display_name"`
 	Password        string           `json:"password"`
 	InitialBalances map[string]int64 `json:"initial_balances"`
 }
 type VirtualAutomationInput struct {
+	GameRoomID      string   `json:"game_room_id"`
+	PlayMode        string   `json:"play_mode"`
 	Enabled         bool     `json:"enabled"`
 	Currency        string   `json:"currency"`
 	StakeMinor      int64    `json:"stake_minor"`
@@ -273,7 +286,8 @@ var ErrInvalidVirtualAccount = errors.New("invalid virtual account")
 func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInput) (VirtualAccount, error) {
 	in.LoginName = strings.TrimSpace(in.LoginName)
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
-	if in.LoginName == "" || in.DisplayName == "" || len(in.Password) < 12 {
+	in.AvatarURL = strings.TrimSpace(in.AvatarURL)
+	if in.LoginName == "" || len(in.DisplayName) > 100 || len(in.AvatarURL) > 2048 || len(in.Password) < 12 {
 		return VirtualAccount{}, ErrInvalidVirtualAccount
 	}
 	passwordHash, err := identity.HashPassword(in.Password)
@@ -285,8 +299,24 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 		return VirtualAccount{}, err
 	}
 	defer tx.Rollback(ctx)
+	if in.AvatarURL != "" {
+		var valid bool
+		if _, err := uuid.Parse(in.ActorUserID); err != nil {
+			return VirtualAccount{}, ErrInvalidAvatar
+		}
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM uploads WHERE owner_user_id=$1 AND storage_key=$2 AND status='confirmed' AND lower(content_type) IN ('image/jpeg','image/png','image/webp'))`, in.ActorUserID, in.AvatarURL).Scan(&valid); err != nil {
+			return VirtualAccount{}, err
+		}
+		if !valid {
+			return VirtualAccount{}, ErrInvalidAvatar
+		}
+	}
 	id := uuid.NewString()
 	if _, err = tx.Exec(ctx, `INSERT INTO users(id,login_name,display_name,is_virtual) VALUES($1,$2,$3,true)`, id, in.LoginName, in.DisplayName); err != nil {
+		return VirtualAccount{}, err
+	}
+	var created VirtualAccount
+	if err = tx.QueryRow(ctx, `UPDATE users SET display_name=CASE WHEN display_name='' THEN '用户'||public_id::text ELSE display_name END,avatar_url=$2 WHERE id=$1 RETURNING public_id,login_name,display_name,status,CASE WHEN avatar_url='' THEN '' ELSE '/v1/avatars/'||public_id::text||'?v='||regexp_replace(avatar_url,'^.*/','') END`, id, in.AvatarURL).Scan(&created.UserID, &created.LoginName, &created.DisplayName, &created.UserStatus, &created.AvatarURL); err != nil {
 		return VirtualAccount{}, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO auth_identities(id,user_id,provider,subject,password_hash) VALUES($1,$2,'password',$3,$4)`, uuid.NewString(), id, in.LoginName, passwordHash); err != nil {
@@ -325,26 +355,94 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	if err = tx.Commit(ctx); err != nil {
 		return VirtualAccount{}, err
 	}
-	return s.virtualByID(ctx, id)
+	return created, nil
 }
 func (s *Service) virtualByID(ctx context.Context, id string) (VirtualAccount, error) {
 	var v VirtualAccount
-	err := s.pool.QueryRow(ctx, `SELECT u.public_id,COALESCE(u.login_name,''),u.display_name,a.enabled,a.currency,a.stake_minor,a.game_type_codes,a.interval_seconds FROM users u JOIN virtual_account_automations a ON a.user_id=u.id WHERE u.id=$1 AND u.is_virtual=true`, id).Scan(&v.UserID, &v.LoginName, &v.DisplayName, &v.Enabled, &v.Currency, &v.StakeMinor, &v.GameTypeCodes, &v.IntervalSeconds)
+	err := s.pool.QueryRow(ctx, `SELECT u.public_id,COALESCE(u.login_name,''),u.display_name,a.enabled,a.currency,a.stake_minor,a.game_type_codes,a.interval_seconds,
+ a.game_room_id::text,a.play_mode,u.status,
+ CASE WHEN a.run_status='running' AND a.lease_until<now() THEN 'retry_pending' ELSE a.run_status END,
+ a.last_run_at,a.last_finished_at,
+ CASE WHEN a.enabled AND u.status='active' THEN GREATEST(COALESCE(a.last_run_at + make_interval(secs=>a.interval_seconds),now()),COALESCE(a.lease_until,now())) ELSE NULL END,
+ a.last_results
+ FROM users u JOIN virtual_account_automations a ON a.user_id=u.id WHERE u.id=$1 AND u.is_virtual=true`, id).Scan(&v.UserID, &v.LoginName, &v.DisplayName, &v.Enabled, &v.Currency, &v.StakeMinor, &v.GameTypeCodes, &v.IntervalSeconds, &v.GameRoomID, &v.PlayMode, &v.UserStatus, &v.RunStatus, &v.LastRunAt, &v.LastFinishedAt, &v.NextRunAt, &v.LastResults)
 	return v, err
 }
-func (s *Service) SetVirtualAutomation(ctx context.Context, publicID int64, in VirtualAutomationInput) (VirtualAccount, error) {
-	if in.StakeMinor <= 0 || in.IntervalSeconds < 3 || in.IntervalSeconds > 86400 || strings.TrimSpace(in.Currency) == "" {
-		return VirtualAccount{}, ErrInvalidVirtualAccount
+func (s *Service) GetVirtualAutomation(ctx context.Context, publicID int64) (VirtualAccount, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `SELECT id::text FROM users WHERE public_id=$1 AND is_virtual=true`, publicID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return VirtualAccount{}, ErrUserNotFound
 	}
+	if err != nil {
+		return VirtualAccount{}, err
+	}
+	return s.virtualByID(ctx, id)
+}
+func (s *Service) SetVirtualAutomation(ctx context.Context, publicID int64, in VirtualAutomationInput) (VirtualAccount, error) {
 	var id string
 	if err := s.pool.QueryRow(ctx, `SELECT id::text FROM users WHERE public_id=$1 AND is_virtual=true`, publicID).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
 		return VirtualAccount{}, ErrUserNotFound
 	} else if err != nil {
 		return VirtualAccount{}, err
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE virtual_account_automations SET enabled=$2,currency=$3,stake_minor=$4,game_type_codes=$5,interval_seconds=$6,updated_at=now() WHERE user_id=$1`, id, in.Enabled, strings.ToUpper(in.Currency), in.StakeMinor, in.GameTypeCodes, in.IntervalSeconds)
+	// Stopping never requires a valid room/currency or a sufficient balance.
+	if !in.Enabled {
+		_, err := s.pool.Exec(ctx, `UPDATE virtual_account_automations SET enabled=false,run_id=NULL,lease_until=NULL,run_status='stopped',updated_at=now() WHERE user_id=$1`, id)
+		if err != nil {
+			return VirtualAccount{}, err
+		}
+		return s.virtualByID(ctx, id)
+	}
+	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
+	in.PlayMode = strings.ToLower(strings.TrimSpace(in.PlayMode))
+	if err := validateVirtualAutomation(in); err != nil {
+		return VirtualAccount{}, err
+	}
+	var valid int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM game_room_types rt
+ JOIN game_rooms r ON r.id=rt.room_id AND r.enabled AND r.game_kind='hash'
+ JOIN game_types gt ON gt.id=rt.game_type_id AND gt.enabled
+ JOIN hash_room_currency_configs c ON c.room_id=r.id AND c.currency=$2
+ JOIN currencies cur ON cur.code=c.currency AND cur.enabled
+ WHERE r.id=$1 AND gt.code=ANY($3) AND $4>=c.min_stake_minor
+ AND $4<=CASE $5 WHEN 'guess' THEN c.guess_max_stake_minor WHEN 'dodge' THEN c.dodge_max_stake_minor ELSE c.road_max_stake_minor END`,
+		in.GameRoomID, in.Currency, in.GameTypeCodes, in.StakeMinor, in.PlayMode).Scan(&valid)
+	if err != nil {
+		return VirtualAccount{}, err
+	}
+	if valid != len(in.GameTypeCodes) {
+		return VirtualAccount{}, ErrInvalidVirtualAccount
+	}
+	_, err = s.pool.Exec(ctx, `UPDATE virtual_account_automations SET enabled=$2,currency=$3,stake_minor=$4,game_type_codes=$5,interval_seconds=$6,
+ game_room_id=$7,play_mode=$8,run_id=NULL,lease_until=NULL,last_run_at=NULL,run_status='ready',updated_at=now() WHERE user_id=$1`, id, in.Enabled, in.Currency, in.StakeMinor, in.GameTypeCodes, in.IntervalSeconds, in.GameRoomID, in.PlayMode)
 	if err != nil {
 		return VirtualAccount{}, err
 	}
 	return s.virtualByID(ctx, id)
+}
+
+func validateVirtualAutomation(in VirtualAutomationInput) error {
+	if _, err := uuid.Parse(in.GameRoomID); err != nil {
+		return ErrInvalidVirtualAccount
+	}
+	if in.StakeMinor <= 0 || in.Currency == "" || in.IntervalSeconds < 3 || in.IntervalSeconds > 86400 || len(in.GameTypeCodes) == 0 || len(in.GameTypeCodes) > 6 {
+		return ErrInvalidVirtualAccount
+	}
+	if in.PlayMode != "road" && in.PlayMode != "guess" && in.PlayMode != "dodge" {
+		return ErrInvalidVirtualAccount
+	}
+	seen := map[string]bool{}
+	for _, code := range in.GameTypeCodes {
+		switch code {
+		case "hash_9", "hash_13", "hash_17", "hash_19", "hash_23", "hash_29":
+		default:
+			return ErrInvalidVirtualAccount
+		}
+		if seen[code] {
+			return ErrInvalidVirtualAccount
+		}
+		seen[code] = true
+	}
+	return nil
 }

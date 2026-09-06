@@ -23,11 +23,11 @@ type adjustmentStub struct {
 func (s *adjustmentStub) AdjustWallet(_ context.Context, in credit.AdjustmentInput) (credit.AdjustmentResult, error) {
 	s.calls++
 	s.input = in
-	return credit.AdjustmentResult{UserID: in.UserID, Action: in.Action}, s.err
+	return credit.AdjustmentResult{Currency:"POINTS",UserID: in.UserID, Action: in.Action}, s.err
 }
 func (s *adjustmentStub) AdminCredit(ctx context.Context, in credit.AdminCreditInput) (credit.CreditResult, error) {
 	_, err := s.AdjustWallet(ctx, credit.AdjustmentInput{OperatorID: in.OperatorID, UserID: in.UserID, Action: "credit"})
-	return credit.CreditResult{}, err
+	return credit.CreditResult{Currency:"POINTS"}, err
 }
 
 type fundsPasswordStub struct {
@@ -64,7 +64,7 @@ func TestAdminFundsEndpointsPermissionsPasswordsAndErrors(t *testing.T) {
 			t.Run(path+tc.name, func(t *testing.T) {
 				credits := &adjustmentStub{err: tc.businessErr}
 				passwords := &fundsPasswordStub{err: tc.passwordErr}
-				s := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithCredits(credits), WithAdminSecurity(passwords))
+				s := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithCredits(credits), WithAdminSecurity(passwords))
 				r := httptest.NewRequest("POST", path, strings.NewReader(body))
 				if tc.role != "" {
 					r.Header.Set("Authorization", "Bearer "+issueTestToken(t, "admin-user", []string{tc.role}))
@@ -85,7 +85,7 @@ func TestAdminFundsEndpointsPermissionsPasswordsAndErrors(t *testing.T) {
 		for _, invalid := range []string{strings.Replace(body, `,"first_password":"secret"`, "", 1), strings.Replace(body, `"100009"`, `100009`, 1), body + ` {}`, strings.TrimSuffix(body, "}") + `,"operator_id":"other"}`} {
 			c := &adjustmentStub{}
 			p := &fundsPasswordStub{}
-			s := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithCredits(c), WithAdminSecurity(p))
+			s := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithCredits(c), WithAdminSecurity(p))
 			r := httptest.NewRequest("POST", path, strings.NewReader(invalid))
 			r.Header.Set("Authorization", "Bearer "+issueTestToken(t, "admin-user", []string{"admin"}))
 			w := httptest.NewRecorder()

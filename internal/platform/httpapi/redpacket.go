@@ -103,7 +103,7 @@ func writeRedPacketError(writer http.ResponseWriter, err error) bool {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, redpacket.ErrPacketNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
-	case errors.Is(err, redpacket.ErrRoomAccessDenied), errors.Is(err, redpacket.ErrSenderCannotClaim):
+	case errors.Is(err, redpacket.ErrRoomAccessDenied), errors.Is(err, redpacket.ErrSenderCannotClaim), errors.Is(err, redpacket.ErrVirtualAccount):
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 	case errors.Is(err, redpacket.ErrPacketUnavailable), errors.Is(err, redpacket.ErrInsufficientBalance):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})

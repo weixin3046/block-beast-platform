@@ -26,6 +26,9 @@ func (service *Service) Create(ctx context.Context, input CreateInput) (Packet, 
 		return Packet{}, false, err
 	}
 	defer tx.Rollback(ctx)
+	if err := requireRealAccount(ctx, tx, input.SenderUserID); err != nil {
+		return Packet{}, false, err
+	}
 	existing, err := findByRequest(ctx, tx, input.SenderUserID, input.ClientRequestID)
 	if err == nil {
 		return existing, false, tx.Commit(ctx)

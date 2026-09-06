@@ -76,15 +76,17 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	}
 
 	type acceptedBet struct {
+		simulated                         bool
 		betID, walletID, userID, currency string
 		playMode                          string
+		placedAt                          time.Time
 		selection                         json.RawMessage
 		stake                             int64
 		payoutMultiplier, payoutDivisor   *int64
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT bets.id, bets.wallet_id, bets.user_id, wallets.currency,COALESCE(bets.play_mode,''),
-			bets.selection,bets.stake_minor,bets.payout_multiplier_snapshot,bets.payout_divisor_snapshot
+			bets.selection,bets.stake_minor,bets.payout_multiplier_snapshot,bets.payout_divisor_snapshot,bets.is_simulated,bets.created_at
 		FROM bets JOIN wallets ON wallets.id=bets.wallet_id
 		WHERE round_id = $1 AND status = 'accepted'
 		ORDER BY wallet_id, id
@@ -96,7 +98,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	for rows.Next() {
 		var bet acceptedBet
 		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.userID, &bet.currency, &bet.playMode,
-			&bet.selection, &bet.stake, &bet.payoutMultiplier, &bet.payoutDivisor); err != nil {
+			&bet.selection, &bet.stake, &bet.payoutMultiplier, &bet.payoutDivisor, &bet.simulated, &bet.placedAt); err != nil {
 			rows.Close()
 			return SettlementResult{}, err
 		}
@@ -110,8 +112,10 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 
 	result := SettlementResult{RoundID: roundID, Outcome: append([]string(nil), outcome...), SettledAt: time.Now().UTC()}
 	for _, bet := range bets {
-		if err := applyCommission(ctx, tx, bet.betID, bet.userID, bet.currency, bet.stake, result.SettledAt); err != nil {
-			return SettlementResult{}, err
+		if !bet.simulated {
+			if err := applyCommission(ctx, tx, bet.betID, bet.userID, bet.currency, bet.stake, result.SettledAt); err != nil {
+				return SettlementResult{}, err
+			}
 		}
 		var availableMinor int64
 		if err := tx.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1 FOR UPDATE`, bet.walletID).Scan(&availableMinor); err != nil {
@@ -123,8 +127,8 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		}
 		// 只有实际结算为输或赢的投注才属于活动任务有效流水。取消和退款投注
 		// 不会进入 SettleRound，因此从源头上不会累计，也不存在领取后再回退的问题。
-		if service.taskHook != nil {
-			if err := service.taskHook.OnBetSettled(ctx, tx, bet.userID, bet.currency, bet.stake, result.SettledAt); err != nil {
+		if service.taskHook != nil && !bet.simulated && bet.playMode != "dodge" {
+			if err := service.taskHook.OnBetSettled(ctx, tx, bet.userID, bet.currency, bet.stake, bet.placedAt); err != nil {
 				return SettlementResult{}, err
 			}
 		}
@@ -143,6 +147,14 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			return SettlementResult{}, ErrPayoutOverflow
 		}
 		payout := bet.stake * payoutMultiplier / payoutDivisor
+		if bet.simulated {
+			if _, err := tx.Exec(ctx, `UPDATE bets SET status='won',payout_minor=$2,settled_at=$3,balance_after_settlement_minor=$4 WHERE id=$1`, bet.betID, payout, result.SettledAt, availableMinor); err != nil {
+				return SettlementResult{}, err
+			}
+			result.WonBetCount++
+			result.PayoutMinor += payout
+			continue
+		}
 		if availableMinor > math.MaxInt64-payout {
 			return SettlementResult{}, ErrPayoutOverflow
 		}

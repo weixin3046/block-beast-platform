@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,6 +15,17 @@ type Service struct {
 	now    func() time.Time
 	random func(max int64) (int64, error)
 	ttl    time.Duration
+}
+
+func requireRealAccount(ctx context.Context, tx pgx.Tx, userID string) error {
+	var virtual bool
+	if err := tx.QueryRow(ctx, "SELECT is_virtual FROM users WHERE id=$1 FOR SHARE", userID).Scan(&virtual); err != nil {
+		return err
+	}
+	if virtual {
+		return ErrVirtualAccount
+	}
+	return nil
 }
 
 func NewService(pool *pgxpool.Pool, ttl time.Duration) *Service {

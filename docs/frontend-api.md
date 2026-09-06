@@ -1,14 +1,157 @@
 # 前端接口接入
 
-## 文档反馈修复（0053）
+## 活动任务与转盘对齐（0056–0059）
 
-本人投注、公共投注列表以及下单/取消响应也新增 `decimals`、`stake`、`payout`，含完整公共投注对象的Socket事件使用相同字段。展示投入和派奖时直接使用 `stake/payout`，不要把 `*_minor` 当作完整币种金额，也不要按固定100或1000转换所有币种。
+所有管理写操作仍仅 admin，并验证后台全局二级密码 second_password；不放宽 operator 权限。金额传真实数量，响应为金额字符串，配置 ID 均由服务端生成。
 
-- `GET /v1/admin/bets` 新增 `decimals`（整数）、`stake`、`payout`（十进制字符串）。页面直接显示字符串，原 `*_minor` 保留用于兼容；例如 USDT 的 `payout_minor=198500` 对应 `payout="0.198500"`。
-- `GET /v1/admin/ledger` 新增 `display_name`、`decimals`、`amount`、`balance_after`。积分 `amount_minor=68` 对应 `amount="0.068"`；余额 `500250` 对应 `balance_after="500.250"`。这些字符串已经由后端转换，页面不再除以1000或1000000。
-- `GET /v1/admin/users` 新增 `parent_user_id`、`parent_display_name`、`parent_invitation_code`，无直接上级时省略。设置代理等级不自动绑定上级。
-- 上下分客服先调用 `GET /v1/chat/rooms`，按 `service_type=deposit/withdrawal` 分组；使用 `customer_display_name`、`customer_user_id`、`customer_invitation_code` 展示玩家，而不是房间UUID。选中后用房间 `id` 查询历史及订阅Socket；公开用户ID与邀请码不可混用。普通用户只能看到自己的客服会话，工作人员可查看客服会话列表。
-- `0053_spin_default_amounts.sql` 修正仍与默认编码、名称、币种、旧金额完全匹配的幸运转盘奖项：例如“68 宝石”改为68000最小单位（积分3位），不修改钱包或历史奖励。自定义奖项不按名称推算金额；配置仍以 `amount_minor` 最小单位保存，权重仍必须大于0。部署需执行0052、0053迁移并更新API，页面使用新增展示字段。
+### 多转盘、启停与删除
+
+可以同时启用多个转盘，包括多个消耗同一币种的转盘。新增 POST /v1/admin/spins，单条修改 PUT /v1/admin/spins/{spinID}，不会关闭其他转盘。旧 PUT /v1/admin/spins 整批入口已停用，验证权限及二级密码后返回 410。
+
+独立开关：PUT /v1/admin/spins/{spinID}/enabled，传 `{"second_password":"后台二级密码","enabled":false}`。独立删除：DELETE /v1/admin/spins/{spinID}，请求体传 `{"second_password":"后台二级密码"}`。成功返回 `{"success":true}`；删除为软删除，列表隐藏、禁止新抽奖，历史记录保留；重复删除成功，不存在返回404，已删除不能重新启用。
+
+奖项新增 disabled 布尔值，默认 false。weight 允许为0，无需同时设置 disabled；零权重奖项可以显示但不会被抽中。禁用奖项不参与抽奖，也不计入有效总权重。奖励 amount 仍必须大于0，不用零金额模拟“谢谢参与”。启用转盘至少有一个未禁用且权重大于0的奖项；可以保存整体停用、权重全零或所有奖项禁用的配置。消费与奖励币种独立，多个奖项可奖励不同币种；不要求体力与币种强绑定。不限制每日抽奖次数。零权重可保存与参考对齐，但不复制参考随机边界误选零权重奖项的行为。
+
+抽奖记录：
+
+- 后台 GET /v1/admin/spin-records（admin）。
+- 前台 GET /v1/activities/spin-records（已登录用户）。
+- 查询参数：spin_id 可选UUID、currency可选奖励币种、user_id可选公开数字ID、limit 1–100默认50、offset默认0。
+- 返回 `{items,total}`；每项含 id、spin_id、user_id、display_name、is_virtual、prize_id、prize_label、currency、amount、created_at。不返回其他用户余额或请求幂等键；只查询真实抽奖执行记录，不混入合成中奖记录，虚拟账户记录必须明确标识。
+
+### 独立任务、多奖励和完成次数
+
+新增或编辑任务示例（编辑路径带 taskID，请求不带 id/code）：
+
+```json
+{
+  "second_password":"后台二级密码",
+  "title":"每日宝石投注任务",
+  "period_type":"daily",
+  "sort_order":10,
+  "max_complete_count":2,
+  "accumulation_currency":"POINTS",
+  "threshold":100,
+  "enabled":true,
+  "rewards":[
+    {"currency":"STAMINA","amount":1.5},
+    {"currency":"USDT","amount":0.1}
+  ]
+}
+```
+
+period_type 为 daily/global，默认 daily；max_complete_count 默认1，0表示不限制，正数为该周期最多领取次数，上限100000。global为长期任务，无每日清零；daily仍遵守中国时区当天手动领取、过期失效。sort_order 为整数，升序展示。奖励列表1–32项，各币种不能重复；每项 amount 独立按币种精度换算。新请求使用 rewards，不与旧 reward_currency/reward 混传。响应暂保留旧首项摘要以支持现有调用，新页面只以 rewards 为准。
+
+每个任务独立累计。达到门槛即封顶，等待手动领取期间不再累计，多余投注不带入下一次；领取成功后次数加1，若未达上限则进度归零开始下一轮，达到上限则停止。当日新建任务不追溯继承同币种旧任务进度。已有进度的任务不能更换累计币种或周期，应停用旧任务再新建，避免历史进度被重新解释。
+
+只有非模拟、非躲避、最终 won/lost 的投注累计。取消与退款不累计。日期按投注时间 placed_at 对应的中国时区日期，不按结算时间；23:59投注次日才结算时只写前一天进度，前一天奖励已过期，不能在次日补领。global任务不受这个日期过期限制。
+
+GET /v1/tasks/bet-progress 返回 title、period_type、sort_order、max_complete_count、complete_count、rewards 及原进度字段。completed表示达到门槛，rewarded表示本周期已达到领取次数上限；completed=true且rewarded=false可领取。POST /v1/tasks/{taskID}/claim（沿用既有路径）领取后刷新进度和钱包，读取 rewards[].currency/amount/balance_after；多项奖励、领取次数及快照同事务提交。
+
+独立启停：PUT /v1/admin/tasks/bet-configs/{taskID}/enabled，传 enabled 和 second_password；删除：DELETE /v1/admin/tasks/bet-configs/{taskID}，传 second_password。删除隐藏配置且不能再累计/领取，保留进度与历史奖励审计。旧整批 PUT /v1/admin/tasks/bet-configs 返回410。
+
+后台 GET /v1/admin/tasks/progress 支持 task_id、user_id、date（YYYY-MM-DD）、limit、offset，返回 items/total；列表包含任务、用户、周期、累计币种、实际进度/门槛、已领取次数、上限及更新时间。长期任务 period_date 为内部固定值1970-01-01，展示为“长期”即可。该接口只读，不提供任意篡改进度或已领取次数的接口。
+
+升级必须在停止旧 API/Worker 写入后执行0056、0057、0058、0059，启动同版本进程。0057保留旧领取记录并迁移已有每日进度，不重算历史资金；旧共享进度表只作历史留存，不再写入。
+
+## 后台代理关系查询
+
+`GET /v1/admin/users/{userID}/agent-relation`：admin/operator 查询指定用户的直属上级。路径传查询用户接口返回的公开数字 ID，不是邀请码，也不是前端生成的 ID。
+
+```json
+{"user_id":100009,"parent_user_id":100006}
+```
+
+未绑定上级返回 `parent_user_id: null`；用户不存在返回 404，ID 格式错误返回 400；未登录 401、普通玩家 403。此接口不返回整棵代理树或下级列表。玩家端 `GET /v1/agents/me` 仍只查询本人。
+设置代理等级与绑定上级是两件事：设置 `agent-level` 不会自动创建上下级关系。
+
+## 后台创建虚拟账号与挂机接入流程
+
+以下管理接口使用 `POST /v1/admin/auth/login` 获取的 admin/operator 令牌，不使用虚拟玩家的令牌。
+
+1. `GET /v1/currencies` 获取可用币种；`GET /v1/admin/users?user_type=virtual&q=账号名` 查询已有虚拟账号。
+2. `POST /v1/admin/virtual-accounts` 创建账号，示例：
+
+```json
+{
+  "login_name":"virtual-demo-01",
+  "display_name":"演示玩家",
+  "avatar_url":"",
+  "password":"请替换为至少12字符的密码",
+  "initial_balances":{"POINTS":1000,"USDT":100}
+}
+```
+
+账号 ID 由后端生成，保存响应的 `user_id`。初始余额传真实金额，不乘精度；不需要的币种省略，不传零。创建默认不开启挂机。账号有 player 角色，可使用 `POST /v1/auth/login` 正常登录；不需要先登录玩家账号才能保存挂机配置。创建接口没有请求幂等键，网络超时应先按登录名查询确认，避免盲目重试。
+
+`display_name` 可省略或传空白，后端生成“用户+公开用户ID”；自定义昵称去除首尾空白后最多100字节。`avatar_url` 可省略或为空；指定头像时，使用同一个后台操作人的令牌调用 `POST /v1/uploads/authorize` → 按返回的上传地址、方法和请求头上传图片 → `POST /v1/uploads/{upload_id}/confirm`，把已确认记录的 `storage_key` 传给创建接口。仅支持 JPEG/PNG/WebP，不接受外链、未确认图片或其他操作人的上传。不需要转交上传记录所有权，也不需要登录机器人上传。
+
+创建响应只有账号信息，例如：
+
+```json
+{"user_id":100009,"login_name":"virtual-demo-01","display_name":"演示玩家","avatar_url":"","status":"active","is_virtual":true}
+```
+
+有头像时响应 `avatar_url` 是可直接展示的 `/v1/avatars/...` 地址；创建不再返回 `automation_enabled/interval_seconds/stake/currency/run_status` 等旧配置字段。是否挂机和运行结果以以下 robot-plans 接口为准。
+
+3. 创建前查询房间和币种配置。`POST /v1/admin/robot-plans` 创建一条计划，一个账号可以创建多条：
+
+```json
+{
+  "request_id":"robot-plan-create-001",
+  "user_id":100009,
+  "enabled":true,
+  "game_type":"hash_9",
+  "game_room_id":"94000000-0000-4000-8000-000000000001",
+  "currency":"POINTS",
+  "min_stake":1.5,
+  "max_stake":100,
+  "selections":[{"play_mode":"road","pick":"odd"},{"play_mode":"road","pick":"small"}],
+  "skip_min":1,
+  "skip_max":3
+}
+```
+
+计划 `id` 由后端生成；`request_id` 是前端为一次创建生成并在重试时保持不变的幂等键，不是业务 ID。相同键不同内容返回 409。`user_id` 是公开数字用户 ID。`enabled` 为布尔值。`min_stake/max_stake` 为正的实际金额，数字或十进制字符串，响应仅返回金额字符串；必须符合该房间、币种和所有候选玩法的限额。`game_type` 为 hash_9/13/17/19/23/29 之一。`selections` 为不重复的候选组合：road 支持 odd/even/big/small；guess/dodge 支持字符串 0–9。`skip_min/skip_max` 为 1–10000 的整数，表示间隔多少期，不是秒数，最小值不能大于最大值。
+
+4. `GET /v1/admin/robot-plans?q=100009&limit=50&offset=0` 查询计划和运行状态；q 支持公开用户 ID、账号名、昵称。返回 items/total，limit 为 1–100。`GET /v1/admin/robot-plans/{planID}` 查询单条。完整编辑调用 `PUT /v1/admin/robot-plans/{planID}`，提交上面除 request_id 外的全部字段，不允许改所属用户。开关调用 `PUT /v1/admin/robot-plans/{planID}/enabled`，只传 `{"enabled":false}` 或 true；删除调用 DELETE 同一路径（不带 /enabled）。admin/operator 均可管理，普通玩家返回 403，未登录 401。
+5. Worker 按轮次序号调度：首次启用先随机计算未来期号，不立即下单；到期随机选择一组玩法和区间内金额，每计划每期最多一单。错过期号重新安排未来期号，不补历史单。关闭、删除或账号非 active 时不执行。编辑配置会重置排期。查看 `next_round_sequence`、`last_seen_sequence`、`last_checked_at`、`last_status`、`last_error`、`last_bet_id`；状态包括 ready/stopped/scheduled/waiting_round/placed/failed。保存成功不是投注成功，以 last_bet_id 及后台投注记录为准。同一用户同一期只能使用一个赔率房间，多计划选择冲突房间会失败；多计划合计仍受单期投注限额约束。
+6. 新建虚拟账户无需初始余额（可省略 initial_balances）；Worker 按需创建零余额钱包。新虚拟投注为模拟订单：不扣款，中奖、取消、退款也不增加钱包余额；仍保存输赢和模拟派奖金额，不产生投注资金流水、佣金或活动累计。既有真实扣款订单继续按原规则结算，不根据账号当前类型篡改历史资金。
+7. 虚拟玩家仍参与混合排行榜并占名次及奖励位置；排行榜奖励与模拟投注派奖是不同业务。前台必须通过 is_virtual 明确标识虚拟玩家、说明混合排名及奖励规则，不得将模拟投注展示为真实用户资金流入。真实经营看板、代理团队人数和流水排除虚拟用户，虚拟账户禁止下分，也禁止发送或领取红包（403），避免资金流向真实用户。
+
+旧 `PUT /v1/admin/virtual-accounts/{userID}/automation` 已停用，返回 410；不会自动把旧的固定秒数配置转换为新计划。升级需要执行 0054、0055 迁移，并更新 API 和 Worker 后按上述步骤创建计划。
+
+## 配置 ID 的当前规则
+
+任务、转盘及奖项的 ID 均由后端生成。单条新增请求体不传 `id/code/items`；单条编辑把 GET 返回的 ID 放到路径中，不在请求体重复传。转盘 `code` 仅为后端维护的只读内部编码，前端不填写。
+
+| 操作 | 任务 | 转盘 |
+| --- | --- | --- |
+| 查询列表 | GET /v1/admin/tasks/bet-configs | GET /v1/admin/spins |
+| 新增单条 | POST /v1/admin/tasks/bet-configs | POST /v1/admin/spins |
+| 编辑单条 | PUT /v1/admin/tasks/bet-configs/{taskID} | PUT /v1/admin/spins/{spinID} |
+
+写接口仅 admin，均传 `second_password`（后台全局二级密码）。新增返回 201 和单条配置，编辑返回 200 和单条配置，编辑目标不存在返回 404。停用通过编辑设置 `enabled:false`，其他业务参数传齐。保存单条不会禁用其他任务/转盘。
+
+新增任务请求示例：
+
+```json
+{"second_password":"后台二级密码","accumulation_currency":"POINTS","threshold":100,"reward_currency":"USDT","reward":1.5,"enabled":true}
+```
+
+新增转盘请求示例：
+
+```json
+{"second_password":"后台二级密码","title":"活动转盘","cost_currency":"POINTS","cost":1.5,"enabled":true,"sort_order":0,"prizes":[{"label":"奖励","currency":"USDT","amount":2,"weight":1}]}
+```
+
+编辑转盘时，`prizes` 仍是**该转盘的完整奖项列表**：保留/修改的奖项带 GET 返回的 `prizes[].id`，新增奖项不带 ID，漏传的旧奖项会移除；不能引用其他转盘的奖项。现在 `prizes[].id` 是真实 UUID，不再是旧的奖项编码，新抽奖结果的 `prize_id` 与它一致。历史抽奖记录保留原标识与奖励快照，历史展示使用 `prize_label` 等快照字段，不依赖当前奖项列表。
+
+旧集合 PUT 整批接口已停用，验证权限和二级密码后返回410；请使用单条接口。新增 POST 没有新增请求幂等键，网络超时须先重新查询确认，不能盲目自动重试。已有投注/抽奖等接口的 `request_id`/`client_request_id` 仍由调用端生成，同一次操作重试复用，不是资源主键。
+
+## 金额统一协议
+
+所有前端金额接口遵循[实际金额接口协议](./amount-contract.md)：请求传100或1.5，响应只返回实际金额字符串，不再返回最小单位字段。前后端需要同步升级。
 
 ## 用户管理、统计及金额口径补充（0052）
 
@@ -16,7 +159,7 @@
 - 重置个人交易密码：`PUT /v1/admin/users/{userID}/secondary-password`，同上字段，新密码1–128字节；交易密码即用户个人二级密码，不是后台全局操作密码。仅admin。
 - 两种重置均撤销目标刷新会话，不保存明文、不返回密码；现有访问令牌仍在原有效期内，不能把刷新会话撤销解释为立即踢出全部连接。后台自己改登录密码仍可走原个人改密接口。
 - 禁言：`PUT /v1/admin/users/{userID}/mute`，`{"muted":true}`；解除传false。admin/operator可操作，operator不能禁言后台账号。全局聊天禁言独立于账号status，Socket发消息时检查，返回“账号已被禁言”；仍可登录、投注、读历史消息。
-- 用户搜索：`GET /v1/admin/users?q=100006&currency=USDT,JADE&user_type=real&available_min=1.5&available_max=10000&limit=50&offset=0`。`user_type`可选real/virtual，省略全部；q支持公开用户ID、登录名、昵称。币种可逗号分隔或重复传currency，任一所选钱包满足余额范围即匹配用户，余额筛选为展示单位、不得跨币种相加。返回数组，每个用户新增`is_virtual/chat_muted/balances`，balances含currency、decimals、available_minor、frozen_minor、available、frozen。未传币种返回全部钱包。
+- 用户搜索：`GET /v1/admin/users?q=100006&currency=USDT,JADE&user_type=real&available_min=1.5&available_max=10000&limit=50&offset=0`。`user_type`可选real/virtual，省略全部；q支持公开用户ID、登录名、昵称。币种可逗号分隔或重复传currency，任一所选钱包满足余额范围即匹配用户，余额筛选为展示单位、不得跨币种相加。返回数组，每个用户新增`is_virtual/chat_muted/balances`，balances含currency、decimals、available、frozen、available、frozen。未传币种返回全部钱包。
 - 代理等级：读取用户列表的`agent_level`，不要根据`roles`是否存在agent角色判断。1–6表示代理，0表示非代理；设置等级不等于创建上下级关系。修复列表此前漏查代理等级的问题，调整等级不再清空已有佣金比例。
 
 ### 看板 /v1/admin/dashboard 每个字段的含义
@@ -29,32 +172,32 @@
 | --- | --- |
 | currency / decimals | 平台币种及小数精度 |
 | bet_count | 时间范围内创建的投注单数，含取消、退款及待结算；不是有效投注单数 |
-| stake_minor / stake | 上述投注本金总额（含取消和退款），前者最小单位整数，后者展示字符串 |
-| payout_minor / payout | 上述投注当前已记录的游戏派奖总额，含本金，不是净盈利 |
-| deposit_minor / deposit | 时间范围内链上充值入账，不含后台上分 |
-| credit_minor / credit | 时间范围内后台人工上分 |
-| clearance_minor / clearance | 人工下分、积分提现审核扣款、链上提现最终成功扣款；不含冻结、拒绝和投注退款 |
-| gift_minor / gift | 后台人工赠分，不代表全部任务/转盘/排行榜奖励 |
-| penalty_minor / penalty | 后台人工扣分，返回正数；不是投注输款 |
-| balance_minor / balance | 当前可用余额加冻结余额，不受from/to影响，不是历史期末余额 |
+| stake | 上述投注本金总额（含取消和退款），实际金额字符串 |
+| payout | 上述投注当前已记录的游戏派奖总额，含本金，不是净盈利 |
+| deposit | 时间范围内链上充值入账，不含后台上分 |
+| credit | 时间范围内后台人工上分 |
+| clearance | 人工下分、积分提现审核扣款、链上提现最终成功扣款；不含冻结、拒绝和投注退款 |
+| gift | 后台人工赠分，不代表全部任务/转盘/排行榜奖励 |
+| penalty | 后台人工扣分，返回正数；不是投注输款 |
+| balance | 当前可用余额加冻结余额，不受from/to影响，不是历史期末余额 |
 
-from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下单时间归属，资金按流水发生时间归属。所有统计排除虚拟账户。各币种金额独立；不要把字符串或minor跨币种相加，也不要把payout当net_win。此次删除`players`顶层的stake_minor/payout_minor/deposit_minor/credit_minor/balance_minor（此前错误混合币种）；改读funds同名字段。没有资金操作但存在钱包时也返回该币种零统计。
+from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下单时间归属，资金按流水发生时间归属。所有统计排除虚拟账户。各币种金额独立；不要把不同币种金额直接相加，也不要把payout当net_win。此次删除`players`顶层的stake/payout/deposit/credit/balance（此前错误混合币种）；改读funds同名字段。没有资金操作但存在钱包时也返回该币种零统计。
 
 ### 排行榜新增字段及时间
 
-`GET /v1/leaderboards?period=today&currency=USDT`的周期字段原本在根对象：`period`今天/昨天/本周/上周，`period_type`日/周，`starts_at/ends_at`中国时区周期对应的时间边界，`refreshed_at`快照刷新时间。新增根`decimals`；items新增`total_bet`（有效投注展示金额）、`total_payout_minor/total_payout`（有效投注含本金派奖）、`net_win_minor/net_win`（派奖减有效投注）、`first_bet_at`（周期内首笔有效投注时间）、`available_minor/available`（刷新时可用余额快照）。余额仅向本人或后台返回，不公开其他玩家余额。历史冻结榜单没有保存的派奖/余额字段省略，不使用0或当前余额冒充历史数据。周期排名仍按effective_stake_minor降序，不改成净赢排序。
+`GET /v1/leaderboards?period=today&currency=USDT`的周期字段原本在根对象：`period`今天/昨天/本周/上周，`period_type`日/周，`starts_at/ends_at`中国时区周期对应的时间边界，`refreshed_at`快照刷新时间。新增根`decimals`；items新增`total_bet`（有效投注展示金额）、`total_payout`（有效投注含本金派奖）、`net_win`（派奖减有效投注）、`first_bet_at`（周期内首笔有效投注时间）、`available`（刷新时可用余额快照）。余额仅向本人或后台返回，不公开其他玩家余额。历史冻结榜单没有保存的派奖/余额字段省略，不使用0或当前余额冒充历史数据。周期排名仍按effective_stake降序，不改成净赢排序。
 
 ### 投注与转盘的金额单位
 
-USDT精度6：实际投1000 USDT应传`stake_minor=1000000000`，倍率1.985中奖得到`payout_minor=1985000000`，即1985 USDT。若传1000 minor，实际投注0.001 USDT，派奖1985 minor=0.001985 USDT。派奖包含本金，最终余额=扣款后余额+派奖；相对投注前净增985 USDT，而非1985 USDT。小于最小单位的赔率结果按整数除法向下截断，不是截断到3位。
+投注1000 USDT提交 `stake:1000`，赔率1.985中奖返回 `payout:"1985.000000"`。派奖包含本金；后端精确计算和转换，前端不再乘除精度。
 
-转盘配置的`cost_minor`及奖项`amount_minor`分别用各自币种的最小单位；`label`只是文案，不能替代金额。例如奖励10 USDT需配置amount_minor=10000000。抽奖响应新增cost_decimals/reward_decimals、cost/reward展示字符串、cost_available/reward_available最终余额展示、cost_balance_after_spin_minor最终消耗币种余额。原cost_balance仍是扣费后的中间快照；消耗与奖励同币种时，以reward_balance或cost_balance_after_spin_minor作为最终余额，不要用cost_balance覆盖钱包。
+转盘 `cost` 与奖项 `amount` 都是实际币种数量。消耗和奖励按各自币种独立转换。`cost_balance` 为扣费后中间快照，最终消耗币种余额读取 `cost_balance_after_spin`，奖励余额读取 `reward_balance`。
 
 ### 转盘权重和排行榜密码报错
 
-每个转盘奖项weight必须是大于0的整数，相对概率=weight/全部奖项weight总和；不要求总和100。第2个奖项报错时检查prizes[1].weight：0、未传、空值、负数或把0.2当20%均不正确。不要把金额、概率百分数字符串当权重。未改变此规则为允许0；不参与抽奖的奖项应从本次配置中移除。
+每个转盘奖项 weight 为非负整数，0代表不中奖但可以保留展示；相对概率=该奖项weight/全部未禁用奖项weight总和，不要求总和100。请求应明确提交 weight，负数、小数或概率百分数字符串不正确。启用转盘时有效总权重必须大于0；disabled=true 的奖项不参与计算。
 
-排行榜保存使用`PUT /v1/admin/leaderboard-reward-rules`，示例：`{"second_password":"后台全局二级操作密码","period_type":"daily","currency":"USDT","version":0,"rules":[{"rank_from":1,"rank_to":1,"reward_currency":"USDT","reward_minor":1000000,"enabled":true}]}`。version取GET最新版本，不总是0。second_password放最外层，不是个人交易密码、first_password或password；先由admin在全局密码管理中设置second。缺字段/空值/类型错误400，未设置409，错误密码401，锁定429。此轮把缺字段及空值改成明确中文提示。
+排行榜保存使用`PUT /v1/admin/leaderboard-reward-rules`，示例：`{"second_password":"后台全局二级操作密码","period_type":"daily","currency":"USDT","version":0,"rules":[{"rank_from":1,"rank_to":1,"reward_currency":"USDT","reward":1,"enabled":true}]}`。version取GET最新版本，不总是0。second_password放最外层，不是个人交易密码、first_password或password；先由admin在全局密码管理中设置second。缺字段/空值/类型错误400，未设置409，错误密码401，锁定429。此轮把缺字段及空值改成明确中文提示。
 
 发布必须先执行0052迁移；不修改历史钱包余额，不自动重新派奖。
 
@@ -200,7 +343,7 @@ API 密钥、密码和令牌必须继续使用环境变量或密钥管理系统�
 运营后台使用 `GET /v1/admin/hash/config` 读取完整矩阵，并通过
 `PUT /v1/admin/hash/config` 携带 `expected_version` 原子保存。六个房间及六个共享
 区块关系固定，只允许修改名称、排序、启停状态和各币种参数。
-倍率使用 `multiplier/divisor` 定点整数；投注上下限字段统一使用钱包最小单位。
+倍率使用 `multiplier/divisor` 定点整数；投注上下限字段统一使用实际币种金额。
 例如 USDT 按 6 位精度时，`100000` 表示 0.1 USDT，`50000000` 表示 50 USDT。
 后台不再提供创建房间、创建玩法或人工创建哈希轮次的接口。
 
@@ -249,7 +392,7 @@ const response = await fetch(`${api}/v1/bets`, {
     account_id: user_id,
     currency: "POINTS",
     selection: { pick: "7" },
-    stake_minor: 2500,
+    stake: 2500,
   }),
 });
 
@@ -270,24 +413,24 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 
 - 本人所有币种统一流水：`GET /v1/users/me/ledger?currency=POINTS&limit=50`；不传 `currency` 则查询本人全部币种。返回 `{items,next_cursor}`，下一页原样传 `cursor=next_cursor` 并保持币种筛选不变，没有 `next_cursor` 表示结束。不能用此接口读取其他玩家的资金流水。
 - 每条统一流水返回 `currency`、`decimals`、`amount`（展示金额字符串）、`available_after`（变更后可用余额字符串）、`frozen_after`（冻结余额字符串或 null）。无需前端做精度转换。
-- `amount_minor` 是业务金额；实际余额变动以 `available_delta_minor` 和 `frozen_delta_minor` 为准。申请提现是可用减少、冻结增加；确认提现是可用不变、冻结减少；驳回是可用增加、冻结减少。不要把冻结和确认两条流水重复算为两次下分。
-- 新记录包含冻结余额快照；无法可靠还原的历史记录返回 `frozen_after_minor=null`、`frozen_after=null`，不能当成 0。
+- `amount` 是业务金额；实际余额变动以 `available_delta` 和 `frozen_delta` 为准。申请提现是可用减少、冻结增加；确认提现是可用不变、冻结减少；驳回是可用增加、冻结减少。不要把冻结和确认两条流水重复算为两次下分。
+- 新记录包含冻结余额快照；无法可靠还原的历史记录返回 `frozen_after=null`、`frozen_after=null`，不能当成 0。
 - 旧积分和体力接口继续可用，底层已统一查询 `ledger_entries`；体力旧接口仅查询 `STAMINA`，其他体力币种请使用统一流水接口。
 
 - 积分流水：`GET /v1/points/{accountID}/ledger?limit=50&offset=0`
 - 体力流水：`GET /v1/stamina/{accountID}/ledger?limit=50&offset=0`
 - USDT 充值记录：`GET /v1/deposits`
 - USDT 提现记录：`GET /v1/withdrawals`
-- 本人投注与结算记录：`GET /v1/bets?status=won&limit=50&offset=0`。下单响应、投注详情和本人列表统一返回 `game_type`、`game_name`、`round_sequence`、`game_room_id/code/name`、`play_mode`、投注选项及赔率快照。`balance_after_bet_minor` 是该笔投注扣款后的余额快照；`balance_after_settlement_minor` 是赢、输、结算退款或主动取消完成瞬间的余额快照，进行中的投注为空；取消投注响应额外返回 `balance_after_refund_minor`。
+- 本人投注与结算记录：`GET /v1/bets?status=won&limit=50&offset=0`。下单响应、投注详情和本人列表统一返回 `game_type`、`game_name`、`round_sequence`、`game_room_id/code/name`、`play_mode`、投注选项及赔率快照。`balance_after_bet` 是该笔投注扣款后的余额快照；`balance_after_settlement` 是赢、输、结算退款或主动取消完成瞬间的余额快照，进行中的投注为空；取消投注响应额外返回 `balance_after_refund`。
 - 所有玩家公开投注：`GET /v1/bets/public-feed?player_type=all&game_type=hash_9&currency=USDT&status=accepted&limit=50&offset=0`。`player_type` 可传 `all`、`real`、`virtual`，默认同时返回真实和虚拟玩家；通过 `player.is_virtual` 标识玩家类型。玩家展示信息读取 `player.user_id`、`player.display_name` 和 `player.avatar_url`。公开列表包含相同的期号、房间和赔率字段，但绝不返回任何余额、登录账号、内部 UUID 或 IP。
 
 赔率展示使用 `payout_rate`；精确计算或核对派奖时使用整数 `payout_multiplier / payout_divisor`，不要使用浮点数自行推导。房间配置之后发生变化，也不影响投注记录中的赔率快照。
 
-流水按时间倒序返回，`amount_minor` 正数为入账、负数为出账；`business_type` 区分来源：`admin_credit`（管理员充值）、`bet_task_reward`（参与投注活动任务奖励）、`activity_consume`（活动消耗）。
+流水按时间倒序返回，`amount` 正数为入账、负数为出账；`business_type` 区分来源：`admin_credit`（管理员充值）、`bet_task_reward`（参与投注活动任务奖励）、`activity_consume`（活动消耗）。
 
 ## 活动任务与多转盘
 
-活动任务按中国时区（UTC+8）的自然日累计。只有最终结算为 `won` 或 `lost` 的有效投注才增加进度；`cancelled` 和 `refunded` 投注完全不计入。玩家达到门槛后必须在当天主动领取，跨到第二天后进度从 0 重新计算，前一天未领取的奖励失效。
+每日任务按投注时间所在的中国时区（UTC+8）自然日累计；长期任务不清零。只有最终结算为 won/lost 且非躲避、非模拟的投注增加进度，cancelled/refunded完全不计入。每日任务必须当天主动领取，未领取次日失效。新增字段及多奖励流程以本文开头0056–0059章节为准。
 
 后台配置闭环：
 
@@ -295,42 +438,38 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 2. 编辑每个档位的以下字段：
 
 - `accumulation_currency`：已登记的平台币种代码；只有实际使用该币种产生的投注才会累计。
-- `threshold_minor`：该币种的累计投注门槛。
+- `threshold`：该币种的累计投注门槛。
 - `reward_currency`：已登记的平台币种代码，与累计投注币种独立配置。
-- `reward_minor`：奖励数量。
+- `reward`：奖励数量。
 - `enabled`：是否展示、累计并发放该档奖励。
 
-3. 调用 `PUT /v1/admin/tasks/bet-configs` 提交 `{"items":[...]}`。这是完整列表替换：已有项必须沿用 GET 返回的 `id`；新增项的 `id` 传空字符串；提交不存在的非空 `id` 返回 400；未包含的旧项会被自动禁用。数组至少保留一项，如需全部停用，应把保留项的 `enabled` 全部设为 `false`。
-4. 保存成功后接口返回数据库中的完整列表，后台应以该响应覆盖页面状态。相同 `accumulation_currency + threshold_minor` 不能重复，两个金额都必须是大于 0 的最小单位整数。币种统一转大写且必须先在币种目录登记，不做资产/体力白名单或累计/奖励绑定；错误搭配由运营负责。
+3. 新增调用 `POST /v1/admin/tasks/bet-configs`，编辑调用 `PUT /v1/admin/tasks/bet-configs/{taskID}`，请求体直接传单条业务字段及 `second_password`，不要包裹 items，不传 id/code。
+4. 保存成功后返回单条配置，后台更新对应行或重新 GET 列表。允许相同累计币种与门槛的不同独立任务，金额必须大于0。币种统一转大写且必须先在币种目录登记，不做资产/体力白名单或累计/奖励绑定；错误搭配由运营负责。
 
 ```json
 {
-  "items": [
-    {
-      "id": "",
+      "second_password": "后台二级密码",
       "accumulation_currency": "USDT",
-      "threshold_minor": 1000000,
+      "threshold": 1,
       "reward_currency": "USDT_STAMINA",
-      "reward_minor": 10,
+      "reward": 10,
       "enabled": true
-    }
-  ]
 }
 ```
 
 前台参与与到账闭环：
 
-1. 进入活动页调用 `GET /v1/tasks/bet-progress`，展示每档的 `progress_minor / threshold_minor`、`completed` 和 `rewarded`。
+1. 进入活动页调用 `GET /v1/tasks/bet-progress`，展示每档的 `progress / threshold`、`completed` 和 `rewarded`。
 2. 玩家按正常流程调用 `POST /v1/bets`。下单成功时暂不累计任务；网络重试必须复用同一 `client_request_id`，避免创建重复投注。
-3. 等投注结算为 `won` 或 `lost` 后，服务端才按结算时所在的中国时区自然日，把 `stake_minor` 累加到相同 `accumulation_currency` 的进度。前端收到结算事件或查询到最终状态后，重新调用 `GET /v1/tasks/bet-progress`；当某档 `completed=true` 且 `rewarded=false` 时显示“领取”按钮。
+3. 等非躲避、非模拟投注结算为 won/lost 后，服务端按投注时间所在中国时区日期累加对应任务独立进度。收到结算事件后重新调用 GET /v1/tasks/bet-progress；completed=true且rewarded=false显示领取按钮。
 4. 点击领取调用 `POST /v1/tasks/{taskID}/claim`，`taskID` 使用进度项的 `id`，不需要请求体。成功返回本次奖励币种、奖励金额、领取后的余额和领取时间。
-5. 领取成功后重新调用 `GET /v1/tasks/bet-progress` 和 `GET /v1/wallets/{accountID}/all`，此档应变为 `rewarded=true`。领取记录、钱包入账和 `business_type=bet_task_reward` 流水在同一事务内完成，不会出现只标记领取但余额未到账的情况。
+5. 领取成功后刷新任务进度和钱包；次数达到上限时rewarded=true，否则进度归零开始下一次累计。领取记录、所有奖励钱包入账和business_type=bet_task_reward流水在同一事务内完成。
 
-领取接口状态：未达到门槛或当天已经领取返回 409；任务不存在或已被后台禁用返回 404；成功返回 200。领取按钮提交期间必须禁用，收到 409 后应重新拉取进度，不要反复请求。
+领取接口状态：未达到本轮门槛或本周期已达到领取上限返回409；任务不存在、删除或禁用返回404；成功返回200。领取按钮提交期间必须禁用，收到409后刷新进度，不要反复请求。
 
-每种累计币种拥有独立的当日进度，同一币种的多个门槛共享进度。主动取消的 `cancelled` 投注和轮次取消、异常退款产生的 `refunded` 投注从未写入进度，因此不会出现先领取奖励再扣回的问题。中国时区零点后，查询和领取都只读取新一天的进度，旧日记录仅保留作审计，不能补领。运营在当天中途新增一个低于玩家现有进度的档位时，该档会直接显示 `completed=true, rewarded=false`，玩家可以在当天立即手动领取。
+每个任务独立进度，同一币种的多个任务不共享进度记录，新任务不继承旧流水。cancelled/refunded不累计。每日任务零点后只查询、领取新一天进度，旧日只保留审计，不能补领；长期任务跨日保留进度。
 
-后台通过 `GET/PUT /v1/admin/spins` 管理多个转盘。每个转盘配置独立的 `code`、`cost_currency`、`cost_minor` 和 `prizes`；消耗币种和奖项奖励币种均接受已登记的平台币种代码，不做绑定。玩家先调用 `GET /v1/activities/spins` 获取启用转盘，再调用 `POST /v1/activities/spins/{spinID}/play`。扣除参与消耗、发放奖品、写入两侧流水和抽奖记录在同一事务内完成。新领取/抽奖记录保存当时的配置快照，不随运营后续修改而变化。
+后台通过 `GET /v1/admin/spins` 查询、`POST /v1/admin/spins` 新增、`PUT /v1/admin/spins/{spinID}` 编辑单个转盘。每个转盘配置独立的 `title`、`cost_currency`、`cost` 和 `prizes`，不需要填写 ID 或 code；消耗币种和奖项奖励币种均接受已登记的平台币种代码，不做绑定。玩家先调用 `GET /v1/activities/spins` 获取启用转盘，再调用 `POST /v1/activities/spins/{spinID}/play`。扣除参与消耗、发放奖品、写入两侧流水和抽奖记录在同一事务内完成。新领取/抽奖记录保存当时的配置快照，不随运营后续修改而变化。
 
 ## 金额精度与前端表示
 
@@ -347,24 +486,18 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 
 当前币种显示精度如下：
 
-| 币种 | 小数位 | 1 个显示单位对应的 `_minor` | 前端规则 |
-|---|---:|---:|---|
-| `USDT` | 6（平台目录） | `1000000` | 不随用户选择的链改变。 |
-| `POINTS`（宝石） | 3 | `1000` | 固定显示最多3位小数；例如 `1500 minor = 1.5`。 |
-| `JADE`（玉石） | 3 | `1000` | 固定显示最多3位小数；例如 `1 minor = 0.001`。 |
-| `ORIGIN_STONE`（源石） | 3 | `1000` | 固定显示最多3位小数；例如 `1 minor = 0.001`。 |
-| `STAMINA`（宝石体力） | 0 | `1` | 只显示整数。 |
-| `USDT_STAMINA` | 0 | `1` | 只显示整数；它是体力，不沿用 USDT 的链上精度。 |
-| `JADE_STAMINA` | 0 | `1` | 只显示整数。 |
-| `ORIGIN_STONE_STAMINA` | 0 | `1` | 只显示整数。 |
-| PQPA 返回的其他链上资产 | 读取对应资产的 `decimals` | `10^decimals` | 必须使用所选资产记录的精度。 |
-| 自定义币种 | 创建时指定 0–18 位 | `10^decimals` | 必须先登记；没有未知币种默认 0 位的回退。 |
+| 币种 | 平台小数位 |
+| --- | --- |
+| USDT | 6 |
+| POINTS、JADE、ORIGIN_STONE | 3 |
+| STAMINA、USDT_STAMINA、JADE_STAMINA、ORIGIN_STONE_STAMINA | 0 |
+| 自定义币种 | 登记时指定0–18 |
 
-三个积分资产统一采用3位小数。后台上分接口由后端换算精度：给玩家上 `100` 宝石提交 `amount="100"`，后端入账 `100000 minor`；上 `1.5` 宝石提交 `amount="1.5"`，后端入账 `1500 minor`。四种体力为0位，提交 `amount="8"` 就入账 `8 minor`；`USDT_STAMINA` 虽然名称带有 USDT 前缀，仍是独立的整数型活动次数，不沿用 USDT 的链上精度。其他仍以 `_minor` 命名的写接口继续提交最小单位整数，接口文档会逐项明确，前端不要自行猜测。
+前端直接提交实际金额，后端读取币种目录转换；链上资产精度不参与前端钱包换算。
 
 这样设计是为了让钱包余额、不可变流水、投注扣款和 outbox 能在同一事务中精确相等，避免二进制浮点误差，并让幂等重试与并发校验得到完全相同的结果。数据库余额不得为负，单笔金额通常必须大于 0。赔率同样使用 `payout_multiplier / payout_divisor` 的定点整数；无法整除的派奖最小单位余数会被整数除法截去，不产生小数最小单位。
 
-服务端理论范围是有符号 64 位整数（最大 `9223372036854775807`），但 JavaScript `number` 的安全整数上限只有 `9007199254740991`。当前 JSON 金额仍以数字返回，服务端也没有额外限制到 JavaScript 安全整数；前端不得用浮点数换算金额，业务配置应控制在安全整数范围内。若未来必须支持超过该范围的余额，需要把所有 `_minor` 字段统一升级为十进制字符串契约，不能只在前端收到响应后再转 `BigInt`，因为标准 `JSON.parse` 在转换前已经可能丢失精度。
+内部使用int64最小单位整数；前端响应只接收十进制字符串，因此大余额不会在JSON解析时损失精度。请求大金额也应使用字符串，避免浏览器发送前丢精度。
 
 ## 链上充值
 
@@ -378,7 +511,7 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 
 ## USDT 提现
 
-提现网络同样来自 `GET /v1/assets`，只允许选择 `support_withdraw=true` 的资产。调用 `POST /v1/withdrawals` 时必须提交 `chain_code`、`currency`、目标地址、可选的 `destination_memo`、最小单位整数金额和客户端幂等键。服务端执行地址格式、单笔最小/最大金额和 UTC 每日累计限额检查；超出每日限额返回 409。后台审批通过后由 Worker 调用 PQPA 出金；最终状态由 PQPA Webhook 更新，回调丢失时由 Worker 主动对账补偿。
+提现网络同样来自 `GET /v1/assets`，只允许选择 `support_withdraw=true` 的资产。调用 `POST /v1/withdrawals` 时必须提交 `chain_code`、`currency`、目标地址、可选的 `destination_memo`、实际币种金额和客户端幂等键。服务端执行地址格式、单笔最小/最大金额和 UTC 每日累计限额检查；超出每日限额返回 409。后台审批通过后由 Worker 调用 PQPA 出金；最终状态由 PQPA Webhook 更新，回调丢失时由 Worker 主动对账补偿。
 
 ## 管理后台接口
 
@@ -388,7 +521,7 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 - `GET /v1/admin/bets` 跨玩家查询投注并返回相同的期号、房间和赔率字段；`GET /v1/admin/ledger` 查询统一流水；`GET /v1/admin/refunds-clearances` 查询结算退款、主动取消退款和下分/清退明细，投注退款记录包含关联 `bet_id`、期号和房间。三个接口均支持时间、用户和分页筛选。
 - `GET /v1/admin/dashboard?user=&from=&to=` 返回玩家统计及按币种全局统计；全局数据自动排除虚拟账户。
 - `GET /v1/admin/users/{userID}/login-ips` 返回玩家用过的 IP，并在每个 IP 下嵌套该地址登录过的其他用户；也可用 `GET /v1/admin/login-ips/{ip}/users` 直接反查。
-- `POST /v1/admin/virtual-accounts` 使用登录名和密码创建可登录的虚拟账户；`PUT /v1/admin/virtual-accounts/{userID}/automation` 保存挂机玩法、币种、单注和间隔配置。虚拟账户可投注并进入排行榜，但不计入看板全局充值、流水和余额统计，也禁止下分。
+- `POST /v1/admin/virtual-accounts` 创建可登录虚拟账户；`/v1/admin/robot-plans` 管理多条按期号运行的模拟投注计划，详见本文开头流程。虚拟账户不计入看板全局充值、流水和余额统计，禁止下分。
 
 ### 请求参数类型约定（以 Go 实际解码类型为准）
 
@@ -402,10 +535,9 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 | 积分清退/链上提现请求体（仅本地关闭鉴权时回退） | `account_id` | string；正常登录省略，由 Token 确定本人 |
 | 用户/代理管理路径 | `{userID}`、`{agentID}` | 公开数字 ID，例如 `/100009/roles`，不是内部 UUID |
 | 轮次、投注、提现单、上传文件路径 | 对应资源 ID | UUID 字符串，不要套用用户 ID 规则 |
-| 金额 | `amount` | 展示金额 string，例如 `"1.5"`，目前用于管理员资金操作 |
-| 金额 | `amount_minor`、`stake_minor`、`reward_minor` 等 | 最小单位整数，不能传小数字符串；不能将所有资金接口都改传 amount |
+| 金额 | `amount`、`stake`、`reward` 等 | 请求为实际金额数字或字符串；响应为实际金额字符串，不含最小单位字段 |
 
-排行榜奖励配置使用 `version`（整数）与 `rules`（数组），每档 `rank_from/rank_to` 为整数、`reward_minor` 为最小单位整数、`enabled` 为 boolean。任务/转盘配置的金额也仍是最小单位整数。
+排行榜配置使用整数 `version` 和 `rules` 数组；每档 `rank_from/rank_to` 为整数，`reward` 为实际奖励金额，`enabled` 为布尔值。任务、转盘同样提交实际金额。
 
 注意两个保留现状的例外：审计日志查询 `actor_user_id` 目前按内部 UUID 筛选；平台配置响应 `updated_by` 目前仍为内部 UUID 字符串。其他经公开 ID 转换的流水响应 `operator_id` 是公开数字 ID。这里仅对齐文档，没有改变这些接口的实际行为。
 
@@ -444,13 +576,13 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 }
 ```
 
-返回：`operation_id`（UUID）、`user_id`（公开数字 ID）、`currency`、`action`、`amount_minor`（正数）、`delta_minor`（增减带符号）、`balance_before_minor`、`balance_after_minor`（操作前后可用余额）、`frozen_minor`（冻结余额）、`duplicate`、`occurred_at`。金额字段均为最小单位整数，时间为 RFC3339。重复请求 `duplicate=true`，返回首次操作快照，不代表当前余额。
+返回：`operation_id`（UUID）、`user_id`（公开数字 ID）、`currency`、`action`、`amount`（正数）、`delta`（增减带符号）、`balance_before`、`balance_after`（操作前后可用余额）、`frozen`（冻结余额）、`duplicate`、`occurred_at`。金额字段均为实际金额十进制字符串，时间为 RFC3339。重复请求 `duplicate=true`，返回首次操作快照，不代表当前余额。
 
 - 下分/人工扣分仅扣可用余额，不动冻结，不取消投注。余额不足 409；虚拟账户禁止两种扣款，返回 403，允许上分/赠分。
 - 同一请求编号修改用户、币种、操作、金额或备注返回 409；等值金额（如 "1" 与 "1.0"）视为相同。
 - 未设置全局一级密码 409；密码错误 401；无管理员权限 403；参数/精度错误 400。
 - 新流水类型：`admin_credit` 上分、`admin_debit` 清退、`admin_reward` 赠分、`admin_penalty` 人工扣分。业务编号 `business_id` 对应 `operation_id`。
-- 看板 `global[].credit_minor` 为人工上分；总充值由链上 `deposit_minor` 加人工 `credit_minor` 展示。新增 `clearance_minor` 为人工下分+积分审核成功扣款+链上最终成功扣款（不含冻结、驳回和投注退款），`gift_minor` 为人工赠分，`penalty_minor` 为人工扣分，全部按币种，排除虚拟账户。人工扣分不计游戏输赢。
+- 看板 `global[].credit` 为人工上分；总充值由链上 `deposit` 加人工 `credit` 展示。新增 `clearance` 为人工下分+积分审核成功扣款+链上最终成功扣款（不含冻结、驳回和投注退款），`gift` 为人工赠分，`penalty` 为人工扣分，全部按币种，排除虚拟账户。人工扣分不计游戏输赢。
 - `players[].funds[]` 按币种返回完整投注、资金和余额统计及展示字符串；0052起移除玩家顶层跨币种金额汇总，详见本文开头字段说明。
 - 金额、流水、成功审计、幂等结果和 outbox 同一事务，失败全部回滚；不在任何持久化记录中保存操作密码。
 
@@ -468,18 +600,18 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 2. **玩家端**：`POST /v1/point-withdrawals` 提交申请。例如下分 `1.5` 宝石：
 
    ```json
-   { "request_id": "point-withdraw-001", "amount_minor": 1500, "remark": "申请下分" }
+   { "request_id": "point-withdraw-001", "amount": 1.5, "remark": "申请下分" }
    ```
 
    | 字段 | JSON 类型 | 必填 | 说明 |
    | --- | --- | --- | --- |
    | `request_id` | string | 是 | 幂等标识，网络重试复用。 |
-   | `amount_minor` | number（整数，对应 Go int64） | 是 | 大于 0 的最小单位整数。POINTS 精度 3，下分 100 传 `100000`，下分 1.5 传 `1500`；这里尚未改为展示金额字符串。 |
+   | `amount` | number或string | 是 | 实际币种金额，下分100传100，下分1.5传1.5；后端转换精度。 |
    | `remark` | string | 否 | 申请备注；当前申请列表响应不返回此字段。 |
    | `account_id` | string | 否 | 正常登录时不要传，由 Token 确定本人；只供鉴权关闭的本地开发回退使用。 |
 
-   不传 `currency`，这个接口固定操作 `POINTS`；不传 `amount` 或二级密码字段。当前没有在下分接口中自动验证二级密码的链路。
-3. **服务端**：同一事务将金额从可用余额转入冻结余额，记录申请和流水。返回 201，申请字段为 `id`（UUID string）、`user_id`（公开数字 ID）、`client_request_id`（string，对应请求中的 `request_id`）、`amount_minor`（整数）、`status="requested"`、`created_at`（时间字符串）。重复申请返回原申请，不再冻结。
+   不传 `currency`，这个接口固定操作 `POINTS`；必须传 `amount`；不传二级密码字段。当前没有在下分接口中自动验证二级密码的链路。
+3. **服务端**：同一事务将金额从可用余额转入冻结余额，记录申请和流水。返回 201，申请字段为 `id`（UUID string）、`user_id`（公开数字 ID）、`client_request_id`（string，对应请求中的 `request_id`）、`amount`（十进制字符串）、`status="requested"`、`created_at`（时间字符串）。重复申请返回原申请，不再冻结。
 4. **后台端，后台 Token**：`GET /v1/admin/point-withdrawals?status=requested` 查询待审核申请。`status` 为可选 string，可取 `requested/approved/rejected`，不传返回全部状态；当前固定最多 50 条，未实现用户筛选和翻页，不能依赖 `user`、`limit`、`offset` 参数生效。
 5. **后台端**：使用申请的 `id` 调用 `POST /v1/admin/point-withdrawals/{withdrawalID}/review`。路径参数为申请 UUID string，不是用户 ID。请求体二选一：
 
@@ -508,7 +640,7 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
    | `currency` | string | 是 | 使用所选资产的 `token_code`，例如 `USDT`。 |
    | `destination_address` | string | 是 | 收款地址，必须符合所选链的校验规则。 |
    | `destination_memo` | string | 按链要求 | 不需要时省略；需要备注/标签的网络按要求提供。 |
-   | `amount_minor` | number（整数，对应 Go int64） | 是 | 平台最小单位，不是网络最小单位。USDT 平台精度 6，提现 100 USDT 传 `100000000`。不能传展示字符串 `amount`。 |
+   | `amount` | number或string | 是 | 实际币种金额，下分100传100，下分1.5传1.5；后端转换精度。 |
    | `account_id` | string | 否 | 正常鉴权时省略，仅本地关闭鉴权时回退使用。 |
 
    正确请求体形状（链和地址必须替换为实际选择值）：
@@ -519,11 +651,11 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
      "chain_code": "所选链代码",
      "currency": "USDT",
      "destination_address": "所选链的有效收款地址",
-     "amount_minor": 100000000
+     "amount": 100
    }
    ```
 
-3. **服务端**：检查余额、虚拟账号限制、链/资产支持、地址、最低/单笔/每日限额及精度；冻结金额后返回 201。响应主键为 `withdrawal_id`（UUID string），不是积分申请的 `id`；并包含 `client_request_id`、收款地址、链、币种、整数 `amount_minor`、string `status` 和时间 `created_at`。
+3. **服务端**：检查余额、虚拟账号限制、链/资产支持、地址、最低/单笔/每日限额及精度；冻结金额后返回 201。响应主键为 `withdrawal_id`（UUID string），不是积分申请的 `id`；并包含 `client_request_id`、收款地址、链、币种、实际金额 `amount`、string `status` 和时间 `created_at`。
 4. **后台端，后台 Token**：`GET /v1/admin/withdrawals?status=requested` 查询待审核列表；`GET /v1/withdrawals/{withdrawalID}` 查详情。后台列表只实现可选 string `status` 过滤，固定最多 50 条，不支持用户筛选或翻页。当前链上提现 DTO 不返回所属用户 ID，不能假设列表有 `user_id`；需要按用户辅助核对时，可用 `GET /v1/admin/refunds-clearances?user=100009&status=requested&limit=50&offset=0`，筛出 `record_type="withdrawal"`，其 `id` 对应提现 UUID。
 5. **后台通过**：`POST /v1/admin/withdrawals/{withdrawalID}/approve`，不需要请求体，200 返回提现对象，`status="approved"`。金额此时仍冻结，后续由 Worker 出金。
 6. **后台驳回**：`POST /v1/admin/withdrawals/{withdrawalID}/reject`，建议传 `{"reason":"收款信息需要核实"}`；`reason` 为可选 string。200 返回提现对象，`status="cancelled"`，金额解冻退回原钱包。两种审批均只允许 `requested` 状态；重复审批返回 409。
@@ -533,7 +665,7 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 
 ### 上下分共同约定与错误处理
 
-- 参数类型以本节实际 Go 接口为准：上分金额是展示字符串；两种下分申请金额仍是整数 `amount_minor`，不能混用。前端构造下分整数时使用十进制定点处理，不用浮点乘法再取整；超过 JavaScript 安全整数范围时不能直接经 `Number` 序列化，也不能擅自把接口整数改成字符串。
+- 金额类型统一遵循[实际金额接口协议](./amount-contract.md)，上分、下分、投注、奖励均提交实际金额，不在前端转换精度。
 - 通常 400 表示参数、金额/精度或资产不支持；401 表示登录无效；403 表示权限不足或虚拟账号禁止下分；404 表示用户/钱包/申请不存在；409 表示余额不足、每日限额或状态冲突；500/503 表示服务异常/暂不可用。以实际接口响应为准，可直接展示中文 `error`。
 - 写请求超时不是失败的证明。上分/申请复用原幂等标识并核对结果；审核先重新查询状态，已经通过或驳回就停止重试。前端提交期间禁用按钮，防止连续点击生成多笔不同标识的操作。
 - 冻结、扣款、解冻、写流水由后端事务完成，前端不再调用其他接口手动“补扣/补回”。钱包通知用于触发查询刷新，不用推送金额自行累加余额。
@@ -632,7 +764,7 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 
 ## 聊天室红包
 
-- `POST /v1/chat/rooms/{roomID}/red-packets`：使用 `USDT` 或 `POINTS` 创建红包。请求包含 `client_request_id`、`currency`、`total_minor`、`packet_count` 和可选 `greeting`。
+- `POST /v1/chat/rooms/{roomID}/red-packets`：使用 `USDT` 或 `POINTS` 创建红包。请求包含 `client_request_id`、`currency`、`total`、`packet_count` 和可选 `greeting`。
 - `GET /v1/red-packets/{packetID}`：房间成员查询红包剩余份数和状态。
 - `POST /v1/red-packets/{packetID}/claim`：领取红包；同一用户重复请求返回第一次领取记录，不会重复入账。
 

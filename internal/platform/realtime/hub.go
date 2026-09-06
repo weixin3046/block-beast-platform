@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,17 +12,19 @@ import (
 
 	"github.com/block-beast/platform/internal/application/chat"
 	"github.com/block-beast/platform/internal/domain/identity"
+	"github.com/block-beast/platform/internal/platform/amountjson"
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats.go"
 )
 
 type Hub struct {
-	secret  []byte
-	origins []string
-	mu      sync.RWMutex
-	clients map[string]map[*client]struct{}
-	nats    *nats.Conn
-	chat    ChatSender
+	currencies amountjson.Catalog
+	secret     []byte
+	origins    []string
+	mu         sync.RWMutex
+	clients    map[string]map[*client]struct{}
+	nats       *nats.Conn
+	chat       ChatSender
 }
 
 type ChatSender interface {
@@ -36,6 +39,8 @@ func (hub *Hub) WithChatSender(sender ChatSender) *Hub {
 	hub.chat = sender
 	return hub
 }
+
+func (hub *Hub) WithCurrencies(catalog amountjson.Catalog) *Hub { hub.currencies = catalog; return hub }
 
 func (hub *Hub) ConnectNATS(url string) error {
 	connection, err := nats.Connect(url)
@@ -118,7 +123,20 @@ func accessToken(request *http.Request) (token, protocol string) {
 
 func (hub *Hub) publish(message *nats.Msg) {
 	userIDs, broadcast := eventTargets(message.Subject, message.Data)
-	envelope := encodeMessage(serverMessage{Type: "event", Subject: message.Subject, Payload: publicEventPayload(message.Subject, message.Data)})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	obj, err := amountjson.ReadJSON(bytes.NewReader(publicEventPayload(message.Subject, message.Data)))
+	if err != nil {
+		return
+	}
+	if err = amountjson.New(ctx, hub.currencies).Convert(obj, "", false, false); err != nil {
+		return
+	}
+	payload, err := json.Marshal(obj)
+	if err != nil {
+		return
+	}
+	envelope := encodeMessage(serverMessage{Type: "event", Subject: message.Subject, Payload: payload})
 	if broadcast {
 		hub.publishTopics(eventTopics(message.Subject, message.Data), envelope)
 		return
@@ -130,7 +148,7 @@ func (hub *Hub) publish(message *nats.Msg) {
 
 func publicEventPayload(subject string, data []byte) []byte {
 	payload := append([]byte(nil), data...)
-	if !strings.HasPrefix(subject, "chat.") {
+	if !strings.HasPrefix(subject, "chat.") && subject != "game.round.settled" {
 		return payload
 	}
 	var fields map[string]json.RawMessage
@@ -138,6 +156,11 @@ func publicEventPayload(subject string, data []byte) []byte {
 		return payload
 	}
 	delete(fields, "user_ids")
+	// This historical aggregate mixed currencies and has no valid display unit.
+	// Clients obtain per-currency payouts from bet records instead.
+	if subject == "game.round.settled" {
+		delete(fields, "payout_minor")
+	}
 	publicPayload, err := json.Marshal(fields)
 	if err != nil {
 		return payload

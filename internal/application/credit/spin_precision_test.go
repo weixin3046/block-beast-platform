@@ -18,7 +18,19 @@ func TestPrizeWeightBounds(t *testing.T) {
 	}
 	p[0].Weight = 1
 	p[1].Weight = 0
+	for range 100 {
+		got, ok := choosePrize(p)
+		if !ok || got.ID != "1" {
+			t.Fatal("zero weight prize must not prevent or win a draw", got, ok)
+		}
+	}
+	p[0].Weight = 0
 	if _, ok := choosePrize(p); ok {
-		t.Fatal("zero weight accepted")
+		t.Fatal("all-zero pool accepted")
+	}
+	p[0].Weight = 1
+	p[1].Weight = -1
+	if _, ok := choosePrize(p); ok {
+		t.Fatal("negative weight accepted")
 	}
 }

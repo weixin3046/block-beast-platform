@@ -20,7 +20,7 @@ type stubRedPacketService struct {
 }
 
 func (stub stubRedPacketService) Create(context.Context, redpacket.CreateInput) (redpacket.Packet, bool, error) {
-	return redpacket.Packet{ID: "packet-1"}, stub.created, stub.err
+	return redpacket.Packet{Currency: "USDT", ID: "packet-1"}, stub.created, stub.err
 }
 
 func (stub stubRedPacketService) Claim(context.Context, string, string) (redpacket.Claim, bool, error) {
@@ -43,14 +43,14 @@ func TestCreateRedPacketMapsTransactionErrors(t *testing.T) {
 		{stub: stubRedPacketService{err: redpacket.ErrInsufficientBalance}, want: http.StatusConflict},
 	}
 	for _, testCase := range tests {
-		server := New(
+		server := newAmountTestServer(
 			config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)),
 			nil, readinessChecker{}, nil, nil, nil, nil,
 			WithAuth(NewAuthenticator(testSecret)), WithRedPackets(testCase.stub),
 		)
 		request := httptest.NewRequest(
 			http.MethodPost, "/v1/chat/rooms/room-1/red-packets",
-			strings.NewReader(`{"client_request_id":"r1","currency":"USDT","total_minor":10,"packet_count":2}`),
+			strings.NewReader(`{"client_request_id":"r1","currency":"USDT","total":0.00001,"packet_count":2}`),
 		)
 		request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "user-1", []string{identity.RolePlayer}))
 		response := httptest.NewRecorder()

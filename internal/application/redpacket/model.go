@@ -6,6 +6,7 @@ import (
 )
 
 var ErrInvalidPacket = errors.New("red packet amount, count, currency, or request ID is invalid")
+var ErrVirtualAccount = errors.New("虚拟账户不能发送或领取红包")
 var ErrPacketNotFound = errors.New("red packet not found")
 var ErrPacketUnavailable = errors.New("red packet is exhausted, refunded, or expired")
 var ErrAlreadyClaimed = errors.New("red packet already claimed")

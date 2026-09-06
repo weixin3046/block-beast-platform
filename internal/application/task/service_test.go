@@ -70,15 +70,15 @@ func TestClaimBetTaskIsManualSingleUseAndExpiresAtChinaMidnight(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = pool.Exec(ctx, `
-		INSERT INTO user_daily_bet_progress(user_id,bet_date,accumulation_currency,total_stake_minor)
-		VALUES($1,'2026-08-31',$2,100)`, userID, accumulationCurrency)
+		INSERT INTO task_progress(user_id,period_date,config_id,progress_minor)
+		VALUES($1,'2026-08-31',$2,100)`, userID, configID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM ledger_entries WHERE wallet_id IN (SELECT id FROM wallets WHERE user_id=$1)`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM bet_task_reward_records WHERE user_id=$1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM user_daily_bet_progress WHERE user_id=$1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM task_reward_claims WHERE user_id=$1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM task_progress WHERE user_id=$1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM bet_task_configs WHERE id=$1`, configID)
 		_, _ = pool.Exec(ctx, `DELETE FROM wallets WHERE user_id=$1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, userID)
@@ -100,9 +100,9 @@ func TestClaimBetTaskIsManualSingleUseAndExpiresAtChinaMidnight(t *testing.T) {
 	if _, err = pool.Exec(ctx, `UPDATE bet_task_configs SET reward_minor=99 WHERE id=$1`, configID); err != nil {
 		t.Fatal(err)
 	}
-	var snapshotReward, snapshotVersion int64
-	if err = pool.QueryRow(ctx, `SELECT (config_snapshot->>'reward_minor')::bigint,(config_snapshot->>'version')::bigint FROM bet_task_reward_records WHERE user_id=$1 AND config_id=$2`, userID, configID).Scan(&snapshotReward, &snapshotVersion); err != nil || snapshotReward != 7 || snapshotVersion != 1 {
-		t.Fatalf("snapshot %d version %d %v", snapshotReward, snapshotVersion, err)
+	var snapshotReward, snapshotThreshold int64
+	if err = pool.QueryRow(ctx, `SELECT (config_snapshot->>'reward_minor')::bigint,(config_snapshot->>'threshold_minor')::bigint FROM task_reward_claims WHERE user_id=$1 AND config_id=$2`, userID, configID).Scan(&snapshotReward, &snapshotThreshold); err != nil || snapshotReward != 7 || snapshotThreshold != 100 {
+		t.Fatalf("snapshot reward %d threshold %d %v", snapshotReward, snapshotThreshold, err)
 	}
 
 	service.now = func() time.Time { return time.Date(2026, time.September, 1, 0, 0, 0, 0, chinaTimeZone) }

@@ -26,6 +26,7 @@ import (
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/application/task"       // 任务/签到应用服务
 	"github.com/block-beast/platform/internal/application/uploads"
+	"github.com/block-beast/platform/internal/application/virtualbot"
 	"github.com/block-beast/platform/internal/config"           // 配置加载
 	"github.com/block-beast/platform/internal/domain/game"      // 游戏轮次仓储
 	"github.com/block-beast/platform/internal/domain/identity"  // 身份认证仓储
@@ -138,6 +139,7 @@ func main() {
 	operationsService := operations.NewService(pool)
 	options = append(options, httpapi.WithPhrases(operationsService), httpapi.WithUserControls(operationsService))
 	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithAnalytics(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService), httpapi.WithHashConfig(operationsService), httpapi.WithPublicUserResolver(identityRepository))
+	options = append(options, httpapi.WithRobotPlans(virtualbot.NewService(pool, bettingService)))
 	if cfg.PQPAAPISecret == "" {
 		logger.Warn("PQPA_API_SECRET is not set; chain deposit webhook is disabled")
 	} else {

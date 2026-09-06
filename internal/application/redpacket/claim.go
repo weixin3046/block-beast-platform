@@ -17,6 +17,9 @@ func (service *Service) Claim(ctx context.Context, packetID, userID string) (Cla
 		return Claim{}, false, err
 	}
 	defer tx.Rollback(ctx)
+	if err := requireRealAccount(ctx, tx, userID); err != nil {
+		return Claim{}, false, err
+	}
 	existing, err := findClaim(ctx, tx, packetID, userID)
 	if err == nil {
 		return existing, false, tx.Commit(ctx)

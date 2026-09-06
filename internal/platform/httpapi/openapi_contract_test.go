@@ -24,8 +24,8 @@ func TestEveryHTTPRouteIsDocumentedInOpenAPI(t *testing.T) {
 	scanner := bufio.NewScanner(openAPI)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "  /") && strings.HasSuffix(line, ":") {
-			currentPath = normalizeContractPath(strings.TrimSuffix(strings.TrimSpace(line), ":"))
+		if (strings.HasPrefix(line, "  /") || strings.HasPrefix(line, "  '/") || strings.HasPrefix(line, "  \"/")) && strings.HasSuffix(line, ":") {
+			currentPath = normalizeContractPath(strings.Trim(strings.TrimSuffix(strings.TrimSpace(line), ":"), "'\""))
 			continue
 		}
 		if currentPath != "" && strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "      ") {

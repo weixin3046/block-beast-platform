@@ -14,7 +14,7 @@ import (
 )
 
 type ValidBetTaskHook interface {
-	OnBetSettled(ctx context.Context, tx pgx.Tx, userID, currency string, stakeMinor int64, settledAt time.Time) error
+	OnBetSettled(ctx context.Context, tx pgx.Tx, userID, currency string, stakeMinor int64, placedAt time.Time) error
 }
 
 type Service struct {
@@ -54,13 +54,14 @@ func (service *Service) CancelRound(ctx context.Context, roundID string) (int, e
 	}
 
 	type refundableBet struct {
-		betID    string
-		walletID string
-		stake    int64
-		currency string
+		simulated bool
+		betID     string
+		walletID  string
+		stake     int64
+		currency  string
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT bets.id, bets.wallet_id, bets.stake_minor, wallets.currency
+		SELECT bets.id, bets.wallet_id, bets.stake_minor, wallets.currency,bets.is_simulated
 		FROM bets
 		JOIN wallets ON wallets.id = bets.wallet_id
 		WHERE bets.round_id = $1 AND bets.status = 'accepted'
@@ -73,7 +74,7 @@ func (service *Service) CancelRound(ctx context.Context, roundID string) (int, e
 	bets := make([]refundableBet, 0)
 	for rows.Next() {
 		var bet refundableBet
-		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.stake, &bet.currency); err != nil {
+		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.stake, &bet.currency, &bet.simulated); err != nil {
 			return 0, err
 		}
 		bets = append(bets, bet)
@@ -87,6 +88,12 @@ func (service *Service) CancelRound(ctx context.Context, roundID string) (int, e
 		err := tx.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1 FOR UPDATE`, bet.walletID).Scan(&availableMinor)
 		if err != nil {
 			return 0, err
+		}
+		if bet.simulated {
+			if _, err = tx.Exec(ctx, `UPDATE bets SET status='refunded',settled_at=now(),balance_after_settlement_minor=$2 WHERE id=$1`, bet.betID, availableMinor); err != nil {
+				return 0, err
+			}
+			continue
 		}
 		availableMinor += bet.stake
 		_, err = tx.Exec(ctx, `UPDATE wallets SET available_minor = $2, version = version + 1, updated_at = now() WHERE id = $1`, bet.walletID, availableMinor)

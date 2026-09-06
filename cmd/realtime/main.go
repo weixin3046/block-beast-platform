@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/block-beast/platform/internal/application/chat"
+	"github.com/block-beast/platform/internal/application/currency"
 	"github.com/block-beast/platform/internal/config"
 	realtimeplatform "github.com/block-beast/platform/internal/platform/realtime"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,7 +35,7 @@ func main() {
 		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write([]byte("ok\n"))
 	})
-	hub := realtimeplatform.NewHub(cfg.AuthTokenSecret, cfg.RealtimeAllowedOrigins).WithChatSender(chat.NewService(pool))
+	hub := realtimeplatform.NewHub(cfg.AuthTokenSecret, cfg.RealtimeAllowedOrigins).WithChatSender(chat.NewService(pool)).WithCurrencies(currency.NewService(pool))
 	if err := hub.ConnectNATS(cfg.NATSURL); err != nil {
 		logger.Error("realtime gateway failed to connect to NATS", "error", err)
 		return

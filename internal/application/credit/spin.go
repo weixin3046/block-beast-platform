@@ -19,6 +19,7 @@ const BizLuckySpinCost = "lucky_spin_cost"
 var ErrActivityUnavailable = errors.New("activity is unavailable")
 
 type SpinPrize struct {
+	Disabled    bool   `json:"disabled"`
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Currency    string `json:"currency"`
@@ -70,6 +71,28 @@ func (service *Service) LuckySpin(ctx context.Context, userID, spinID, requestID
 	if err != nil {
 		return SpinResult{}, ErrActivityUnavailable
 	}
+	// Use the same wallet ordering as task claims and round settlement.
+	// Otherwise A->B task rewards and B->A spins can deadlock.
+	rows, err := tx.Query(ctx, "SELECT id FROM wallets WHERE user_id=$1 ORDER BY id FOR UPDATE", userID)
+	if err != nil {
+		return SpinResult{}, err
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return SpinResult{}, err
+	}
+	// A concurrent identical draw may have committed while we waited.
+	if existing, e := findSpin(ctx, tx, userID, requestID); e == nil {
+		if e = formatSpin(ctx, tx, &existing); e != nil {
+			return SpinResult{}, e
+		}
+		return existing, tx.Commit(ctx)
+	} else if !errors.Is(e, pgx.ErrNoRows) {
+		return SpinResult{}, e
+	}
 	prize, ok := choosePrize(config.Prizes)
 	if !ok {
 		return SpinResult{}, ErrActivityUnavailable
@@ -119,8 +142,11 @@ func (service *Service) LuckySpin(ctx context.Context, userID, spinID, requestID
 func choosePrize(prizes []SpinPrize) (SpinPrize, bool) {
 	var total int64
 	for _, prize := range prizes {
+		if prize.Disabled {
+			continue
+		}
 		if prize.ID == "" || prize.Label == "" || prize.AmountMinor <= 0 ||
-			prize.Weight <= 0 || total > math.MaxInt64-prize.Weight || !validCurrency(prize.Currency) {
+			prize.Weight < 0 || total > math.MaxInt64-prize.Weight || !validCurrency(prize.Currency) {
 			return SpinPrize{}, false
 		}
 		total += prize.Weight
@@ -134,6 +160,9 @@ func choosePrize(prizes []SpinPrize) (SpinPrize, bool) {
 	}
 	cursor := value.Int64()
 	for _, prize := range prizes {
+		if prize.Disabled {
+			continue
+		}
 		if cursor < prize.Weight {
 			return prize, true
 		}

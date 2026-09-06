@@ -104,7 +104,7 @@ func (service *Service) refundOne(ctx context.Context, packetID string) (bool, e
 		return false, err
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"red_packet_id": packet.ID, "refund_minor": packet.RemainingMinor,
+		"red_packet_id": packet.ID, "refund_minor": packet.RemainingMinor, "currency": packet.Currency,
 		"room_id": packet.RoomID, "broadcast": broadcast, "user_ids": userIDs,
 	})
 	if _, err := tx.Exec(ctx, `

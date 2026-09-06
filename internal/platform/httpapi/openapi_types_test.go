@@ -62,8 +62,15 @@ func contractProperty(t *testing.T, schema, field string) string {
 }
 func checkContractType(t *testing.T, schema, field, expected string) {
 	t.Helper()
+	if strings.HasSuffix(field, "_minor") {
+		field = strings.TrimSuffix(field, "_minor")
+		expected = "string"
+	}
+	if field == "cost_balance" || field == "reward_balance" {
+		expected = "string"
+	}
 	p := contractProperty(t, schema, field)
-	match := regexp.MustCompile(`\btype:\s*(\[[^\]]+\]|[A-Za-z]+)`).FindStringSubmatch(p)
+	match := regexp.MustCompile(`(?m)^          type:\s*(\[[^\]]+\]|(?:- (?:string|number)\s*)+|[A-Za-z]+)`).FindStringSubmatch(p)
 	if len(match) < 2 || !regexp.MustCompile(`\b`+expected+`\b`).MatchString(match[1]) {
 		t.Errorf("%s.%s: Go expects %s, schema=%s", schema, field, expected, p)
 	}
@@ -234,11 +241,21 @@ func TestPublicUserPathParametersAreNotUUIDs(t *testing.T) {
 func TestOpenAPIAmountPatternsAcceptDecimalStrings(t *testing.T) {
 	for _, name := range []string{"AdminCreditRequest", "WalletAdjustmentRequest"} {
 		property := contractProperty(t, name, "amount")
-		match := regexp.MustCompile(`pattern: '([^']+)'`).FindStringSubmatch(property)
+		match := regexp.MustCompile(`pattern: (.+)`).FindStringSubmatch(property)
 		if len(match) != 2 {
 			t.Fatalf("missing amount pattern for %s", name)
 		}
-		pattern, err := regexp.Compile(match[1])
+		patternText := strings.TrimSpace(match[1])
+		if strings.HasPrefix(patternText, "\"") {
+			var err error
+			patternText, err = strconv.Unquote(patternText)
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			patternText = strings.Trim(patternText, "'")
+		}
+		pattern, err := regexp.Compile(patternText)
 		if err != nil {
 			t.Fatal(err)
 		}

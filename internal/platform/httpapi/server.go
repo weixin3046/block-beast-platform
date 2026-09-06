@@ -21,6 +21,7 @@ import (
 )
 
 type Server struct {
+	robotPlans         RobotPlanService
 	currencies         CurrencyService
 	config             config.Config
 	logger             *slog.Logger
@@ -218,6 +219,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/red-packets/{packetID}/claim", server.protect(server.claimRedPacket))
 	mux.HandleFunc("POST /v1/agents/bind", server.protect(server.bindAgent))
 	mux.HandleFunc("GET /v1/agents/me", server.protect(server.agentRelation))
+	mux.HandleFunc("GET /v1/admin/users/{userID}/agent-relation", server.protectRoles(server.adminAgentRelation, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/agents/me/commissions", server.protect(server.commissions))
 	mux.HandleFunc("GET /v1/agents/me/team-summary", server.protect(server.teamSummary))
 	mux.HandleFunc("PUT /v1/admin/agents/{agentID}/commission-rate", server.protectRoles(server.setAgentCommissionRate, identity.RoleAdmin, identity.RoleOperator))
@@ -278,14 +280,24 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/users/{userID}/login-ips", server.protectRoles(server.adminUserLoginIPs, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/login-ips/{ip}/users", server.protectRoles(server.adminLoginIPUsers, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/virtual-accounts", server.protectRoles(server.createVirtualAccount, identity.RoleAdmin, identity.RoleOperator))
-	mux.HandleFunc("PUT /v1/admin/virtual-accounts/{userID}/automation", server.protectRoles(server.setVirtualAutomation, identity.RoleAdmin, identity.RoleOperator))
+	for _, route := range []string{"GET /v1/admin/robot-plans", "POST /v1/admin/robot-plans", "GET /v1/admin/robot-plans/{planID}", "PUT /v1/admin/robot-plans/{planID}", "DELETE /v1/admin/robot-plans/{planID}", "PUT /v1/admin/robot-plans/{planID}/enabled"} {
+		mux.HandleFunc(route, server.protectRoles(server.handleRobotPlans, identity.RoleAdmin, identity.RoleOperator))
+	}
+	mux.HandleFunc("PUT /v1/admin/virtual-accounts/{userID}/automation", server.protectRoles(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusGone, map[string]string{"error": "旧挂机接口已停用，请使用机器人计划接口"})
+	}, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/configs", server.protectRoles(server.adminConfigs, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/leaderboard-reward-rules", server.protectRoles(server.leaderboardRules, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/leaderboard-reward-rules", server.protectRoles(server.secondPassword(server.replaceLeaderboardRules), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/leaderboard-rewards", server.protectRoles(server.leaderboardRewards, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/configs/{key}", server.protectRoles(server.secondPassword(server.putConfig), identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/tasks/bet-configs", server.protectRoles(server.adminBetTaskConfigs, identity.RoleAdmin))
-	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs", server.protectRoles(server.secondPassword(server.replaceBetTaskConfigs), identity.RoleAdmin))
+	mux.HandleFunc("POST /v1/admin/tasks/bet-configs", server.protectRoles(server.secondPassword(server.saveTaskConfig), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs/{taskID}", server.protectRoles(server.secondPassword(server.saveTaskConfig), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs", server.protectRoles(server.secondPassword(server.retiredActivityBatch), identity.RoleAdmin))
+	mux.HandleFunc("DELETE /v1/admin/tasks/bet-configs/{taskID}", server.protectRoles(server.secondPassword(server.taskState), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs/{taskID}/enabled", server.protectRoles(server.secondPassword(server.taskState), identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/admin/tasks/progress", server.protectRoles(server.taskProgress, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/game-types", server.protectRoles(server.adminGameTypes, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/hash/config", server.protectRoles(server.adminHashConfig, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/hash/config", server.protectRoles(server.secondPassword(server.updateHashConfig), identity.RoleAdmin, identity.RoleOperator))
@@ -301,11 +313,17 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/activities/spins", server.protect(server.spinConfigs))
 	mux.HandleFunc("POST /v1/activities/spins/{spinID}/play", server.protect(server.playConfiguredSpin))
 	mux.HandleFunc("GET /v1/admin/spins", server.protectRoles(server.adminSpinConfigs, identity.RoleAdmin))
-	mux.HandleFunc("PUT /v1/admin/spins", server.protectRoles(server.secondPassword(server.replaceSpinConfigs), identity.RoleAdmin))
+	mux.HandleFunc("POST /v1/admin/spins", server.protectRoles(server.secondPassword(server.saveSpinConfig), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/spins/{spinID}", server.protectRoles(server.secondPassword(server.saveSpinConfig), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/spins", server.protectRoles(server.secondPassword(server.retiredActivityBatch), identity.RoleAdmin))
+	mux.HandleFunc("DELETE /v1/admin/spins/{spinID}", server.protectRoles(server.secondPassword(server.spinState), identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/spins/{spinID}/enabled", server.protectRoles(server.secondPassword(server.spinState), identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/admin/spin-records", server.protectRoles(server.spinRecords, identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/activities/spin-records", server.protect(server.spinRecords))
 	mux.HandleFunc("GET /v1/wallets/{accountID}/all", server.protect(server.allBalances))
 	mux.HandleFunc("GET /v1/points/{accountID}/ledger", server.protect(server.pointsLedger))
 	mux.HandleFunc("GET /v1/stamina/{accountID}/ledger", server.protect(server.staminaLedger))
-	return server.withCORS(server.withRequestLog(chineseRoutingErrors(mux)))
+	return server.withCORS(server.withRequestLog(server.withAmountResponses(chineseRoutingErrors(mux))))
 }
 
 func (server *Server) withCORS(next http.Handler) http.Handler {
@@ -344,6 +362,7 @@ func (server *Server) withCORS(next http.Handler) http.Handler {
 
 // protect 在未配置鉴权时放行（保持本地开发兼容），否则要求有效令牌。
 func (server *Server) protect(handler http.HandlerFunc) http.HandlerFunc {
+	handler = server.requestAmounts(handler)
 	if server.auth == nil {
 		return handler
 	}
@@ -351,6 +370,7 @@ func (server *Server) protect(handler http.HandlerFunc) http.HandlerFunc {
 }
 
 func (server *Server) protectRoles(handler http.HandlerFunc, roles ...string) http.HandlerFunc {
+	handler = server.requestAmounts(handler)
 	if server.auth == nil {
 		return handler
 	}
@@ -959,6 +979,17 @@ func (server *Server) withRequestLog(next http.Handler) http.Handler {
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
+	if status < 400 {
+		if converter, ok := writer.(interface{ publicAmountJSON(any) (any, error) }); ok {
+			converted, err := converter.publicAmountJSON(value)
+			if err != nil {
+				status = 500
+				value = map[string]string{"error": "金额转换失败，请检查币种配置"}
+			} else {
+				value = converted
+			}
+		}
+	}
 	if status >= 400 {
 		value = chineseErrorResponse(value)
 	}
