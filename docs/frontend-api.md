@@ -63,7 +63,51 @@ GET /v1/tasks/bet-progress 返回 title、period_type、sort_order、max_complet
 ```
 
 未绑定上级返回 `parent_user_id: null`；用户不存在返回 404，ID 格式错误返回 400；未登录 401、普通玩家 403。此接口不返回整棵代理树或下级列表。玩家端 `GET /v1/agents/me` 仍只查询本人。
+`PUT /v1/admin/users/{userID}/agent-level` 必须显式传入 `agent_level`：`0` 恢复普通用户，`1–6` 设置代理等级；缺失、null 或超出范围返回 400。恢复普通用户后邀请码不可用于新注册，新投注返水按非代理处理；保留上下级关系、已有佣金比例和历史投注快照，历史订单沿用原结算规则。
+
 设置代理等级与绑定上级是两件事：设置 `agent-level` 不会自动创建上下级关系。
+
+## 级差返水配置（0060–0061，本地新版结算已接入）
+
+后台 admin/operator 调用 `GET /v1/admin/rebate-configs?game_type=hash_9&game_room_id=94000000-0000-4000-8000-000000000001&currency=POINTS`，三个筛选参数均可省略。响应为配置数组，含 id、game_type、game_room_id、game_room_name、currency、enabled、version、levels、updated_at。初始化144组，即六房间×六区块×四投注币种。
+
+编辑使用 `PUT /v1/admin/rebate-configs/{configID}`，传 `version`（GET返回整数）、`enabled`（布尔）、`second_password`（后台二级密码）和完整 `levels` 数组。每项为 `{"level":1,"rate_per_mille":14}`，必须包含不重复的1–6级，比例随等级非递减且均为0–1000整数。14表示14‰即1.4%，前端不要转换金额精度。修改成功返回新版配置；版本冲突409需重新获取，不得盲目覆盖。
+
+新版API接受哈希投注时保存返水配置和代理链快照，之后修改配置、代理等级不影响已接受投注。上下路/竞猜以本金为基数，躲避以正净赢为基数；每位上级的级差金额按币种最小单位向下取整。模拟、取消、退款单不发放。配置停用或缺失不回退旧佣金；历史版本1订单仍走旧机制，新版本2订单不会叠加旧佣金。
+
+本地代码已接入实际结算，但不代表线上已生效：必须停旧API/Worker，依次执行0060、0061并更新同版本进程。已入账返水沿用 `business_type=commission`，前端显示“佣金/返水”，不要再重复计入派奖或赠分。旧 `/v1/admin/agents/{agentID}/commission-rate` 万分比配置只影响版本1历史单；新单应使用上述级差配置。
+
+### 返水查询闭环
+
+后台 `GET /v1/admin/rebate-records`；本人 `GET /v1/agents/me/rebates`。支持 `source_user_id`、`beneficiary_user_id`（公开数字ID）、`currency`、`status=paid/reversed`、`game_type`、`game_room_id`、`from/to`（RFC3339，起始包含、结束不包含）、`limit`（1–100，默认50）、`offset`。本人接口强制收款人为登录用户，额外传别人ID只会得到空列表，不能代查。
+
+响应 `{items,total,summary}`：items含来源玩家、收款代理、投注ID、期号、玩法、房间、币种、返水基数base、快照等级agent_level、千分比级差differential_per_mille、实际金额amount、状态和时间；base/amount为实际数量字符串。summary按币种返回全筛选范围（不受分页影响）的source_bets去重投注数、paid_count/reversed_count明细数和paid_amount/reversed_amount金额。排除模拟投注、虚拟来源和虚拟收款用户。只展示新版级差返水，历史直属佣金仍查原佣金接口；不得把两份数据重复累计。
+
+### 排行榜本人排名
+
+`GET /v1/leaderboards?period=today&currency=POINTS&limit=50`新增 `self`，字段结构与items单条一致。即使本人不在前50名，也返回本人完整排名；未上榜返回null。today/yesterday/this_week/last_week均使用中国时区和对应币种；items和self使用同一数据库快照。身份取登录令牌，不支持传入self_user_id冒充他人。普通玩家看不到其他玩家余额，self可展示本人的余额；金额仅返回实际数量字符串。
+
+### 登录白名单（0063，风险检测未启用）
+
+### 后台创建普通玩家与绑定上级
+
+1. 登录后台取得令牌，准备后台全局二级密码。
+2. 需要头像时按上传授权→上传文件→确认上传取得storage_key；不要直接传任意外部图片地址。
+3. `POST /v1/admin/users`：`{"login_name":"player008","password":"至少12字符的登录密码","display_name":"昵称","avatar_url":"已确认的storage_key","second_password":"后台二级密码"}`。头像、昵称可省略；只创建真实player和默认零钱包，不接受roles、is_virtual、初始余额。重复登录名409，不会覆盖旧账号。返回后端数字user_id，玩家之后用普通登录接口登录。
+4. `PUT /v1/admin/users/{userID}/agent-relation`：`{"parent_user_id":100006,"second_password":"后台二级密码"}`。ID为数字，不是UUID；仅无上级真实用户可绑定真实上级，已有上级409，自身/成环/虚拟关系400。绑定同时更新已有后代路径、记录审计。查询沿用 `GET /v1/admin/users/{userID}/agent-relation`；等级和推荐关系是两项设置，绑定不会自动升级代理。
+5. 上分仍独立调用wallet-adjustments并使用一级密码，不在创建接口内赠送真钱。
+
+### 后台单笔作废（0062）
+
+`POST /v1/admin/bets/{betID}/void`，JSON：`{"request_id":"本次操作唯一编号","reason":"操作原因","second_password":"后台二级密码"}`。仅admin/operator；只作废accepted订单，封盘后可操作，结算已完成则409，不能更改历史输赢。请求编号由调用方为一次操作生成，重试必须原样复用，同一操作人重用编号但改变投注/原因返回409。
+
+返回operation_id、bet_id、user_id、operator_user_id、game_type、round_sequence、currency、stake、refund、is_simulated、reason、status=voided、duplicate、created_at。stake/refund为实际数量字符串，真实单退本金一次，模拟单refund为零且不动钱包。投注查询新增voided状态筛选；前端显示“后台作废”。`GET /v1/admin/bet-voids?limit=50&offset=0`返回items/total。统一退款明细也包含record_type=bet_void，资金账本business_type=bet_void、entry_type=bet_void_refund显示“后台作废退款”，不是充值/赠分/清退。作废不累计任务、排行榜或返水；实时余额更新仍通过wallet.ledger.committed。
+
+### 白名单管理说明
+
+目前按确认不接入第三方IP/VPN/设备风险检测。`GET /v1/admin/login-whitelist`明确返回 `risk_check_enabled:false`、`whitelist_effective:false`，管理端应显示“未启用”，不能显示“已通过VPN检测”。白名单配置只保存预备规则，不改变现有登录判定；密码、失败锁定、账号禁用和前后台角色隔离始终生效。
+
+admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{"ip":"203.0.113.77","remark":"办公网络","second_password":"后台二级密码"}`，或使用数字user_id替代ip，两者只能选一个。IP接受单个IPv4/IPv6，不接受CIDR，IPv4映射地址自动归一化；备注最多200字，ID由后端生成，同目标保存更新备注。删除 `DELETE /v1/admin/login-whitelist/{entryID}`，JSON请求体传second_password；重复删除返回204。所有写入和审计同事务，密码不写审计。
 
 ## 后台创建虚拟账号与挂机接入流程
 
@@ -257,6 +301,27 @@ from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下�
 | `USDT_STAMINA` | USDT 体力 | USDT 投注任务奖励，用于 USDT 转盘 |
 | `JADE_STAMINA` | 玉石体力 | 玉石投注任务奖励，用于玉石转盘 |
 | `ORIGIN_STONE_STAMINA` | 源石体力 | 源石投注任务奖励，用于源石转盘 |
+
+## 金额响应格式与登录 IP 查询修复
+
+HTTP和Socket金额响应统一去掉小数末尾多余的0，仍返回字符串：`available:"2223.000000"` 改为 `available:"2223"`，`"1.500"` 改为 `"1.5"`，`"0.000000"` 改为 `"0"`。不会丢弃有效小数，数据库精度与请求精度限制不变，赔率、昵称、ID及投注selection不受此格式化影响。本文旧示例中的补零金额按本规则展示。
+
+`GET /v1/admin/users/{userID}/login-ips` 返回纯IPv4/IPv6地址，不带 `/32` 或 `/128`。每个IP下的users列出同地址登录过的账号；查询同IP用户时复用纯地址。未登录过返回空数组。本次修复不需要数据库迁移。
+
+## 哈希投注合单（0064）
+
+同一玩家、同一期、同币种、同赔率房间、同玩法和同选项的 `accepted` 投注，在下单事务中合为一张订单。例如连续三次提交 `stake:10`、不同 `client_request_id`，返回同一个 `bet_id`，`stake` 依次为 `"10.000"`、`"20.000"`、`"30.000"`（宝石），`placement_count` 依次为 1、2、3。不同选项（例如单和小）或不同币种不合并，仍受现有同一期不能跨赔率房间规则限制。
+
+- 每次请求的 `stake` 都是本次追加的实际金额，不是希望订单达到的总额；前端不转换精度。累计限额按玩家、期号、币种、房间、玩法、选项校验。
+- 本人列表、公开列表、后台投注列表及监控直接返回合单结果，无需前端再次合计。本人/公开/后台投注列表的 `placement_count` 是成功下单次数，`last_placed_at` 是最后追加时间。`placed_at`（后台为 `created_at`）保留首单时间，日任务和榜单日期仍按首单时间归属。
+- 与参考项目删除旧单并生成新 ID 的存储方式不同，本项目保留稳定 `bet_id`、首单赔率及返水快照，追加不追溯改价或改上级。当前配置仍决定是否允许新追加及累计限额。每次追加有独立请求记录和扣款流水，流水 `business_type=bet`、`business_id=bet_id` 不变。
+- `POST /v1/bets` 返回本次 `client_request_id` 对应订单的**当前合计状态**；详情/列表的 `client_request_id` 是首单请求编号。重试任何一次已成功请求不会再次追加，即使订单已取消或结算；同编号改变原请求参数返回 409。
+- `balance_after_bet` 是最后一次追加扣款后的余额快照，不是第一次的余额，也不是当前实时余额；逐次扣款余额查看资金流水。虚拟投注不扣余额、不产生投注资金流水。
+- 玩家取消、后台作废、整期退款均处理整张合单，退还全部已扣本金，不能只取消其中一次追加。取消后新的请求创建新单；旧请求重试仍返回旧单。
+- 结算对合计本金计算一次派奖并按最小单位向下取整，返水也按整单计算一次；任务、榜单与看板不得再次按 `placement_count` 乘本金。虚拟合单参与混合榜单但不进入真实资金统计及活动累计。
+- Socket `game.bet.placed` 的 `bet.stake` 是最新合计额；按 `bet_id` 更新已有行，按 `placement_count` 丢弃乱序旧版本。新增 `placement_id` 标识本次追加、`added_stake` 表示本次金额，可用于展示“刚投注10分”，不得用合计额重复累加。钱包仍以钱包事件或接口为准。
+
+仅0064上线后新建的哈希订单启用合单；历史订单及账本不改写，旧待结算单仍独立处理。部署需停止旧写入，迁移后启动同版本 API/Worker/Realtime，不能与旧写入程序混用。非哈希通用玩法不合单。
 
 ## 调用顺序
 

@@ -11,6 +11,8 @@ import (
 )
 
 type AdminBet struct {
+	PlacementCount   int64           `json:"placement_count"`
+	LastPlacedAt     time.Time       `json:"last_placed_at"`
 	Decimals         int             `json:"decimals"`
 	Stake            string          `json:"stake"`
 	Payout           string          `json:"payout"`
@@ -50,7 +52,7 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 			gt.code,gt.name,r.sequence,w.currency,COALESCE(b.game_room_id::text,''),
 			COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),b.selection,b.stake_minor,
 			COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-			b.payout_minor,b.status,b.created_at,b.settled_at,c.decimals
+			b.payout_minor,b.status,b.created_at,b.settled_at,c.decimals,b.placement_count,COALESCE(b.last_placed_at,b.created_at)
 		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
 		JOIN currencies c ON c.code=w.currency
 		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
@@ -69,7 +71,7 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 		if err := rows.Scan(&v.BetID, &v.UserID, &v.LoginName, &v.DisplayName, &v.IsVirtual,
 			&v.GameType, &v.GameName, &v.RoundSequence, &v.Currency, &v.GameRoomID, &v.GameRoomCode,
 			&v.GameRoomName, &v.PlayMode, &v.Selection, &v.StakeMinor, &v.PayoutMultiplier,
-			&v.PayoutDivisor, &v.PayoutMinor, &v.Status, &v.CreatedAt, &v.SettledAt, &v.Decimals); err != nil {
+			&v.PayoutDivisor, &v.PayoutMinor, &v.Status, &v.CreatedAt, &v.SettledAt, &v.Decimals, &v.PlacementCount, &v.LastPlacedAt); err != nil {
 			return nil, err
 		}
 		v.PayoutRate = payoutRate(v.PayoutMultiplier, v.PayoutDivisor)
@@ -174,6 +176,12 @@ func (s *Service) ListRefundClearances(ctx context.Context, user, status string,
 				le.balance_after_minor,'completed' status,le.business_id bet_id,le.occurred_at
 			FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id
 			WHERE le.entry_type IN ('refund','bet_refund')
+			UNION ALL
+			SELECT le.id::text,'bet_void',w.user_id,w.currency,le.amount_minor,
+				le.balance_after_minor,'completed',v.bet_id::text,le.occurred_at
+			FROM ledger_entries le JOIN wallets w ON w.id=le.wallet_id
+			JOIN admin_bet_voids v ON v.id::text=le.business_id
+			WHERE le.business_type='bet_void' AND le.entry_type='bet_void_refund'
 			UNION ALL
 			SELECT le.id::text,'admin_debit',w.user_id,w.currency,-le.amount_minor,
 				le.balance_after_minor,'completed',''::text,le.occurred_at

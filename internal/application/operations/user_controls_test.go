@@ -97,6 +97,22 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 	if err = s.SetAgentLevel(ctx, fmtID(uid), 4); err != nil {
 		t.Fatal(err)
 	}
+	for i := 0; i < 2; i++ {
+		if err = s.SetAgentLevel(ctx, fmtID(uid), 0); err != nil {
+			t.Fatal("restore ordinary user", err)
+		}
+		var ordinary bool
+		if err = p.QueryRow(ctx, `SELECT agent_level IS NULL FROM users WHERE id=$1`, user).Scan(&ordinary); err != nil || !ordinary {
+			t.Fatal("ordinary user must be stored as NULL", err)
+		}
+		ordinaryUsers, e := s.SearchUsers(ctx, UserSearch{Query: fmtID(uid)})
+		if e != nil || len(ordinaryUsers) != 1 || ordinaryUsers[0].AgentLevel != 0 || ordinaryUsers[0].ParentUserID == nil || *ordinaryUsers[0].ParentUserID != parentID {
+			t.Fatalf("ordinary user and parent relation: %+v %v", ordinaryUsers, e)
+		}
+	}
+	if err = s.SetAgentLevel(ctx, fmtID(uid), 4); err != nil {
+		t.Fatal("restore agent", err)
+	}
 	var rate int
 	if err = p.QueryRow(ctx, `SELECT rate_basis_points FROM agent_commission_rates WHERE agent_user_id=$1`, user).Scan(&rate); err != nil || rate != 100 {
 		t.Fatal(rate, err)
@@ -145,3 +161,15 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 	}
 }
 func fmtID(v int64) string { b, _ := json.Marshal(v); return string(b) }
+
+func TestSetAgentLevelValidation(t *testing.T) {
+	s := NewService(nil)
+	for _, level := range []int{-1, 7} {
+		if err := s.SetAgentLevel(context.Background(), "invalid", level); !errors.Is(err, ErrInvalidAgentLevel) {
+			t.Fatalf("level %d: %v", level, err)
+		}
+	}
+	if err := s.SetAgentLevel(context.Background(), "invalid", 0); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("ordinary user level should pass validation: %v", err)
+	}
+}

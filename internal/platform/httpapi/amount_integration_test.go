@@ -65,7 +65,7 @@ func TestDisplayBetHTTPStoresExactMinorOnce(t *testing.T) {
 	}
 	svc := betting.NewService(p)
 	s := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), svc, readinessChecker{}, nil, nil, svc, nil, WithCurrencies(currency.NewService(p)), WithPublicUserResolver(moneyUserResolver{user, public}))
-	for _, test := range []struct{ id, amount, stake string }{{"hundred", "100", "100.000"}, {"fraction", "1.5", "1.500"}, {"fraction", "\"1.5\"", "1.500"}} {
+	for _, test := range []struct{ id, amount, stake string }{{"hundred", "100", "100"}, {"fraction", "1.5", "1.5"}, {"fraction", "\"1.5\"", "1.5"}} {
 		body := fmt.Sprintf(`{"client_request_id":%q,"round_id":%q,"account_id":%d,"currency":"POINTS","stake":%s,"selection":{"pick":"red"}}`, test.id, round, public, test.amount)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/v1/bets", strings.NewReader(body)))

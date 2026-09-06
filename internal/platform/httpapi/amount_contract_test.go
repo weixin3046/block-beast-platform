@@ -34,7 +34,7 @@ func TestAmountContractConversions(t *testing.T) {
 		{`{"items":[{"accumulation_currency":"USDT","threshold":1.5,"reward_currency":"POINTS","reward":1.5}]}`, "", true, `"threshold_minor":1500000`},
 		{`{"cost_currency":"POINTS","cost":1.5,"prizes":[{"currency":"USDT","amount":1.5,"weight":10}]}`, "", true, `"amount_minor":1500000`},
 		{`{"currency":"POINTS","rules":[{"reward_currency":"USDT","reward":1.5,"rank_from":1}]}`, "", true, `"reward_minor":1500000`},
-		{`{"currency":"POINTS","amount_minor":68,"balance_after_minor":500250}`, "", false, `"balance_after":"500.250"`},
+		{`{"currency":"POINTS","amount_minor":68,"balance_after_minor":500250}`, "", false, `"balance_after":"500.25"`},
 		{`{"currency":"USDT","amount_minor":9007199254740993}`, "", false, `"amount":"9007199254.740993"`},
 		{`{"amount_minor":1}`, "STAMINA", false, `"amount":"1"`},
 		{`{"bet_limits":{"CUSTOM":{"min_stake":1.5,"max_stake":100}}}`, "", true, `"max_stake_minor":10000`},
@@ -76,7 +76,7 @@ func TestAmountResponseContainsOnlyDisplayMoney(t *testing.T) {
 	r := httptest.NewRequest("GET", "/v1/bets", nil)
 	writer := &amountWriter{ResponseWriter: w, codec: amountCodec{server: s, ctx: r.Context()}}
 	writeJSON(writer, 200, map[string]any{"currency": "POINTS", "stake_minor": 1500, "payout_minor": 2985, "payout_multiplier": 1985, "payout_divisor": 1000})
-	if w.Code != 200 || strings.Contains(w.Body.String(), "_minor") || !strings.Contains(w.Body.String(), `"stake":"1.500"`) || !strings.Contains(w.Body.String(), `"payout_multiplier":1985`) {
+	if w.Code != 200 || strings.Contains(w.Body.String(), "_minor") || !strings.Contains(w.Body.String(), `"stake":"1.5"`) || !strings.Contains(w.Body.String(), `"payout_multiplier":1985`) {
 		t.Fatal(w.Body.String())
 	}
 }

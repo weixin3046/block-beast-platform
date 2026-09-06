@@ -21,7 +21,7 @@ func TestSocketMoneyIsFormattedAfterPrivateRouting(t *testing.T) {
 	h.publish(&nats.Msg{Subject: "wallet.ledger.committed", Data: []byte(`{"user_id":"owner","currency":"POINTS","amount_minor":1500,"available_after_minor":98500}`)})
 	select {
 	case data := <-owner.outbound:
-		if strings.Contains(string(data), "_minor") || !strings.Contains(string(data), `"amount":"1.500"`) || !strings.Contains(string(data), `"available_after":"98.500"`) {
+		if strings.Contains(string(data), "_minor") || !strings.Contains(string(data), `"amount":"1.5"`) || !strings.Contains(string(data), `"available_after":"98.5"`) {
 			t.Fatal(string(data))
 		}
 	default:

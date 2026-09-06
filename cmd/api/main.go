@@ -22,6 +22,7 @@ import (
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
+	"github.com/block-beast/platform/internal/application/rebate"
 	"github.com/block-beast/platform/internal/application/redpacket"
 	"github.com/block-beast/platform/internal/application/settlement" // 结算应用服务
 	"github.com/block-beast/platform/internal/application/task"       // 任务/签到应用服务
@@ -137,6 +138,9 @@ func main() {
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
 	operationsService := operations.NewService(pool)
+	options = append(options, httpapi.WithRebates(rebate.NewService(pool)))
+	options = append(options, httpapi.WithLoginWhitelist(operationsService))
+	options = append(options, httpapi.WithAdminCompletion(operationsService, operationsService, agent.NewService(pool)))
 	options = append(options, httpapi.WithPhrases(operationsService), httpapi.WithUserControls(operationsService))
 	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithAnalytics(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService), httpapi.WithHashConfig(operationsService), httpapi.WithPublicUserResolver(identityRepository))
 	options = append(options, httpapi.WithRobotPlans(virtualbot.NewService(pool, bettingService)))

@@ -139,7 +139,7 @@ func (server *Server) setAgentCommissionRate(writer http.ResponseWriter, request
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to set commission rate"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]string{"status": "updated"})
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "updated", "scope": "legacy_bets_only", "message": "仅影响版本1历史投注；新哈希投注请配置级差返水"})
 }
 
 func (server *Server) agentRelation(writer http.ResponseWriter, request *http.Request) {

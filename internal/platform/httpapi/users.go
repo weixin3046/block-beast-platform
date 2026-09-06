@@ -185,13 +185,17 @@ func (server *Server) currentUser(writer http.ResponseWriter, request *http.Requ
 
 func (server *Server) setAgentLevel(writer http.ResponseWriter, request *http.Request) {
 	var input struct {
-		AgentLevel int `json:"agent_level"`
+		AgentLevel *int `json:"agent_level"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 16<<10)).Decode(&input); err != nil {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if err := server.userAdmin.SetAgentLevel(request.Context(), request.PathValue("userID"), input.AgentLevel); errors.Is(err, operations.ErrInvalidAgentLevel) {
+	if input.AgentLevel == nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": operations.ErrInvalidAgentLevel.Error()})
+		return
+	}
+	if err := server.userAdmin.SetAgentLevel(request.Context(), request.PathValue("userID"), *input.AgentLevel); errors.Is(err, operations.ErrInvalidAgentLevel) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	} else if errors.Is(err, operations.ErrUserNotFound) {
@@ -202,8 +206,8 @@ func (server *Server) setAgentLevel(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
-	server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "user.agent_level.update", TargetType: "user", TargetID: request.PathValue("userID"), Payload: map[string]any{"agent_level": input.AgentLevel}})
-	writeJSON(writer, http.StatusOK, map[string]int{"agent_level": input.AgentLevel})
+	server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "user.agent_level.update", TargetType: "user", TargetID: request.PathValue("userID"), Payload: map[string]any{"agent_level": *input.AgentLevel}})
+	writeJSON(writer, http.StatusOK, map[string]int{"agent_level": *input.AgentLevel})
 }
 
 func (server *Server) adminRoles(writer http.ResponseWriter, request *http.Request) {

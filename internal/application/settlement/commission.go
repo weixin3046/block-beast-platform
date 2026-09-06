@@ -5,20 +5,18 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"math"
 )
 
 // applyCommission pays the direct agent on every settled, non-refunded bet.
-func applyCommission(ctx context.Context, tx pgx.Tx, betID, playerID, currency string, stake int64, settledAt interface{}) error {
-	var agentID string
-	err := tx.QueryRow(ctx, `SELECT parent_user_id::text FROM agent_relations WHERE user_id=$1 AND parent_user_id IS NOT NULL`, playerID).Scan(&agentID)
-	if errors.Is(err, pgx.ErrNoRows) {
+func applyCommission(ctx context.Context, tx pgx.Tx, betID, agentID, currency string, stake int64, settledAt interface{}) error {
+	// Use the beneficiary gathered before wallet locks. Re-reading a newly
+	// bound parent here would introduce an unsorted wallet lock.
+	if agentID == "" {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
 	var rate int
-	err = tx.QueryRow(ctx, `SELECT rate_basis_points FROM agent_commission_rates WHERE agent_user_id=$1`, agentID).Scan(&rate)
+	err := tx.QueryRow(ctx, `SELECT rate_basis_points FROM agent_commission_rates WHERE agent_user_id=$1`, agentID).Scan(&rate)
 	if errors.Is(err, pgx.ErrNoRows) || rate == 0 {
 		return nil
 	}
@@ -46,6 +44,9 @@ func applyCommission(ctx context.Context, tx pgx.Tx, betID, playerID, currency s
 	}
 	if err != nil {
 		return err
+	}
+	if balance > math.MaxInt64-amount {
+		return ErrPayoutOverflow
 	}
 	balance += amount
 	if _, err = tx.Exec(ctx, `UPDATE wallets SET available_minor=$2,version=version+1,updated_at=now() WHERE id=$1`, walletID, balance); err != nil {

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"sort"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/rebate"
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/google/uuid"
@@ -76,6 +78,9 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	}
 
 	type acceptedBet struct {
+		legacyAgentID                     string
+		rebateVersion                     int
+		allocations                       []rebate.Allocation
 		simulated                         bool
 		betID, walletID, userID, currency string
 		playMode                          string
@@ -86,11 +91,11 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT bets.id, bets.wallet_id, bets.user_id, wallets.currency,COALESCE(bets.play_mode,''),
-			bets.selection,bets.stake_minor,bets.payout_multiplier_snapshot,bets.payout_divisor_snapshot,bets.is_simulated,bets.created_at
+			bets.selection,bets.stake_minor,bets.payout_multiplier_snapshot,bets.payout_divisor_snapshot,bets.is_simulated,bets.created_at,bets.rebate_version
 		FROM bets JOIN wallets ON wallets.id=bets.wallet_id
 		WHERE round_id = $1 AND status = 'accepted'
 		ORDER BY wallet_id, id
-		FOR UPDATE`, roundID)
+		FOR UPDATE OF bets`, roundID)
 	if err != nil {
 		return SettlementResult{}, err
 	}
@@ -98,7 +103,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	for rows.Next() {
 		var bet acceptedBet
 		if err := rows.Scan(&bet.betID, &bet.walletID, &bet.userID, &bet.currency, &bet.playMode,
-			&bet.selection, &bet.stake, &bet.payoutMultiplier, &bet.payoutDivisor, &bet.simulated, &bet.placedAt); err != nil {
+			&bet.selection, &bet.stake, &bet.payoutMultiplier, &bet.payoutDivisor, &bet.simulated, &bet.placedAt, &bet.rebateVersion); err != nil {
 			rows.Close()
 			return SettlementResult{}, err
 		}
@@ -110,11 +115,97 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 	}
 	rows.Close()
 
+	// Gather every source and recipient before taking any wallet lock. Task and
+	// spin transactions lock all of a user's currencies in the same UUID order.
+	users := map[string]bool{}
+	type recipient struct{ user, currency string }
+	recipients := map[recipient]bool{}
+	for i := range bets {
+		b := &bets[i]
+		users[b.userID] = true
+		if b.simulated {
+			continue
+		}
+		if b.rebateVersion == 1 {
+			var parent string
+			e := tx.QueryRow(ctx, `SELECT parent_user_id::text FROM agent_relations WHERE user_id=$1 AND parent_user_id IS NOT NULL`, b.userID).Scan(&parent)
+			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+				return SettlementResult{}, e
+			}
+			if e == nil {
+				b.legacyAgentID = parent
+				users[parent] = true
+				recipients[recipient{parent, b.currency}] = true
+			}
+			continue
+		}
+		chain, e := rebate.LoadTx(ctx, tx, b.betID)
+		if e != nil {
+			return SettlementResult{}, e
+		}
+		var payout int64
+		if hashSelectionWins(b.playMode, b.selection, outcome) {
+			m, d := rules.PayoutMultiplier, rules.PayoutScale()
+			if b.payoutMultiplier != nil && b.payoutDivisor != nil {
+				m, d = *b.payoutMultiplier, *b.payoutDivisor
+			}
+			if m <= 0 || d <= 0 || b.stake > math.MaxInt64/m {
+				return SettlementResult{}, ErrPayoutOverflow
+			}
+			payout = b.stake * m / d
+		}
+		b.allocations, e = rebate.Calculate(b.stake, payout, b.playMode, chain)
+		if e != nil {
+			return SettlementResult{}, e
+		}
+		for _, a := range b.allocations {
+			users[a.UserID] = true
+			recipients[recipient{a.UserID, b.currency}] = true
+		}
+	}
+	ordered := make([]recipient, 0, len(recipients))
+	for r := range recipients {
+		ordered = append(ordered, r)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].user == ordered[j].user {
+			return ordered[i].currency < ordered[j].currency
+		}
+		return ordered[i].user < ordered[j].user
+	})
+	for _, r := range ordered {
+		if _, err = tx.Exec(ctx, `INSERT INTO wallets(id,user_id,currency) SELECT gen_random_uuid(),$1,$2 WHERE NOT EXISTS(SELECT 1 FROM wallets WHERE user_id=$1 AND currency=$2) ON CONFLICT(user_id,currency) DO NOTHING`, r.user, r.currency); err != nil {
+			return SettlementResult{}, err
+		}
+	}
+	ids := make([]string, 0, len(users))
+	for id := range users {
+		ids = append(ids, id)
+	}
+	locked, e := tx.Query(ctx, `SELECT id FROM wallets WHERE user_id=ANY($1::uuid[]) ORDER BY id FOR UPDATE`, ids)
+	if e != nil {
+		return SettlementResult{}, e
+	}
+	for locked.Next() {
+	}
+	e = locked.Err()
+	locked.Close()
+	if e != nil {
+		return SettlementResult{}, e
+	}
+
 	result := SettlementResult{RoundID: roundID, Outcome: append([]string(nil), outcome...), SettledAt: time.Now().UTC()}
 	for _, bet := range bets {
-		if !bet.simulated {
-			if err := applyCommission(ctx, tx, bet.betID, bet.userID, bet.currency, bet.stake, result.SettledAt); err != nil {
+		if !bet.simulated && bet.rebateVersion == 1 {
+			if err := applyCommission(ctx, tx, bet.betID, bet.legacyAgentID, bet.currency, bet.stake, result.SettledAt); err != nil {
 				return SettlementResult{}, err
+			}
+		}
+		if !bet.simulated && bet.rebateVersion == 2 {
+			for _, a := range bet.allocations {
+				if err := rebate.PayTx(ctx, tx, bet.betID, bet.currency, a); err != nil {
+					return SettlementResult{}, err
+				}
 			}
 		}
 		var availableMinor int64

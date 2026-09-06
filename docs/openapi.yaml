@@ -3,6 +3,7 @@ info:
   title: Block Beast Platform API
   version: 0.2.0
   description: |
+    金额响应去掉小数末尾多余的零，仍为字符串：2223.000000返回"2223"，1.500返回"1.5"，0.000返回"0"；有效小数不截断，币种decimals与输入精度限制不变。HTTP和Socket一致，旧示例补零金额以此规则为准。
     前端金额协议：请求提交实际币种金额（JSON数字或十进制字符串），响应仅返回实际金额的十进制字符串，不返回最小单位金额字段。币种精度由后端查询currencies表并转换。旧最小单位请求字段会被拒绝。链上机器回调仍遵循其签名协议。
     对外 error 提示统一为简体中文；HTTP 状态码及机器可读字段、枚举保持不变。未知内部错误统一返回“操作失败，请稍后重试”，不透传数据库或第三方错误详情。
     所有前端请求金额由后端转换；平台精度读取GET /v1/currencies，链上资产精度不用于前端钱包换算。
@@ -46,6 +47,262 @@ tags:
 - name: RedPackets
   description: 聊天室红包创建、领取和查询。
 paths:
+  /v1/admin/bets/{betID}/void:
+    post:
+      tags: [Operations]
+      summary: 后台作废单笔未最终结算投注并退款
+      description: admin/operator和后台二级密码；允许封盘后作废，已最终结算拒绝409。真实单退本金一次，模拟单不动钱包。按操作人/request_id幂等，重用不同参数409。
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: betID, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, reason, second_password]
+              properties:
+                request_id: {type: string, minLength: 1, maxLength: 128}
+                reason: {type: string, minLength: 1, maxLength: 2000}
+                second_password: {type: string, writeOnly: true}
+      responses:
+        '200':
+          description: 作废结果，重复请求duplicate=true
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BetVoidResult'}
+        '409': {description: 已最终结算、请求编号参数冲突或余额溢出}
+  /v1/admin/bet-voids:
+    get:
+      tags: [Operations]
+      summary: 查询后台投注作废记录
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: admin/operator；分页记录和全量总数
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  total: {type: integer, format: int64}
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/BetVoidResult'}
+  /v1/admin/users/{userID}/agent-relation:
+    get:
+      tags: [Admin]
+      summary: 后台查询指定用户的直属代理关系
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: userID, in: path, required: true, schema: {type: integer, format: int64, minimum: 100000}}
+      responses:
+        '200':
+          description: 未绑定时parent_user_id为null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, parent_user_id]
+                properties:
+                  user_id: {type: integer, format: int64}
+                  parent_user_id: {type: [integer, 'null'], format: int64}
+    put:
+      tags: [Operations]
+      summary: 给尚无上级的真实用户绑定真实上级
+      description: admin/operator及后台二级密码；禁止改挂、循环及虚拟用户关系，维护后代路径；等级设置仍使用原agent-level接口。
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: userID, in: path, required: true, schema: {type: integer, format: int64, minimum: 100000}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parent_user_id, second_password]
+              properties:
+                parent_user_id: {type: integer, format: int64, minimum: 100000}
+                second_password: {type: string, writeOnly: true}
+      responses:
+        '200':
+          description: 已绑定
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: {type: integer, format: int64}
+                  parent_user_id: {type: integer, format: int64}
+        '409': {description: 已有上级，不允许覆盖}
+  /v1/admin/login-whitelist:
+    get:
+      tags: [Operations]
+      summary: 查询用户/IP白名单及风险检测启用状态
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: admin/operator可查。第三方检测暂不接入，risk_check_enabled和whitelist_effective固定false。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [risk_check_enabled, whitelist_effective, status, items]
+                properties:
+                  risk_check_enabled: {type: boolean, const: false}
+                  whitelist_effective: {type: boolean, const: false}
+                  status: {type: string}
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/LoginWhitelistEntry'}
+    post:
+      tags: [Operations]
+      summary: 保存用户或IP白名单（同目标重复保存更新备注）
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [second_password]
+              properties:
+                user_id: {type: integer, format: int64, minimum: 100000, description: 与ip二选一}
+                ip: {type: string, description: 单个IPv4/IPv6地址，不接受CIDR；与user_id二选一}
+                remark: {type: string, maxLength: 200}
+                second_password: {type: string, writeOnly: true}
+      responses:
+        '200':
+          description: 保存成功；配置不绕过密码、禁用账号或角色限制
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginWhitelistEntry'}
+  /v1/admin/login-whitelist/{entryID}:
+    delete:
+      tags: [Operations]
+      summary: 幂等删除白名单配置
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: entryID, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [second_password]
+              properties:
+                second_password: {type: string, writeOnly: true}
+      responses:
+        '204': {description: 已删除或原本不存在；需admin/operator及后台二级密码}
+  /v1/admin/rebate-records:
+    get:
+      tags: [Operations]
+      summary: 分页查询级差返水明细及同筛选条件的分币种统计
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: source_user_id, in: query, schema: {type: integer, format: int64, minimum: 100000}}
+      - {name: beneficiary_user_id, in: query, schema: {type: integer, format: int64, minimum: 100000}}
+      - {name: currency, in: query, schema: {type: string}}
+      - {name: status, in: query, schema: {type: string, enum: [paid, reversed]}}
+      - {name: game_type, in: query, schema: {type: string}}
+      - {name: game_room_id, in: query, schema: {type: string, format: uuid}}
+      - {name: from, in: query, schema: {type: string, format: date-time}}
+      - {name: to, in: query, schema: {type: string, format: date-time}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: 仅admin/operator；排除模拟投注及虚拟用户；仅包含新版级差返水
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RebateRecords'}
+  /v1/agents/me/rebates:
+    get:
+      tags: [Operations]
+      summary: 本人收取的级差返水明细及统计
+      description: 与后台查询相同筛选、分页和响应结构；收款人强制为登录用户，不可通过筛选查询他人收入。
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: currency, in: query, schema: {type: string}}
+      - {name: status, in: query, schema: {type: string, enum: [paid, reversed]}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: 本人分页明细及分币种统计
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RebateRecords'}
+  /v1/admin/rebate-configs:
+    get:
+      tags: [Operations]
+      summary: 查询哈希级差返水配置
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: game_type, in: query, schema: {type: string, enum: [hash_9, hash_13, hash_17, hash_19, hash_23, hash_29]}}
+      - {name: game_room_id, in: query, schema: {type: string, format: uuid}}
+      - {name: currency, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: 配置数组；admin/operator可读
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RebateConfig'
+  /v1/admin/rebate-configs/{configID}:
+    put:
+      tags: [Operations]
+      summary: 修改单组级差返水配置（仅影响后续新投注）
+      security:
+      - bearerAuth: []
+      parameters:
+      - {name: configID, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, enabled, levels, second_password]
+              properties:
+                version: {type: integer, format: int64, minimum: 1}
+                enabled: {type: boolean}
+                second_password: {type: string, writeOnly: true}
+                levels:
+                  type: array
+                  minItems: 6
+                  maxItems: 6
+                  items:
+                    $ref: '#/components/schemas/RebateLevel'
+      responses:
+        '200':
+          description: 更新后配置；需admin/operator和后台二级密码
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebateConfig'
+        '400': {description: 参数无效，必须完整提供六个等级且比例非递减}
+        '403': {description: 无权限或后台密码无效}
+        '404': {description: 配置不存在}
+        '409': {description: 版本冲突，刷新后重试}
   "/v1/admin/tasks/progress":
     get:
       tags: [Tasks]
@@ -334,48 +591,6 @@ paths:
           description: 编辑目标不存在
         '429':
           description: 后台密码验证暂时锁定
-  "/v1/admin/users/{userID}/agent-relation":
-    get:
-      tags: [Admin]
-      summary: 后台查询指定用户的直属代理关系
-      description: 仅 admin/operator。查询直属上级，不包含下级列表或整棵树。设置代理等级不自动绑定上级。
-      security:
-      - bearerAuth: []
-      parameters:
-      - name: userID
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-          minimum: 100000
-      responses:
-        '200':
-          description: 用户直属上级，未绑定时 parent_user_id 为 null
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [user_id, parent_user_id]
-                properties:
-                  user_id:
-                    type: integer
-                    format: int64
-                  parent_user_id:
-                    type: [integer, 'null']
-                    format: int64
-        '400':
-          description: 用户 ID 格式错误
-        '401':
-          description: 未登录
-        '403':
-          description: 无后台权限
-        '404':
-          description: 用户不存在
-        '500':
-          description: 查询失败
-        '503':
-          description: 服务不可用
   "/v1/admin/users/{userID}/password":
     put:
       tags:
@@ -1229,6 +1444,7 @@ paths:
           - won
           - lost
           - refunded
+          - voided
       - name: from
         in: query
         schema:
@@ -2452,6 +2668,7 @@ paths:
           - won
           - lost
           - refunded
+          - voided
       - name: limit
         in: query
         schema:
@@ -2498,6 +2715,7 @@ paths:
           - lost
           - refunded
           - cancelled
+          - voided
       - name: limit
         in: query
         schema:
@@ -2525,8 +2743,7 @@ paths:
       - Bets
       operationId: placeBet
       summary: 创建幂等投注
-      description: 对同一 account_id 和 client_request_id 的重复请求会返回既有投注，不会再次扣款。仅本人或 operator/admin
-        可为指定账号投注。
+      description: 同玩家/期/币种/房间/玩法/选项的accepted哈希订单合单。stake传本次追加额，返回当前合计；同请求编号重试不扣款，改变原参数返回409。仅本人或operator/admin可为指定账号投注。
       security:
       - bearerAuth: []
       requestBody:
@@ -4042,7 +4259,8 @@ paths:
     put:
       tags:
       - Admin
-      summary: 设置代理返佣基点比例
+      summary: 设置版本1历史投注的代理返佣基点比例
+      description: 不影响新版哈希投注；新单使用rebate-configs千分比级差配置。成功响应scope为legacy_bets_only，并提示旧机制作用范围。
       security:
       - bearerAuth: []
       parameters:
@@ -4150,6 +4368,43 @@ paths:
         '409':
           "$ref": "#/components/responses/Conflict"
   "/v1/admin/users":
+    post:
+      tags: [Operations]
+      summary: 后台创建普通真实玩家（零钱包、仅player角色）
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [login_name, password, second_password]
+              properties:
+                login_name: {type: string, pattern: '^[A-Za-z0-9_-]{3,32}$'}
+                password: {type: string, minLength: 12, maxLength: 128, writeOnly: true}
+                display_name: {type: string, description: 省略或空值时后端使用用户加公开ID}
+                avatar_url: {type: string, description: 可选，当前操作人已确认上传的图片storage_key}
+                second_password: {type: string, writeOnly: true}
+      responses:
+        '201':
+          description: 创建成功，不发放玩家登录令牌；仅admin/operator可用
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, login_name, display_name, avatar_url, status, is_virtual, roles, created_at]
+                properties:
+                  user_id: {type: integer, format: int64}
+                  login_name: {type: string}
+                  display_name: {type: string}
+                  avatar_url: {type: string}
+                  status: {type: string}
+                  is_virtual: {type: boolean, const: false}
+                  roles: {type: array, items: {type: string, enum: [player]}}
+                  created_at: {type: string, format: date-time}
+        '409': {description: 登录名已被占用}
     get:
       tags:
       - Admin
@@ -4216,7 +4471,7 @@ paths:
     put:
       tags:
       - Admin
-      summary: 设置用户代理等级；设置后其邀请码才可用于注册邀请
+      summary: 设置用户代理等级；0 恢复普通用户，1–6 可用于注册邀请
       security:
       - bearerAuth: []
       parameters:
@@ -4239,8 +4494,9 @@ paths:
               properties:
                 agent_level:
                   type: integer
-                  minimum: 1
+                  minimum: 0
                   maximum: 6
+                  description: 0 表示普通用户，1–6 表示代理等级；必须显式传入，不能为 null。
       responses:
         '200':
           description: 已更新
@@ -4479,6 +4735,95 @@ components:
           schema:
             "$ref": "#/components/schemas/Error"
   schemas:
+    BetVoidResult:
+      type: object
+      required: [operation_id, bet_id, user_id, operator_user_id, game_type, round_sequence, currency, stake, refund, is_simulated, reason, status, duplicate, created_at]
+      properties:
+        operation_id: {type: string, format: uuid}
+        bet_id: {type: string, format: uuid}
+        user_id: {type: integer, format: int64}
+        operator_user_id: {type: integer, format: int64}
+        game_type: {type: string}
+        round_sequence: {type: integer, format: int64}
+        currency: {type: string}
+        stake: {type: string, description: 原投注实际金额}
+        refund: {type: string, description: 实际退款金额，模拟单为零}
+        is_simulated: {type: boolean}
+        reason: {type: string}
+        status: {type: string, enum: [voided]}
+        duplicate: {type: boolean}
+        created_at: {type: string, format: date-time}
+    LoginWhitelistEntry:
+      type: object
+      required: [id, user_id, ip, remark, updated_by, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: [integer, 'null'], format: int64}
+        ip: {type: string, description: 用户白名单时为空字符串}
+        remark: {type: string}
+        updated_by: {type: integer, format: int64}
+        updated_at: {type: string, format: date-time}
+    RebateRecords:
+      type: object
+      required: [items, total, summary]
+      properties:
+        total: {type: integer, format: int64}
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, bet_id, source_user_id, beneficiary_user_id, round_sequence, game_type, game_room_id, game_room_name, currency, base, agent_level, differential_per_mille, amount, status, created_at]
+            properties:
+              id: {type: string, format: uuid}
+              bet_id: {type: string, format: uuid}
+              source_user_id: {type: integer, format: int64}
+              beneficiary_user_id: {type: integer, format: int64}
+              round_sequence: {type: integer, format: int64}
+              game_type: {type: string}
+              game_room_id: {type: string, format: uuid}
+              game_room_name: {type: string}
+              currency: {type: string}
+              base: {type: string, description: 实际数量表示的返水基数}
+              agent_level: {type: integer, minimum: 1, maximum: 6}
+              differential_per_mille: {type: integer, minimum: 1, maximum: 1000}
+              amount: {type: string, description: 实际数量表示的返水金额}
+              status: {type: string, enum: [paid, reversed]}
+              created_at: {type: string, format: date-time}
+        summary:
+          type: array
+          description: 相同筛选下的全量统计，不受分页影响，各币种独立统计；来源投注去重计数。
+          items:
+            type: object
+            required: [currency, source_bets, paid_count, reversed_count, paid_amount, reversed_amount]
+            properties:
+              currency: {type: string}
+              source_bets: {type: integer, format: int64}
+              paid_count: {type: integer, format: int64}
+              reversed_count: {type: integer, format: int64}
+              paid_amount: {type: string}
+              reversed_amount: {type: string}
+    RebateLevel:
+      type: object
+      required: [level, rate_per_mille]
+      properties:
+        level: {type: integer, minimum: 1, maximum: 6}
+        rate_per_mille: {type: integer, minimum: 0, maximum: 1000, description: '千分比整数，14表示14‰即1.4%'}
+    RebateConfig:
+      type: object
+      required: [id, game_type, game_room_id, game_room_name, currency, enabled, version, levels, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        game_type: {type: string}
+        game_room_id: {type: string, format: uuid}
+        game_room_name: {type: string}
+        currency: {type: string}
+        enabled: {type: boolean}
+        version: {type: integer, format: int64}
+        updated_at: {type: string, format: date-time}
+        levels:
+          type: array
+          items:
+            $ref: '#/components/schemas/RebateLevel'
     SpinRecord:
       type: object
       properties:
@@ -5398,6 +5743,11 @@ components:
       - status
       - items
       properties:
+        self:
+          description: 同周期同币种本人排名，不受limit限制；未上榜为null。只依据登录身份。
+          oneOf:
+          - $ref: '#/components/schemas/LeaderboardBoard/properties/items/items'
+          - type: 'null'
         decimals:
           type: integer
         period:
@@ -6372,6 +6722,7 @@ components:
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
     Bet:
       type: object
+      description: 哈希待结算投注合单，stake为合计金额，bet_id稳定，首单赔率和时间保留，取消/退款/结算处理整单。历史单不追溯合并。
       required:
       - bet_id
       - client_request_id
@@ -6390,6 +6741,15 @@ components:
       - payout
       - placed_at
       properties:
+        placement_count:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 成功下单次数，追加时递增，重试不增加。
+        last_placed_at:
+          type: string
+          format: date-time
+          description: 最近一次成功追加时间；placed_at保留首单时间。
         decimals:
           type: integer
         stake:
@@ -6457,6 +6817,7 @@ components:
           - lost
           - won
           - refunded
+          - voided
         placed_at:
           type: string
           format: date-time
@@ -6494,6 +6855,7 @@ components:
           description: true 表示平台虚拟玩家。
     PublicBet:
       type: object
+      description: 返回合单而非逐次请求，以bet_id更新记录，stake为合计金额，不返回余额。
       required:
       - bet_id
       - player
@@ -6511,6 +6873,13 @@ components:
       - payout
       - placed_at
       properties:
+        placement_count:
+          type: integer
+          format: int64
+          minimum: 1
+        last_placed_at:
+          type: string
+          format: date-time
         decimals:
           type: integer
         stake:
@@ -6567,6 +6936,7 @@ components:
           - won
           - lost
           - refunded
+          - voided
         placed_at:
           type: string
           format: date-time
@@ -6645,6 +7015,7 @@ components:
           - won
           - lost
           - refunded
+          - voided
         created_at:
           type: string
           format: date-time
@@ -6652,12 +7023,20 @@ components:
           type: string
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
     AdminBet:
+      description: 后台返回合单，stake为合计金额，created_at保留首单时间。
       allOf:
       - "$ref": "#/components/schemas/AdminCurrentBet"
       - type: object
         required:
         - payout
         properties:
+          placement_count:
+            type: integer
+            format: int64
+            minimum: 1
+          last_placed_at:
+            type: string
+            format: date-time
           decimals:
             type: integer
           stake:
@@ -6674,6 +7053,7 @@ components:
             - won
             - lost
             - refunded
+            - voided
           settled_at:
             type: string
             format: date-time

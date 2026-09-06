@@ -15,7 +15,7 @@ var ErrInvalidUserStatus = errors.New("user status must be active, disabled, or 
 var ErrUserNotFound = errors.New("user not found")
 var ErrCannotDisableOwnAdmin = errors.New("administrator cannot disable own account")
 var ErrCannotDisableLastAdmin = errors.New("cannot disable the platform's last active admin")
-var ErrInvalidAgentLevel = errors.New("agent level must be between 1 and 6")
+var ErrInvalidAgentLevel = errors.New("agent level must be between 0 and 6")
 var ErrInvalidProfile = errors.New("display_name is required and profile fields are too long")
 var ErrInvalidAvatar = errors.New("avatar_url must be empty or a confirmed image upload owned by the current user")
 
@@ -123,7 +123,7 @@ func (service *Service) UpdateCurrentProfile(ctx context.Context, userID, displa
 }
 
 func (service *Service) SetAgentLevel(ctx context.Context, userID string, level int) error {
-	if level < 1 || level > 6 {
+	if level < 0 || level > 6 {
 		return ErrInvalidAgentLevel
 	}
 	publicID, err := strconv.ParseInt(userID, 10, 64)
@@ -141,12 +141,15 @@ func (service *Service) SetAgentLevel(ctx context.Context, userID string, level 
 	} else if err != nil {
 		return err
 	}
-	result, err := tx.Exec(ctx, `UPDATE users SET agent_level=$2,updated_at=now() WHERE id=$1`, internalID, level)
+	result, err := tx.Exec(ctx, `UPDATE users SET agent_level=NULLIF($2,0),updated_at=now() WHERE id=$1`, internalID, level)
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
 		return ErrUserNotFound
+	}
+	if level == 0 {
+		return tx.Commit(ctx)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO agent_commission_rates(agent_user_id,rate_basis_points) VALUES($1,0) ON CONFLICT(agent_user_id) DO NOTHING`, internalID)
 	if err != nil {

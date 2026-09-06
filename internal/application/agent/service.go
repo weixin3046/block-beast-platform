@@ -12,6 +12,9 @@ import (
 
 var ErrInvalidRelation = errors.New("invalid agent relation")
 var ErrRelationExists = errors.New("agent relation already exists")
+var ErrAdminBindForbidden = errors.New("仅管理员或运营人员可以绑定上级")
+var ErrRelationUserNotFound = errors.New("用户或上级不存在")
+var ErrVirtualRelation = errors.New("虚拟用户不能建立代理关系")
 var ErrInvalidCommissionRate = errors.New("commission rate must be between 0 and 10000 basis points")
 var ErrCommissionNotFound = errors.New("commission not found")
 var ErrCommissionState = errors.New("commission cannot transition from its current status")
@@ -23,6 +26,11 @@ type Service struct{ pool *pgxpool.Pool }
 type Relation struct {
 	UserID       string `json:"user_id"`
 	ParentUserID string `json:"parent_user_id"`
+}
+
+type AdminRelation struct {
+	UserID       int64 `json:"user_id"`
+	ParentUserID int64 `json:"parent_user_id"`
 }
 
 type Commission struct {
@@ -216,27 +224,121 @@ func (service *Service) Bind(ctx context.Context, userID, parentID string) error
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)`, parentID).Scan(&exists); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('agent-relation-graph',0))`); err != nil {
 		return err
 	}
-	if !exists {
-		return ErrInvalidRelation
+	if err = ensureRealRelationUsers(ctx, tx, userID, parentID); err != nil {
+		if errors.Is(err, ErrRelationUserNotFound) {
+			return ErrInvalidRelation
+		}
+		return err
 	}
+	if err = bindTx(ctx, tx, userID, parentID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// AdminBind resolves public IDs inside the serialized relation transaction,
+// rechecks the actor role and appends an audit record atomically.
+func (service *Service) AdminBind(ctx context.Context, actorID string, userPublicID, parentPublicID int64) (AdminRelation, error) {
+	if actorID == "" || userPublicID < 100000 || parentPublicID < 100000 || userPublicID == parentPublicID {
+		return AdminRelation{}, ErrInvalidRelation
+	}
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return AdminRelation{}, err
+	}
+	defer tx.Rollback(ctx)
+	var allowed bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users u
+		JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id
+		WHERE u.id=$1 AND u.status='active' AND r.code IN ('admin','operator'))`, actorID).Scan(&allowed); err != nil {
+		return AdminRelation{}, err
+	}
+	if !allowed {
+		return AdminRelation{}, ErrAdminBindForbidden
+	}
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('agent-relation-graph',0))`); err != nil {
+		return AdminRelation{}, err
+	}
+	var userID, parentID string
+	if err = tx.QueryRow(ctx, `SELECT id::text FROM users WHERE public_id=$1`, userPublicID).Scan(&userID); errors.Is(err, pgx.ErrNoRows) {
+		return AdminRelation{}, ErrRelationUserNotFound
+	} else if err != nil {
+		return AdminRelation{}, err
+	}
+	if err = tx.QueryRow(ctx, `SELECT id::text FROM users WHERE public_id=$1`, parentPublicID).Scan(&parentID); errors.Is(err, pgx.ErrNoRows) {
+		return AdminRelation{}, ErrRelationUserNotFound
+	} else if err != nil {
+		return AdminRelation{}, err
+	}
+	if err = ensureRealRelationUsers(ctx, tx, userID, parentID); err != nil {
+		return AdminRelation{}, err
+	}
+	if err = bindTx(ctx, tx, userID, parentID); err != nil {
+		return AdminRelation{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO audit_logs(id,actor_user_id,action,target_type,target_id,payload)
+		VALUES($1,$2,'admin.agent.bind','user',$3,jsonb_build_object('user_id',$4::bigint,'parent_user_id',$5::bigint))`,
+		uuid.NewString(), actorID, userID, userPublicID, parentPublicID); err != nil {
+		return AdminRelation{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return AdminRelation{}, err
+	}
+	return AdminRelation{UserID: userPublicID, ParentUserID: parentPublicID}, nil
+}
+
+func ensureRealRelationUsers(ctx context.Context, tx pgx.Tx, userID, parentID string) error {
+	rows, err := tx.Query(ctx, `SELECT id::text,is_virtual FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE`, []string{userID, parentID})
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var id string
+		var virtual bool
+		if err = rows.Scan(&id, &virtual); err != nil {
+			return err
+		}
+		count++
+		if virtual {
+			return ErrVirtualRelation
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if count != 2 {
+		return ErrRelationUserNotFound
+	}
+	return nil
+}
+
+func bindTx(ctx context.Context, tx pgx.Tx, userID, parentID string) error {
 	var parentPath string
-	err = tx.QueryRow(ctx, `SELECT COALESCE(path::text,'') FROM agent_relations WHERE user_id=$1`, parentID).Scan(&parentPath)
+	err := tx.QueryRow(ctx, `SELECT COALESCE(path::text,'') FROM agent_relations WHERE user_id=$1`, parentID).Scan(&parentPath)
 	if errors.Is(err, pgx.ErrNoRows) {
 		parentPath = ""
 	} else if err != nil {
 		return err
 	}
-	var existing string
+	var existing *string
 	err = tx.QueryRow(ctx, `SELECT parent_user_id::text FROM agent_relations WHERE user_id=$1`, userID).Scan(&existing)
-	if err == nil {
+	if err == nil && existing != nil {
 		return ErrRelationExists
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
+	}
+	var cycle bool
+	if err = tx.QueryRow(ctx, `WITH RECURSIVE ancestors(id) AS (SELECT $1::uuid UNION SELECT ar.parent_user_id FROM agent_relations ar JOIN ancestors a ON ar.user_id=a.id WHERE ar.parent_user_id IS NOT NULL) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=$2)`, parentID, userID).Scan(&cycle); err != nil {
+		return err
+	}
+	if cycle {
+		return ErrInvalidRelation
 	}
 	userLabel := strings.ReplaceAll(userID, "-", "_")
 	parentLabel := strings.ReplaceAll(parentID, "-", "_")
@@ -247,11 +349,20 @@ func (service *Service) Bind(ctx context.Context, userID, parentID string) error
 	if parentPath != "" {
 		path = parentPath + "." + userLabel
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO agent_relations(user_id,parent_user_id,path) VALUES($1,$2,$3::ltree)`, userID, parentID, path)
+	prefix := parentLabel + "."
+	if parentPath != "" {
+		prefix = parentPath + "."
+	}
+	// A root user may already have descendants whose paths start at that user.
+	// Prefix those paths before inserting the root's own newly bound relation.
+	if _, err = tx.Exec(ctx, `UPDATE agent_relations SET path=($2||path::text)::ltree WHERE path <@ $1::ltree`, userLabel, prefix); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO agent_relations(user_id,parent_user_id,path) VALUES($1,$2,$3::ltree) ON CONFLICT(user_id) DO UPDATE SET parent_user_id=EXCLUDED.parent_user_id,path=EXCLUDED.path WHERE agent_relations.parent_user_id IS NULL`, userID, parentID, path)
 	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 func containsPathLabel(path, label string) bool {

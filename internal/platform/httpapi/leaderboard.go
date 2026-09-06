@@ -24,7 +24,16 @@ func (server *Server) leaderboard(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "leaderboards are unavailable"})
 		return
 	}
-	item, err := server.leaderboards.List(request.Context(), request.URL.Query().Get("period"), request.URL.Query().Get("currency"), queryLimit(request, 50))
+	claims, _ := ClaimsFromContext(request.Context())
+	var item leaderboard.Board
+	var err error
+	if personalized, ok := server.leaderboards.(interface {
+		ListForUser(context.Context, string, string, int, string) (leaderboard.Board, error)
+	}); ok {
+		item, err = personalized.ListForUser(request.Context(), request.URL.Query().Get("period"), request.URL.Query().Get("currency"), queryLimit(request, 50), claims.Subject)
+	} else {
+		item, err = server.leaderboards.List(request.Context(), request.URL.Query().Get("period"), request.URL.Query().Get("currency"), queryLimit(request, 50))
+	}
 	if errors.Is(err, leaderboard.ErrInvalidPeriod) || errors.Is(err, leaderboard.ErrInvalidCurrency) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -33,7 +42,6 @@ func (server *Server) leaderboard(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list leaderboard"})
 		return
 	}
-	claims, _ := ClaimsFromContext(request.Context())
 	var viewerID int64
 	if !isStaff(claims) && server.userAdmin != nil {
 		if u, e := server.userAdmin.CurrentUser(request.Context(), claims.Subject); e == nil {

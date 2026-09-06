@@ -21,45 +21,50 @@ import (
 )
 
 type Server struct {
-	robotPlans         RobotPlanService
-	currencies         CurrencyService
-	config             config.Config
-	logger             *slog.Logger
-	betPlacer          BetPlacer
-	readiness          ReadinessChecker
-	wallets            WalletReader
-	rounds             RoundReader
-	bets               BetReader
-	canceller          RoundCanceller
-	auth               *Authenticator
-	logins             LoginService
-	registers          RegisterService
-	sessions           SessionService
-	passwords          PasswordChangeService
-	secondaryPasswords SecondaryPasswordService
-	adminSecurity      AdminSecurityService
-	auditor            AuditRecorder
-	chainWebhook       *chainWebhookConfig
-	withdrawals        WithdrawalService
-	depositHistory     DepositReader
-	depositAddresses   DepositAddressService
-	credits            CreditService
-	tasks              TaskService
-	providerAssets     ProviderAssetReader
-	agents             AgentService
-	userAdmin          UserAdminService
-	userControls       UserControlService
-	operations         OperationsService
-	phrases            PhraseService
-	analytics          AnalyticsService
-	gameAdmin          GameAdminService
-	gameRoomAdmin      GameRoomService
-	hashConfig         HashConfigService
-	chat               ChatService
-	uploads            UploadService
-	leaderboards       LeaderboardService
-	redPackets         RedPacketService
-	publicUsers        PublicUserResolver
+	adminBetVoids       AdminBetVoidService
+	adminPlayerCreator  AdminPlayerCreator
+	adminRelationBinder AdminRelationBinder
+	loginWhitelist      LoginWhitelistService
+	robotPlans          RobotPlanService
+	currencies          CurrencyService
+	config              config.Config
+	logger              *slog.Logger
+	betPlacer           BetPlacer
+	readiness           ReadinessChecker
+	wallets             WalletReader
+	rounds              RoundReader
+	bets                BetReader
+	canceller           RoundCanceller
+	auth                *Authenticator
+	logins              LoginService
+	registers           RegisterService
+	sessions            SessionService
+	passwords           PasswordChangeService
+	secondaryPasswords  SecondaryPasswordService
+	adminSecurity       AdminSecurityService
+	auditor             AuditRecorder
+	chainWebhook        *chainWebhookConfig
+	withdrawals         WithdrawalService
+	depositHistory      DepositReader
+	depositAddresses    DepositAddressService
+	credits             CreditService
+	rebates             RebateService
+	tasks               TaskService
+	providerAssets      ProviderAssetReader
+	agents              AgentService
+	userAdmin           UserAdminService
+	userControls        UserControlService
+	operations          OperationsService
+	phrases             PhraseService
+	analytics           AnalyticsService
+	gameAdmin           GameAdminService
+	gameRoomAdmin       GameRoomService
+	hashConfig          HashConfigService
+	chat                ChatService
+	uploads             UploadService
+	leaderboards        LeaderboardService
+	redPackets          RedPacketService
+	publicUsers         PublicUserResolver
 }
 
 type LoginService interface {
@@ -179,6 +184,7 @@ func New(cfg config.Config, logger *slog.Logger, betPlacer BetPlacer, readiness 
 
 func (server *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	server.registerAdminCompletionRoutes(mux)
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /v1/platform", server.platform)
@@ -224,6 +230,13 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/agents/me/team-summary", server.protect(server.teamSummary))
 	mux.HandleFunc("PUT /v1/admin/agents/{agentID}/commission-rate", server.protectRoles(server.setAgentCommissionRate, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/commissions", server.protectRoles(server.adminCommissions, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/rebate-configs", server.protectRoles(server.rebateConfigs, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/login-whitelist", server.protectRoles(server.loginWhitelistHandler, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/login-whitelist", server.protectRoles(server.secondPassword(server.loginWhitelistHandler), identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("DELETE /v1/admin/login-whitelist/{entryID}", server.protectRoles(server.secondPassword(server.loginWhitelistHandler), identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/rebate-records", server.protectRoles(server.rebateRecords, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/agents/me/rebates", server.protect(server.rebateRecords))
+	mux.HandleFunc("PUT /v1/admin/rebate-configs/{configID}", server.protectRoles(server.secondPassword(server.rebateConfigs), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/commissions/{commissionID}/reverse", server.protectRoles(server.reverseCommission, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/agents/{agentID}/commissions", server.protectRoles(server.grantCommission, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/bets", server.protect(server.placeBet))
@@ -744,7 +757,7 @@ func betPage(writer http.ResponseWriter, request *http.Request) (int, int, bool)
 }
 
 func validBetStatus(status string) bool {
-	return status == "" || status == "accepted" || status == "cancelled" || status == "won" || status == "lost" || status == "refunded"
+	return status == "" || status == "accepted" || status == "cancelled" || status == "won" || status == "lost" || status == "refunded" || status == "voided"
 }
 
 func (server *Server) openRounds(writer http.ResponseWriter, request *http.Request) {
@@ -936,7 +949,7 @@ func writeBetError(writer http.ResponseWriter, err error) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, betting.ErrRoundNotFound), errors.Is(err, wallet.ErrWalletNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
-	case errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds), errors.Is(err, betting.ErrStakeOutsideLimits), errors.Is(err, betting.ErrHashRoomConflict):
+	case errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds), errors.Is(err, betting.ErrStakeOutsideLimits), errors.Is(err, betting.ErrHashRoomConflict), errors.Is(err, betting.ErrRequestConflict):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, betting.ErrAccountDisabled), errors.Is(err, betting.ErrBettingBanned):
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})

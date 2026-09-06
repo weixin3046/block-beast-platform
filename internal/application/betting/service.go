@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/block-beast/platform/internal/application/rebate"
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/domain/wallet"
@@ -27,6 +28,7 @@ var ErrSelectionOutsidePlay = errors.New("selection is not available for this pl
 var ErrHashRoomRequired = errors.New("hash room and play mode are required")
 var ErrHashRoomConflict = errors.New("only one hash rate room may be used in the same round")
 var ErrBetCancellationClosed = errors.New("bet can only be cancelled before betting closes")
+var ErrRequestConflict = errors.New("bet request ID has already been used with different parameters")
 
 type PlaceBetRequest struct {
 	RobotPlanID     string          `json:"-"`
@@ -41,6 +43,8 @@ type PlaceBetRequest struct {
 }
 
 type PlacedBet struct {
+	PlacementCount              int64           `json:"placement_count"`
+	LastPlacedAt                time.Time       `json:"last_placed_at"`
 	Decimals                    int             `json:"decimals"`
 	Stake                       string          `json:"stake"`
 	Payout                      string          `json:"payout"`
@@ -78,6 +82,8 @@ type PublicPlayer struct {
 }
 
 type PublicBet struct {
+	PlacementCount   int64           `json:"placement_count"`
+	LastPlacedAt     time.Time       `json:"last_placed_at"`
 	Decimals         int             `json:"decimals"`
 	Stake            string          `json:"stake"`
 	Payout           string          `json:"payout"`
@@ -166,15 +172,19 @@ const placedBetSelect = `
 		gt.code,gt.name,r.sequence,w.currency,
 		COALESCE(b.game_room_id::text,''),COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),
 		b.selection,b.stake_minor,COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-		b.status,b.payout_minor,debit.balance_after_minor,b.balance_after_settlement_minor,b.created_at,b.settled_at,c.decimals
+		b.status,b.payout_minor,debit.balance_after_minor,b.balance_after_settlement_minor,b.created_at,b.settled_at,c.decimals,
+		b.placement_count,COALESCE(b.last_placed_at,b.created_at)
 	FROM bets b
 	JOIN wallets w ON w.id=b.wallet_id
 	JOIN currencies c ON c.code=w.currency
 	JOIN rounds r ON r.id=b.round_id
 	JOIN game_types gt ON gt.id=r.game_type_id
 	LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
-	LEFT JOIN ledger_entries debit ON debit.wallet_id=b.wallet_id AND debit.business_type='bet'
-		AND debit.business_id=b.id::text AND debit.entry_type='bet_debit'`
+	LEFT JOIN LATERAL (SELECT le.balance_after_minor FROM ledger_entries le
+		LEFT JOIN bet_placements bp ON bp.id=le.bet_placement_id
+		WHERE le.wallet_id=b.wallet_id AND le.business_type='bet'
+		AND le.business_id=b.id::text AND le.entry_type='bet_debit'
+		ORDER BY COALESCE(bp.created_at,le.occurred_at) DESC,le.id DESC LIMIT 1) debit ON true`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -186,7 +196,8 @@ func scanPlacedBet(row rowScanner) (PlacedBet, error) {
 		&bet.GameType, &bet.GameName, &bet.RoundSequence, &bet.Currency,
 		&bet.GameRoomID, &bet.GameRoomCode, &bet.GameRoomName, &bet.PlayMode,
 		&bet.Selection, &bet.StakeMinor, &bet.PayoutMultiplier, &bet.PayoutDivisor,
-		&bet.Status, &bet.PayoutMinor, &bet.BalanceAfterBetMinor, &bet.BalanceAfterSettlementMinor, &bet.PlacedAt, &bet.SettledAt, &bet.Decimals)
+		&bet.Status, &bet.PayoutMinor, &bet.BalanceAfterBetMinor, &bet.BalanceAfterSettlementMinor, &bet.PlacedAt, &bet.SettledAt, &bet.Decimals,
+		&bet.PlacementCount, &bet.LastPlacedAt)
 	if err != nil {
 		return PlacedBet{}, err
 	}
@@ -253,7 +264,8 @@ const publicBetSelect = `
 			b.round_id::text,gt.code,gt.name,r.sequence,w.currency,
 			COALESCE(b.game_room_id::text,''),COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),
 			b.selection,b.stake_minor,COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-			b.status,b.payout_minor,b.created_at,b.settled_at,c.decimals
+			b.status,b.payout_minor,b.created_at,b.settled_at,c.decimals,
+			b.placement_count,COALESCE(b.last_placed_at,b.created_at)
 		FROM bets b
 		JOIN users u ON u.id=b.user_id
 		JOIN wallets w ON w.id=b.wallet_id
@@ -268,7 +280,7 @@ func scanPublicBet(row rowScanner) (PublicBet, error) {
 		&item.RoundID, &item.GameType, &item.GameName, &item.RoundSequence, &item.Currency, &item.GameRoomID,
 		&item.GameRoomCode, &item.GameRoomName, &item.PlayMode, &item.Selection, &item.StakeMinor,
 		&item.PayoutMultiplier, &item.PayoutDivisor, &item.Status,
-		&item.PayoutMinor, &item.PlacedAt, &item.SettledAt, &item.Decimals); err != nil {
+		&item.PayoutMinor, &item.PlacedAt, &item.SettledAt, &item.Decimals, &item.PlacementCount, &item.LastPlacedAt); err != nil {
 		return PublicBet{}, err
 	}
 	item.PayoutRate = formatPayoutRate(item.PayoutMultiplier, item.PayoutDivisor)
@@ -290,6 +302,16 @@ func (service *Service) CancelBet(ctx context.Context, betID, userID string) (Pl
 	}
 	defer tx.Rollback(ctx)
 	var bet PlacedBet
+	// Serialize with settlement before locking this bet or its wallet.
+	var cancelRoundID string
+	if err = tx.QueryRow(ctx, `SELECT round_id::text FROM bets WHERE id=$1 AND user_id=$2`, betID, userID).Scan(&cancelRoundID); errors.Is(err, pgx.ErrNoRows) {
+		return PlacedBet{}, ErrBetNotFound
+	} else if err != nil {
+		return PlacedBet{}, err
+	}
+	if _, err = tx.Exec(ctx, `SELECT id FROM rounds WHERE id=$1 FOR UPDATE`, cancelRoundID); err != nil {
+		return PlacedBet{}, err
+	}
 	var walletID string
 	var betClosesAt time.Time
 	err = tx.QueryRow(ctx, `
@@ -434,7 +456,7 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 		return PlacedBet{}, ErrInvalidSelection
 	}
 
-	existing, err := findBet(ctx, tx, request.AccountID, request.ClientRequestID)
+	existing, err := findPlacement(ctx, tx, request)
 	if err == nil {
 		return existing, nil
 	}
@@ -445,6 +467,13 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 	var userStatus string
 	var simulated bool
 	if err := tx.QueryRow(ctx, `SELECT status,is_virtual FROM users WHERE id=$1 FOR UPDATE`, request.AccountID).Scan(&userStatus, &simulated); err != nil {
+		return PlacedBet{}, err
+	}
+	// Recheck after serializing this user's writes, before state/limit checks.
+	// A concurrent retry must succeed even if the first request reached a limit.
+	if existing, err = findPlacement(ctx, tx, request); err == nil {
+		return existing, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, err
 	}
 	if requireRobot && !simulated {
@@ -513,7 +542,7 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 			return PlacedBet{}, ErrHashRoomConflict
 		}
 		var existingStake int64
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(stake_minor),0) FROM bets WHERE round_id=$1 AND user_id=$2 AND game_room_id=$3 AND play_mode=$4 AND selection=$5 AND status='accepted'`, request.RoundID, request.AccountID, request.GameRoomID, request.PlayMode, request.Selection).Scan(&existingStake); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(b.stake_minor),0) FROM bets b JOIN wallets w ON w.id=b.wallet_id WHERE b.round_id=$1 AND b.user_id=$2 AND b.game_room_id=$3 AND b.play_mode=$4 AND b.selection->>'pick'=$5::jsonb->>'pick' AND b.status='accepted' AND w.currency=$6`, request.RoundID, request.AccountID, request.GameRoomID, request.PlayMode, request.Selection, request.Currency).Scan(&existingStake); err != nil {
 			return PlacedBet{}, err
 		}
 		if existingStake > math.MaxInt64-request.StakeMinor || existingStake+request.StakeMinor > maxStake {
@@ -527,14 +556,6 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 			(request.StakeMinor < limit.MinStakeMinor || request.StakeMinor > limit.MaxStakeMinor) {
 			return PlacedBet{}, ErrStakeOutsideLimits
 		}
-	}
-
-	existing, err = findBet(ctx, tx, request.AccountID, request.ClientRequestID)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return PlacedBet{}, err
 	}
 
 	var walletID string
@@ -566,6 +587,26 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 		StakeMinor:      request.StakeMinor,
 		Status:          "accepted",
 	}
+	merging := false
+	if sharedHashRules(rules) {
+		// The round lock is shared with cancel/void/settlement. Never combine
+		// different currencies, picks, rooms, or historical non-merge orders.
+		var total int64
+		err = tx.QueryRow(ctx, `SELECT id::text,stake_minor FROM bets
+			WHERE user_id=$1 AND round_id=$2 AND wallet_id=$3 AND game_room_id=$4
+			AND play_mode=$5 AND selection->>'pick'=$6::jsonb->>'pick'
+			AND status='accepted' AND merge_enabled AND is_simulated=$7 FOR UPDATE`,
+			request.AccountID, request.RoundID, walletID, request.GameRoomID, request.PlayMode, request.Selection, simulated).Scan(&bet.BetID, &total)
+		if err == nil {
+			if total > math.MaxInt64-request.StakeMinor {
+				return PlacedBet{}, ErrStakeOutsideLimits
+			}
+			merging = true
+			bet.StakeMinor += total
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return PlacedBet{}, err
+		}
+	}
 	if !simulated {
 		availableMinor -= request.StakeMinor
 		_, err = tx.Exec(ctx, `
@@ -576,13 +617,29 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 			return PlacedBet{}, err
 		}
 	}
-	err = tx.QueryRow(ctx, `
+	if merging {
+		_, err = tx.Exec(ctx, `UPDATE bets SET stake_minor=$2,placement_count=placement_count+1,last_placed_at=clock_timestamp() WHERE id=$1`, bet.BetID, bet.StakeMinor)
+	} else {
+		err = tx.QueryRow(ctx, `
 		INSERT INTO bets (id, client_request_id, round_id, user_id, wallet_id, game_room_id, play_mode,
-			selection, stake_minor, status, payout_multiplier_snapshot, payout_divisor_snapshot,is_simulated,robot_plan_id)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9, 'accepted', $10, $11,$12,NULLIF($13,'')::uuid)
+			selection, stake_minor, status, payout_multiplier_snapshot, payout_divisor_snapshot,is_simulated,robot_plan_id,merge_enabled,last_placed_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9, 'accepted', $10, $11,$12,NULLIF($13,'')::uuid,$14,clock_timestamp())
 		RETURNING created_at`, bet.BetID, bet.ClientRequestID, bet.RoundID, bet.AccountID, walletID,
-		bet.GameRoomID, bet.PlayMode, bet.Selection, bet.StakeMinor, payoutMultiplier, payoutDivisor, simulated, request.RobotPlanID).
-		Scan(&bet.PlacedAt)
+			bet.GameRoomID, bet.PlayMode, bet.Selection, bet.StakeMinor, payoutMultiplier, payoutDivisor, simulated, request.RobotPlanID, sharedHashRules(rules)).
+			Scan(&bet.PlacedAt)
+	}
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	if sharedHashRules(rules) && !merging {
+		if err = rebate.SnapshotTx(ctx, tx, bet.BetID); err != nil {
+			return PlacedBet{}, err
+		}
+	}
+	placementID := uuid.NewString()
+	_, err = tx.Exec(ctx, `INSERT INTO bet_placements(id,bet_id,user_id,round_id,client_request_id,currency,game_room_id,play_mode,selection,stake_minor,robot_plan_id)
+		VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,'')::uuid,NULLIF($8,''),$9,$10,NULLIF($11,'')::uuid)`,
+		placementID, bet.BetID, request.AccountID, request.RoundID, request.ClientRequestID, request.Currency, request.GameRoomID, request.PlayMode, request.Selection, request.StakeMinor, request.RobotPlanID)
 	if err != nil {
 		return PlacedBet{}, err
 	}
@@ -590,8 +647,8 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 	if !simulated {
 		_, err = tx.Exec(ctx, `
 		INSERT INTO ledger_entries (
-			id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor
-		) VALUES ($1, $2, 'bet', $3, 'bet_debit', $4, $5)`, uuid.NewString(), walletID, bet.BetID, -bet.StakeMinor, availableMinor)
+			id, wallet_id, business_type, business_id, entry_type, amount_minor, balance_after_minor,bet_placement_id
+		) VALUES ($1, $2, 'bet', $3, 'bet_debit', $4, $5,$6)`, uuid.NewString(), walletID, bet.BetID, -request.StakeMinor, availableMinor, placementID)
 		if err != nil {
 			return PlacedBet{}, err
 		}
@@ -600,9 +657,15 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 	if err != nil {
 		return PlacedBet{}, err
 	}
+	addedStake, err := wallet.FormatDisplayAmount(request.StakeMinor, publicBet.Decimals)
+	if err != nil {
+		return PlacedBet{}, err
+	}
 	payload, err := json.Marshal(struct {
-		Bet PublicBet `json:"bet"`
-	}{Bet: publicBet})
+		Bet         PublicBet `json:"bet"`
+		PlacementID string    `json:"placement_id"`
+		AddedStake  string    `json:"added_stake"`
+	}{Bet: publicBet, PlacementID: placementID, AddedStake: addedStake})
 	if err != nil {
 		return PlacedBet{}, err
 	}
@@ -613,7 +676,7 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 		return PlacedBet{}, err
 	}
 
-	bet, err = findBet(ctx, tx, request.AccountID, request.ClientRequestID)
+	bet, err = findPlacement(ctx, tx, request)
 	if err != nil {
 		return PlacedBet{}, err
 	}
@@ -623,6 +686,29 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 
 func findBet(ctx context.Context, tx pgx.Tx, accountID string, clientRequestID string) (PlacedBet, error) {
 	return scanPlacedBet(tx.QueryRow(ctx, placedBetSelect+` WHERE b.user_id=$1 AND b.client_request_id=$2`, accountID, clientRequestID))
+}
+
+// Return the current canonical order, while validating against the immutable
+// incremental request (the order's stake may already contain later additions).
+func findPlacement(ctx context.Context, tx pgx.Tx, request PlaceBetRequest) (PlacedBet, error) {
+	var betID string
+	var matches bool
+	err := tx.QueryRow(ctx, `SELECT bet_id::text,
+		round_id=$3::uuid AND currency=$4 AND game_room_id IS NOT DISTINCT FROM NULLIF($5,'')::uuid
+		AND COALESCE(play_mode,'')=$6 AND selection=$7::jsonb AND stake_minor=$8
+		AND robot_plan_id IS NOT DISTINCT FROM NULLIF($9,'')::uuid
+		FROM bet_placements WHERE user_id=$1 AND client_request_id=$2`,
+		request.AccountID, request.ClientRequestID, request.RoundID, request.Currency, request.GameRoomID,
+		request.PlayMode, request.Selection, request.StakeMinor, request.RobotPlanID).Scan(&betID, &matches)
+	if err != nil {
+		return PlacedBet{}, err
+	}
+	if !matches {
+		return PlacedBet{}, ErrRequestConflict
+	}
+	bet, err := scanPlacedBet(tx.QueryRow(ctx, placedBetSelect+` WHERE b.id=$1`, betID))
+	bet.ClientRequestID = request.ClientRequestID
+	return bet, err
 }
 
 func sharedHashRules(rules game.Rules) bool {

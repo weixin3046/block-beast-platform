@@ -203,7 +203,7 @@ func (s *Service) RecordLogin(ctx context.Context, userID, ip, audience string) 
 	return err
 }
 func (s *Service) UserLoginIPs(ctx context.Context, publicID int64) ([]LoginIP, error) {
-	rows, err := s.pool.Query(ctx, `SELECT h.ip_address::text,min(h.logged_in_at),max(h.logged_in_at),count(*) FROM user_login_history h JOIN users u ON u.id=h.user_id WHERE u.public_id=$1 GROUP BY h.ip_address ORDER BY max(h.logged_in_at) DESC`, publicID)
+	rows, err := s.pool.Query(ctx, `SELECT host(h.ip_address),min(h.logged_in_at),max(h.logged_in_at),count(*) FROM user_login_history h JOIN users u ON u.id=h.user_id WHERE u.public_id=$1 GROUP BY h.ip_address ORDER BY max(h.logged_in_at) DESC`, publicID)
 	if err != nil {
 		return nil, err
 	}
@@ -214,14 +214,22 @@ func (s *Service) UserLoginIPs(ctx context.Context, publicID int64) ([]LoginIP, 
 		if err := rows.Scan(&v.IP, &v.FirstSeen, &v.LastSeen, &v.LoginCount); err != nil {
 			return nil, err
 		}
-		users, err := s.UsersByLoginIP(ctx, v.IP)
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Release the first query's connection before querying associated users.
+	// Otherwise a single-connection pool (or concurrent saturated pools) stalls.
+	rows.Close()
+	for i := range out {
+		users, err := s.UsersByLoginIP(ctx, out[i].IP)
 		if err != nil {
 			return nil, err
 		}
-		v.Users = users
-		out = append(out, v)
+		out[i].Users = users
 	}
-	return out, rows.Err()
+	return out, nil
 }
 func (s *Service) UsersByLoginIP(ctx context.Context, ip string) ([]LoginIPUser, error) {
 	addr, err := netip.ParseAddr(strings.TrimSpace(ip))
@@ -299,38 +307,15 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 		return VirtualAccount{}, err
 	}
 	defer tx.Rollback(ctx)
-	if in.AvatarURL != "" {
-		var valid bool
-		if _, err := uuid.Parse(in.ActorUserID); err != nil {
-			return VirtualAccount{}, ErrInvalidAvatar
-		}
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM uploads WHERE owner_user_id=$1 AND storage_key=$2 AND status='confirmed' AND lower(content_type) IN ('image/jpeg','image/png','image/webp'))`, in.ActorUserID, in.AvatarURL).Scan(&valid); err != nil {
-			return VirtualAccount{}, err
-		}
-		if !valid {
-			return VirtualAccount{}, ErrInvalidAvatar
-		}
-	}
-	id := uuid.NewString()
-	if _, err = tx.Exec(ctx, `INSERT INTO users(id,login_name,display_name,is_virtual) VALUES($1,$2,$3,true)`, id, in.LoginName, in.DisplayName); err != nil {
+	account, err := createPasswordAccount(ctx, tx, passwordAccountSpec{
+		ActorUserID: in.ActorUserID, AvatarURL: in.AvatarURL, LoginName: in.LoginName,
+		DisplayName: in.DisplayName, PasswordHash: passwordHash, IsVirtual: true,
+	})
+	if err != nil {
 		return VirtualAccount{}, err
 	}
-	var created VirtualAccount
-	if err = tx.QueryRow(ctx, `UPDATE users SET display_name=CASE WHEN display_name='' THEN '用户'||public_id::text ELSE display_name END,avatar_url=$2 WHERE id=$1 RETURNING public_id,login_name,display_name,status,CASE WHEN avatar_url='' THEN '' ELSE '/v1/avatars/'||public_id::text||'?v='||regexp_replace(avatar_url,'^.*/','') END`, id, in.AvatarURL).Scan(&created.UserID, &created.LoginName, &created.DisplayName, &created.UserStatus, &created.AvatarURL); err != nil {
-		return VirtualAccount{}, err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO auth_identities(id,user_id,provider,subject,password_hash) VALUES($1,$2,'password',$3,$4)`, uuid.NewString(), id, in.LoginName, passwordHash); err != nil {
-		return VirtualAccount{}, err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO roles(id,code,description) VALUES($1,'player','player') ON CONFLICT(code) DO NOTHING`, uuid.NewString()); err != nil {
-		return VirtualAccount{}, err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='player'`, id); err != nil {
-		return VirtualAccount{}, err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO wallets(id,user_id,currency) SELECT gen_random_uuid(),$1,code FROM currencies WHERE enabled AND create_on_registration`, id); err != nil {
-		return VirtualAccount{}, err
-	}
+	id := account.InternalID
+	created := VirtualAccount{UserID: account.PublicID, LoginName: account.LoginName, DisplayName: account.DisplayName, UserStatus: account.Status, AvatarURL: account.AvatarURL}
 	for currency, amount := range in.InitialBalances {
 		if amount < 0 {
 			return VirtualAccount{}, ErrInvalidVirtualAccount

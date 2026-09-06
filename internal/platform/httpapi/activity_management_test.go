@@ -97,7 +97,7 @@ func TestPublicSpinRecordsOnlyExposeDisplayAmounts(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer "+issueTestToken(t, "actor", []string{"player"}))
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"amount":"1.500"`) || !strings.Contains(w.Body.String(), `"is_virtual":true`) || strings.Contains(w.Body.String(), "balance") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"amount":"1.5"`) || !strings.Contains(w.Body.String(), `"is_virtual":true`) || strings.Contains(w.Body.String(), "balance") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

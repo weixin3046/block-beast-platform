@@ -43,6 +43,7 @@ type Entry struct {
 	Reward              *Reward   `json:"reward,omitempty"`
 }
 type Board struct {
+	Self        *Entry     `json:"self"`
 	Decimals    int        `json:"decimals"`
 	Period      string     `json:"period"`
 	PeriodType  string     `json:"period_type"`
@@ -245,6 +246,10 @@ func (s *Service) pay(ctx context.Context, periodID, currency, user string, rank
 }
 
 func (s *Service) List(ctx context.Context, period, currency string, limit int) (Board, error) {
+	return s.ListForUser(ctx, period, currency, limit, "")
+}
+
+func (s *Service) ListForUser(ctx context.Context, period, currency string, limit int, userID string) (Board, error) {
 	currency = strings.ToUpper(strings.TrimSpace(currency))
 	if currency == "" {
 		return Board{}, ErrInvalidCurrency
@@ -269,21 +274,26 @@ func (s *Service) List(ctx context.Context, period, currency string, limit int) 
 		end = end.AddDate(0, 0, shift)
 	}
 	o := Board{Period: period, PeriodType: kind, Currency: currency, StartsAt: start, EndsAt: end, Status: "running", Items: []Entry{}}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return Board{}, err
+	}
+	defer tx.Rollback(ctx)
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT decimals FROM currencies WHERE code=$1`, currency).Scan(&o.Decimals); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT decimals FROM currencies WHERE code=$1`, currency).Scan(&o.Decimals); err != nil {
 		return Board{}, ErrInvalidCurrency
 	}
 	var id string
-	err := s.pool.QueryRow(ctx, `SELECT id::text,status,refreshed_at FROM leaderboard_periods WHERE period_type=$1 AND starts_at=$2`, kind, start).Scan(&id, &o.Status, &o.RefreshedAt)
+	err = tx.QueryRow(ctx, `SELECT id::text,status,refreshed_at FROM leaderboard_periods WHERE period_type=$1 AND starts_at=$2`, kind, start).Scan(&id, &o.Status, &o.RefreshedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, nil
 	}
 	if err != nil {
 		return Board{}, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT e.rank,e.public_user_id,e.display_name,e.avatar_url,e.is_virtual,e.effective_stake_minor,e.total_payout_minor,e.available_minor,e.first_effective_at,d.reward_currency,d.reward_minor FROM leaderboard_entries e LEFT JOIN leaderboard_reward_distributions d ON d.period_id=e.period_id AND d.leaderboard_currency=e.currency AND d.user_id=e.user_id WHERE e.period_id=$1 AND e.currency=$2 ORDER BY e.rank LIMIT $3`, id, currency, limit)
+	rows, err := tx.Query(ctx, `SELECT e.rank,e.public_user_id,e.display_name,e.avatar_url,e.is_virtual,e.effective_stake_minor,e.total_payout_minor,e.available_minor,e.first_effective_at,d.reward_currency,d.reward_minor,e.user_id::text=$4 FROM leaderboard_entries e LEFT JOIN leaderboard_reward_distributions d ON d.period_id=e.period_id AND d.leaderboard_currency=e.currency AND d.user_id=e.user_id WHERE e.period_id=$1 AND e.currency=$2 AND (e.rank<=$3 OR e.user_id::text=$4) ORDER BY e.rank`, id, currency, limit, userID)
 	if err != nil {
 		return Board{}, err
 	}
@@ -292,7 +302,8 @@ func (s *Service) List(ctx context.Context, period, currency string, limit int) 
 		var e Entry
 		var c *string
 		var a *int64
-		if err := rows.Scan(&e.Rank, &e.UserID, &e.DisplayName, &e.AvatarURL, &e.IsVirtual, &e.EffectiveStakeMinor, &e.TotalPayoutMinor, &e.AvailableMinor, &e.FirstBetAt, &c, &a); err != nil {
+		var self bool
+		if err := rows.Scan(&e.Rank, &e.UserID, &e.DisplayName, &e.AvatarURL, &e.IsVirtual, &e.EffectiveStakeMinor, &e.TotalPayoutMinor, &e.AvailableMinor, &e.FirstBetAt, &c, &a, &self); err != nil {
 			return Board{}, err
 		}
 		if c != nil {
@@ -311,7 +322,13 @@ func (s *Service) List(ctx context.Context, period, currency string, limit int) 
 			v, _ := wallet.FormatDisplayAmount(*e.AvailableMinor, o.Decimals)
 			e.Available = &v
 		}
-		o.Items = append(o.Items, e)
+		if self {
+			copy := e
+			o.Self = &copy
+		}
+		if e.Rank <= limit {
+			o.Items = append(o.Items, e)
+		}
 	}
 	return o, rows.Err()
 }

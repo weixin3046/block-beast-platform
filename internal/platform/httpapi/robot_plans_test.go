@@ -42,7 +42,7 @@ func TestRobotPlanAmountsAndRoles(t *testing.T) {
 		if w.Code != want {
 			t.Fatalf("%s %d %s", role, w.Code, w.Body.String())
 		}
-		if want == 201 && (stub.input.MinStakeMinor != 1500 || stub.input.MaxStakeMinor != 100000 || strings.Contains(w.Body.String(), "_minor") || !strings.Contains(w.Body.String(), `"min_stake":"1.500"`)) {
+		if want == 201 && (stub.input.MinStakeMinor != 1500 || stub.input.MaxStakeMinor != 100000 || strings.Contains(w.Body.String(), "_minor") || !strings.Contains(w.Body.String(), `"min_stake":"1.5"`)) {
 			t.Fatal(w.Body.String(), stub.input)
 		}
 		if want != 201 && stub.calls != 0 {

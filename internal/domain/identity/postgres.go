@@ -176,6 +176,11 @@ func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, 
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	// Registration also extends the materialized referral graph. Serialize it
+	// with both player and administrator binding before acquiring user locks.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('agent-relation-graph',0))`); err != nil {
+		return "", err
+	}
 	if invitationCode < MinimumInvitationCode {
 		return "", ErrInvitationCodeNotFound
 	}

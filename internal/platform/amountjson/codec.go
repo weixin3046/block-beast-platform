@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/block-beast/platform/internal/application/currency"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/block-beast/platform/internal/domain/wallet"
@@ -51,6 +52,22 @@ func (c *Codec) precision(code string, input bool) (int, error) {
 
 // These are monetary fields only: odds, ranks, weights and counts are untouched.
 var publicMoneyFields = strings.Fields(`amount stake payout threshold progress reward cost total remaining available frozen balance_after balance_before balance_after_bet balance_after_settlement balance_after_refund delta available_delta frozen_delta available_after frozen_after effective_stake total_payout net_win valid_stake paid_commission guess_max_stake dodge_max_stake road_max_stake min_stake max_stake clearance gift penalty deposit credit balance cost_balance_after_spin refund`)
+
+var displayOnlyMoneyFields = strings.Fields(`total_bet base paid_amount reversed_amount added_stake cost_balance reward_balance`)
+var plainDecimal = regexp.MustCompile(`^-?[0-9]+\.[0-9]+$`)
+
+// Only remove insignificant fractional zeros. Never parse through float64,
+// truncate significant digits, or reinterpret identifiers and odds as money.
+func compactMoney(value string) string {
+	if !plainDecimal.MatchString(value) {
+		return value
+	}
+	value = strings.TrimRight(strings.TrimRight(value, "0"), ".")
+	if value == "-0" {
+		return "0"
+	}
+	return value
+}
 
 func moneyCurrency(m map[string]any, field, inherited string) string {
 	code := inherited
@@ -143,7 +160,7 @@ func (c *Codec) Convert(v any, inherited string, input, displayAdjustment bool) 
 							if err != nil {
 								return err
 							}
-							limits[currency] = s
+							limits[currency] = compactMoney(s)
 						}
 					} else if err := c.Convert(value, currency, input, displayAdjustment); err != nil {
 						return err
@@ -227,6 +244,13 @@ func (c *Codec) Convert(v any, inherited string, input, displayAdjustment bool) 
 						return err
 					}
 					x[field] = s
+				}
+			}
+			for _, fields := range [][]string{publicMoneyFields, displayOnlyMoneyFields} {
+				for _, field := range fields {
+					if value, ok := x[field].(string); ok {
+						x[field] = compactMoney(value)
+					}
 				}
 			}
 		}

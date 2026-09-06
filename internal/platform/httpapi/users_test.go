@@ -137,3 +137,25 @@ func TestSecondaryPasswordChangeStillRejectsWrongCurrentPassword(t *testing.T) {
 		t.Fatalf("change calls = %d, set calls = %d", passwords.changeCalls, passwords.setCalls)
 	}
 }
+
+func TestSetAgentLevelRequiresExplicitValue(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{
+		{`{"agent_level":0}`, http.StatusOK},
+		{`{}`, http.StatusBadRequest},
+		{`{"agent_level":null}`, http.StatusBadRequest},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithUserAdmin(stubUserAdmin{}))
+			request := httptest.NewRequest(http.MethodPut, "/v1/admin/users/100000/agent-level", strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "admin-1", []string{identity.RoleAdmin}))
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", response.Code, tc.status, response.Body.String())
+			}
+		})
+	}
+}

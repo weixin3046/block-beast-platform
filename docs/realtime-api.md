@@ -265,6 +265,8 @@ WebSocket 事件是状态变化通知，不是可回放日志：
 
 ## 6. 游戏事件
 
+HTTP与Socket所有金额字符串去掉小数末尾多余的零，例如 `"1.500"` 显示为 `"1.5"`，`"0.000"` 为 `"0"`；下面旧示例的补零金额以此规则为准。此规则不改变币种精度和赔率字段。
+
 ### 6.1 `game.bet.placed`
 
 触发：投注已创建，余额扣减、账本和 Outbox 已在同一事务中提交。
@@ -306,7 +308,9 @@ WebSocket 事件是状态变化通知，不是可回放日志：
 }
 ```
 
-这是广播事件，`payload.bet` 与 `GET /v1/bets/public-feed` 的单条记录结构一致，前端可直接按 `bet_id` 插入或去重。事件不包含余额、登录账号或内部用户 UUID。
+这是广播事件，`payload.bet` 与 `GET /v1/bets/public-feed` 的单条记录结构一致。0064起，同条件追加投注保持同一 `bet_id`，`bet.stake` 为合计金额；前端必须按 `bet_id` 插入或更新，不能仅忽略重复ID。`bet.placement_count` 是递增版本，忽略次数小于或等于当前行的旧投注事件，且不得以迟到的投注事件覆盖已取消/已结算状态；断线后重新拉取接口。`bet.last_placed_at` 为最近追加时间，`placed_at` 保留首单时间。
+
+0064新事件在payload内另有 `placement_id`（本次成功下单UUID）和 `added_stake`（实际币种金额字符串，例如 `"10.000"`）；展示最新投注动态时用added_stake，显示整单时用bet.stake。旧事件可能没有这两个字段。事件不包含余额、登录账号或内部用户 UUID。
 
 ### 6.1.1 `game.bet.cancelled`
 
