@@ -6392,12 +6392,9 @@ components:
       additionalProperties: false
       required:
       - currency
-      - guess_multiplier
-      - guess_divisor
-      - dodge_multiplier
-      - dodge_divisor
-      - road_multiplier
-      - road_divisor
+      - guess_rate
+      - dodge_rate
+      - road_rate
       - guess_max_stake
       - dodge_max_stake
       - road_max_stake
@@ -6406,31 +6403,15 @@ components:
         currency:
           type: string
           minLength: 1
-        guess_multiplier:
-          type: integer
-          format: int64
-          minimum: 1
-          description: 定点整数倍率，例如 9350/1000 = 9.35。
-        guess_divisor:
-          type: integer
-          format: int64
-          minimum: 1
-        dodge_multiplier:
-          type: integer
-          format: int64
-          minimum: 1
-        dodge_divisor:
-          type: integer
-          format: int64
-          minimum: 1
-        road_multiplier:
-          type: integer
-          format: int64
-          minimum: 1
-        road_divisor:
-          type: integer
-          format: int64
-          minimum: 1
+        guess_rate:
+          type: [string, number]
+          description: 实际竞猜倍率，例如9.35；请求支持数字或十进制字符串，响应为字符串。后端精确转换，不接受旧multiplier/divisor字段。
+        dodge_rate:
+          type: [string, number]
+          description: 实际躲避倍率，例如1.08；响应为字符串。大于0，最多18位小数。
+        road_rate:
+          type: [string, number]
+          description: 实际上下路倍率，例如1.94；响应为字符串。大于0，最多18位小数，约分后分子分母须在int64范围内。
         guess_max_stake:
           type:
           - string

@@ -117,6 +117,9 @@ func (c *Codec) Convert(v any, inherited string, input, displayAdjustment bool) 
 			}
 		}
 	case map[string]any:
+		if err := convertHashRates(x, input); err != nil {
+			return err
+		}
 		if input {
 			for _, key := range []string{"currency", "cost_currency", "reward_currency", "accumulation_currency"} {
 				if value, ok := x[key].(string); ok {

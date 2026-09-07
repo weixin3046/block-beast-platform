@@ -162,6 +162,17 @@ func TestOpenAPIComponentTypesMatchGo(t *testing.T) {
 				if tc.publicIDs && isPublicUserIDField(name) {
 					expected = "integer"
 				}
+				// The shared public codec exposes hash odds as actual decimal
+				// strings, while application structs retain exact fractions.
+				if tc.name == "HashCurrencyConfig" {
+					if strings.HasSuffix(name, "_divisor") {
+						continue
+					}
+					if strings.HasSuffix(name, "_multiplier") {
+						name = strings.TrimSuffix(name, "_multiplier") + "_rate"
+						expected = "string"
+					}
+				}
 				if expected != "" {
 					checkContractType(t, tc.name, name, expected)
 				}
