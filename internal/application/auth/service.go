@@ -307,7 +307,7 @@ func (service *Service) refresh(ctx context.Context, refreshToken string, audien
 	if err != nil {
 		return LoginResult{}, err
 	}
-	accessToken, err := identity.IssueAccessToken(service.secret, userID, roles, service.now().UTC(), service.ttl)
+	accessToken, err := service.sessionAccessToken(ctx, userID, roles, newTokenHash)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -411,7 +411,25 @@ func (service *Service) attachRefreshToken(ctx context.Context, result LoginResu
 		return LoginResult{}, err
 	}
 	result.RefreshToken = token
+	result.AccessToken, err = service.sessionAccessToken(ctx, result.UserID, result.Roles, hashRefreshToken(token))
+	if err != nil {
+		return LoginResult{}, err
+	}
 	return result, nil
+}
+
+func (service *Service) sessionAccessToken(ctx context.Context, userID string, roles []string, hash string) (string, error) {
+	sid := ""
+	if reader, ok := service.sessions.(interface {
+		SessionID(context.Context, string) (string, error)
+	}); ok {
+		var err error
+		sid, err = reader.SessionID(ctx, hash)
+		if err != nil {
+			return "", err
+		}
+	}
+	return identity.IssueAccessToken(service.secret, userID, roles, service.now().UTC(), service.ttl, sid)
 }
 
 func randomRefreshToken() (string, error) {

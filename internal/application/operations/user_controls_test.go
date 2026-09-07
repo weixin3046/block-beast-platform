@@ -87,6 +87,23 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 	if err = p.QueryRow(ctx, `SELECT secondary_password_hash FROM users WHERE id=$1`, user).Scan(&hash); err != nil || !identity.VerifyPassword(hash, "trade-secret") {
 		t.Fatal("trade reset", err)
 	}
+	for _, kind := range []string{"login", "secondary"} {
+		for _, password := range []string{"1", strings.Repeat("密", 100)} {
+			if err = s.ResetUserPassword(ctx, admin, uid, kind, password); err != nil {
+				t.Fatalf("reset %s: %v", kind, err)
+			}
+			query := `SELECT password_hash FROM auth_identities WHERE user_id=$1`
+			if kind == "secondary" {
+				query = `SELECT secondary_password_hash FROM users WHERE id=$1`
+			}
+			if err = p.QueryRow(ctx, query, user).Scan(&hash); err != nil || !identity.VerifyPassword(hash, password) {
+				t.Fatalf("verify %s: %v", kind, err)
+			}
+		}
+		if err = s.ResetUserPassword(ctx, admin, uid, kind, " \t"); !errors.Is(err, ErrResetPasswordEmpty) {
+			t.Fatalf("empty %s: %v", kind, err)
+		}
+	}
 	if err = s.SetUserMuted(ctx, op, uid, true); err != nil {
 		t.Fatal(err)
 	}

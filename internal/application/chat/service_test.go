@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -48,6 +49,17 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id IN ($1,$2)`, userID, otherUserID)
 	})
+	staffIDs := []string{uuid.NewString(), uuid.NewString()}
+	for i, role := range []string{"admin", "operator"} {
+		id := staffIDs[i]
+		if _, err := pool.Exec(ctx, `INSERT INTO users (id,display_name,login_name) VALUES ($1,'chat staff',$2)`, id, "chat-"+id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, id) })
+		if _, err := pool.Exec(ctx, `INSERT INTO user_roles (user_id,role_id) SELECT $1,id FROM roles WHERE code=$2`, id, role); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	service := NewService(pool)
 	rooms, err := service.OpenCustomerServiceRooms(ctx, userID)
@@ -129,6 +141,45 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	}
 	if strings.Contains(eventPayload, "sender_user_id") || !strings.Contains(eventPayload, `"display_name": "chat user"`) {
 		t.Fatalf("event payload = %s", eventPayload)
+	}
+	assertTargets := func(messageID string) {
+		t.Helper()
+		var raw []byte
+		if err := pool.QueryRow(ctx, `SELECT payload FROM outbox_events WHERE aggregate_id=$1 AND payload->'message'->>'id'=$2`, room.ID, messageID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			UserIDs   []string `json:"user_ids"`
+			Broadcast bool     `json:"broadcast"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		counts := map[string]int{}
+		for _, id := range payload.UserIDs {
+			counts[id]++
+		}
+		if payload.Broadcast || counts[otherUserID] != 0 {
+			t.Fatal("customer message leaked", payload)
+		}
+		for _, id := range append([]string{userID}, staffIDs...) {
+			if counts[id] != 1 {
+				t.Fatalf("target %s count = %d", id, counts[id])
+			}
+		}
+	}
+	assertTargets(first.ID)
+	// A staff member who is also a room member still receives only one event.
+	if _, err := pool.Exec(ctx, `INSERT INTO chat_room_members (room_id,user_id,member_role) VALUES ($1,$2,'owner')`, room.ID, staffIDs[0]); err != nil {
+		t.Fatal(err)
+	}
+	reply, created, err := service.SendMessage(ctx, room.ID, staffIDs[0], "staff-reply", "reply", true)
+	if err != nil || !created {
+		t.Fatalf("staff reply: %v", err)
+	}
+	assertTargets(reply.ID)
+	if _, _, err := service.SendMessage(ctx, room.ID, otherUserID, "unauthorized", "hello", false); !errors.Is(err, ErrRoomAccessDenied) {
+		t.Fatalf("unauthorized send: %v", err)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE users SET chat_muted=true WHERE id=$1`, userID); err != nil {
 		t.Fatal(err)

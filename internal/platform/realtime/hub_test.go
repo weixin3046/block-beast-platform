@@ -11,7 +11,35 @@ import (
 
 	"github.com/block-beast/platform/internal/domain/identity"
 	"github.com/coder/websocket"
+	"github.com/nats-io/nats.go"
 )
+
+func TestCustomerMessageDeliveredOnlyToTargetsWithoutSubscription(t *testing.T) {
+	hub := NewHub("test", nil)
+	clients := map[string]*client{}
+	for _, id := range []string{"owner", "admin", "operator", "other"} {
+		item := newClient(nil)
+		clients[id] = item
+		hub.add(id, item)
+	}
+	clients["other"].subscribe([]string{"chat"})
+	hub.publish(&nats.Msg{Subject: "chat.message.created", Data: []byte(`{"room_id":"room","message":{"id":"message","body":"hello"},"user_ids":["owner","admin","operator"],"broadcast":false}`)})
+	for id, item := range clients {
+		want := 1
+		if id == "other" {
+			want = 0
+		}
+		if len(item.outbound) != want {
+			t.Fatalf("%s received %d events, want %d", id, len(item.outbound), want)
+		}
+		if want == 1 {
+			payload := <-item.outbound
+			if strings.Contains(string(payload), "user_ids") || !strings.Contains(string(payload), "chat.message.created") {
+				t.Fatalf("invalid envelope: %s", payload)
+			}
+		}
+	}
+}
 
 func TestEventTargetSeparatesPublicAndPrivateEvents(t *testing.T) {
 	if userIDs, broadcast := eventTargets("game.round.settled", []byte(`{}`)); len(userIDs) != 0 || !broadcast {

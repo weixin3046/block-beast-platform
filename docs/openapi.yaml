@@ -3,6 +3,8 @@ info:
   title: Block Beast Platform API
   version: 0.2.0
   description: |
+    0066起真实玩家注册和后台创建账号时原子创建上分/下分客服房间，虚拟账号不自动创建；POST /v1/chat/customer-service仍提供幂等获取或创建，注册响应结构不变。
+    0067起所有账号仅保留最新成功登录会话，旧访问令牌返回401、旧刷新令牌失效；请求字段不变，无需设备ID。刷新沿用会话。迁移撤销旧会话，升级后需重新登录；Socket定期检测撤销并以1008关闭。
     金额响应去掉小数末尾多余的零，仍为字符串：2223.000000返回"2223"，1.500返回"1.5"，0.000返回"0"；有效小数不截断，币种decimals与输入精度限制不变。HTTP和Socket一致，旧示例补零金额以此规则为准。
     前端金额协议：请求提交实际币种金额（JSON数字或十进制字符串），响应仅返回实际金额的十进制字符串，不返回最小单位金额字段。币种精度由后端查询currencies表并转换。旧最小单位请求字段会被拒绝。链上机器回调仍遵循其签名协议。
     对外 error 提示统一为简体中文；HTTP 状态码及机器可读字段、枚举保持不变。未知内部错误统一返回“操作失败，请稍后重试”，不透传数据库或第三方错误详情。
@@ -622,8 +624,8 @@ paths:
                   type: string
                   format: password
                   writeOnly: true
-                  minLength: 12
-                  description: UTF-8最多128字节，不能全空白
+                  minLength: 1
+                  description: 后台重置不限制密码长度，但不能为空或全空白；仍受HTTP请求体大小限制。
                 second_password:
                   type: string
                   format: password
@@ -676,7 +678,7 @@ paths:
                   format: password
                   writeOnly: true
                   minLength: 1
-                  description: UTF-8最多128字节，不能全空白
+                  description: 后台重置不限制密码长度，但不能为空或全空白；仍受HTTP请求体大小限制。
                 second_password:
                   type: string
                   format: password
@@ -3488,6 +3490,7 @@ paths:
       tags:
       - Chat
       summary: 获取或创建当前玩家的上分、下分两个独立客服会话
+      description: 客服新消息通过 WebSocket chat.message.created 定向推送给房间成员及在线 admin、operator，无需订阅 chat；断线重连后通过历史消息接口对账。
       security:
       - bearerAuth: []
       responses:

@@ -28,10 +28,49 @@ type PasswordCredentials struct {
 }
 
 func (repository *PostgresRepository) CreateSession(ctx context.Context, userID string, tokenHash string, audience SessionAudience, expiresAt time.Time) error {
-	_, err := repository.pool.Exec(ctx, `
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id=$1 AND status='active' FOR UPDATE`, userID).Scan(&id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, userID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO sessions (id, user_id, token_hash, audience, expires_at)
 		VALUES ($1, $2, $3, $4, $5)`, uuid.NewString(), userID, tokenHash, audience, expiresAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (repository *PostgresRepository) SessionID(ctx context.Context, tokenHash string) (string, error) {
+	var id string
+	err := repository.pool.QueryRow(ctx, `SELECT id FROM sessions WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at>now()`, tokenHash).Scan(&id)
+	return id, err
+}
+
+func (repository *PostgresRepository) ValidateSession(ctx context.Context, claims AccessTokenClaims) error {
+	if _, err := uuid.Parse(claims.SessionID); err != nil {
+		return ErrInvalidAccessToken
+	}
+	if _, err := uuid.Parse(claims.Subject); err != nil {
+		return ErrInvalidAccessToken
+	}
+	var valid bool
+	err := repository.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.user_id=$2 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active')`, claims.SessionID, claims.Subject).Scan(&valid)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrInvalidAccessToken
+	}
+	return nil
 }
 
 func (repository *PostgresRepository) RotateSession(ctx context.Context, oldTokenHash string, newTokenHash string, audience SessionAudience, expiresAt time.Time) (string, error) {
@@ -222,6 +261,9 @@ func (repository *PostgresRepository) RegisterPasswordUser(ctx context.Context, 
 		return "", err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`, userID, roleID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `SELECT ensure_user_customer_service_rooms($1)`, userID); err != nil {
 		return "", err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO wallets (id,user_id,currency) SELECT gen_random_uuid(),$1,code FROM currencies WHERE enabled AND create_on_registration`, userID); err != nil {

@@ -12,12 +12,16 @@ import (
 )
 
 var ErrUserControlForbidden = errors.New("无权修改该用户的安全信息")
-var ErrUserControlInvalid = errors.New("用户安全参数无效；登录密码至少12字符，交易密码1至128字节")
+var ErrUserControlInvalid = errors.New("用户安全参数无效")
+var ErrResetPasswordEmpty = errors.New("新密码不能为空或全为空白")
 
 // 用户交易密码即个人二级密码，绝不修改后台全局操作密码。
 func (s *Service) ResetUserPassword(ctx context.Context, actor string, publicID int64, kind, password string) error {
-	if (kind != "login" && kind != "secondary") || len(password) > 128 || strings.TrimSpace(password) == "" || (kind == "login" && len([]rune(password)) < 12) {
+	if kind != "login" && kind != "secondary" {
 		return ErrUserControlInvalid
+	}
+	if strings.TrimSpace(password) == "" {
+		return ErrResetPasswordEmpty
 	}
 	hash, err := identity.HashPassword(password)
 	if err != nil {

@@ -226,7 +226,14 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 		}
 		userIDs := []string{}
 		if roomType == "customer_service" || roomType == "direct" {
-			rows, err := tx.Query(ctx, `SELECT user_id::text FROM chat_room_members WHERE room_id=$1`, roomID)
+			// Staff can access customer-service rooms without joining them. UNION
+			// deduplicates staff who are also members or hold both staff roles.
+			rows, err := tx.Query(ctx, `
+				SELECT user_id::text FROM chat_room_members WHERE room_id=$1
+				UNION
+				SELECT ur.user_id::text FROM user_roles ur
+				JOIN roles r ON r.id=ur.role_id
+				WHERE $2='customer_service' AND r.code IN ('admin','operator')`, roomID, roomType)
 			if err != nil {
 				return Message{}, false, err
 			}

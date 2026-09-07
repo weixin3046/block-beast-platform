@@ -24,7 +24,7 @@ func userControlError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, operations.ErrUserNotFound):
 		code = 404
-	case errors.Is(err, operations.ErrUserControlInvalid):
+	case errors.Is(err, operations.ErrUserControlInvalid), errors.Is(err, operations.ErrResetPasswordEmpty):
 		code = 400
 	case errors.Is(err, operations.ErrUserControlForbidden):
 		code = 403

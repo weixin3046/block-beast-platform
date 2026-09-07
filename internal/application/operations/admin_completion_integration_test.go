@@ -175,6 +175,9 @@ func TestAdminBetVoidAndPlayerCreation(t *testing.T) {
 		t.Fatal("player password or virtual flag is unsafe")
 	}
 	var walletCount, enabledWalletCount int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM chat_rooms r JOIN chat_room_members m ON m.room_id=r.id AND m.user_id=r.customer_user_id WHERE r.customer_user_id=$1 AND r.room_type='customer_service' AND m.member_role='owner'`, internalID).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("created player customer rooms=%d err=%v", count, err)
+	}
 	if err = pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE available_minor=0 AND frozen_minor=0) FROM wallets WHERE user_id=$1`, internalID).Scan(&walletCount, &enabledWalletCount); err != nil {
 		t.Fatal(err)
 	}

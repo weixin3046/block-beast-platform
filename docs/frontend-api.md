@@ -87,6 +87,14 @@ GET /v1/tasks/bet-progress 返回 title、period_type、sort_order、max_complet
 
 `GET /v1/leaderboards?period=today&currency=POINTS&limit=50`新增 `self`，字段结构与items单条一致。即使本人不在前50名，也返回本人完整排名；未上榜返回null。today/yesterday/this_week/last_week均使用中国时区和对应币种；items和self使用同一数据库快照。身份取登录令牌，不支持传入self_user_id冒充他人。普通玩家看不到其他玩家余额，self可展示本人的余额；金额仅返回实际数量字符串。
 
+### 单账号单登录会话（0067）
+
+所有账号（含管理员、operator、真实和虚拟玩家）只保留最新一次成功登录的会话。再次登录会撤销旧访问令牌和刷新令牌；登录失败不踢出已有会话。同一令牌的多标签页可共用会话，不采集设备指纹，也不限制同一设备切换账号。
+
+前端请求字段不变，不需要生成设备 ID。旧访问令牌请求返回 401；旧刷新令牌不能续期。Socket 握手和每条命令都会校验会话，空闲连接每秒检查一次，发现撤销后以 1008 和“登录已失效，请重新登录”关闭（数据库响应时间另计）。收到此关闭后不要无限使用旧令牌重连，应提示重新登录；正常 Token 到期可尝试刷新一次，失败则退出登录。刷新保留会话 ID，但 Socket 使用的访问令牌到期后仍须用新令牌重连。
+
+部署须先执行 0067，再同时更新 API 与 Realtime；迁移会撤销全部旧刷新会话，无 sid 的旧访问令牌也不再接受，所有用户需要重新登录。Worker 无需修改；不要在旧版和新版 API 间长期混跑。已通过鉴权、正在执行的请求不会被追溯取消。
+
 ### 登录白名单（0063，风险检测未启用）
 
 ### 后台创建普通玩家与绑定上级
@@ -199,9 +207,9 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 
 ## 用户管理、统计及金额口径补充（0052）
 
-- 重置他人登录密码：`PUT /v1/admin/users/{userID}/password`，`{"new_password":"至少12字符的新密码","second_password":"后台全局二级操作密码"}`。仅admin；新密码UTF-8最多128字节，不可全空白。
-- 重置个人交易密码：`PUT /v1/admin/users/{userID}/secondary-password`，同上字段，新密码1–128字节；交易密码即用户个人二级密码，不是后台全局操作密码。仅admin。
-- 两种重置均撤销目标刷新会话，不保存明文、不返回密码；现有访问令牌仍在原有效期内，不能把刷新会话撤销解释为立即踢出全部连接。后台自己改登录密码仍可走原个人改密接口。
+- 重置他人登录密码：`PUT /v1/admin/users/{userID}/password`，`{"new_password":"新密码","second_password":"后台全局二级操作密码"}`。仅admin；取消12字符最低长度和128字节最高长度限制，密码不能为空或全空白，仍受HTTP请求体大小保护。前端不要额外设置长度限制。
+- 重置个人交易密码：`PUT /v1/admin/users/{userID}/secondary-password`，同上字段，不限制密码长度但不可为空或全空白；交易密码即用户个人二级密码，不是后台全局操作密码。仅admin。本次仅放开后台重置两个接口，不改变注册、自助改密和后台全局操作密码的规则；短密码安全性较低，建议仍使用长且不重复的密码。
+- 两种重置均撤销目标会话，不保存明文、不返回密码；0067 起已绑定会话的访问令牌也失效，Socket 会检测并关闭。后台自己改登录密码仍可走原个人改密接口。
 - 禁言：`PUT /v1/admin/users/{userID}/mute`，`{"muted":true}`；解除传false。admin/operator可操作，operator不能禁言后台账号。全局聊天禁言独立于账号status，Socket发消息时检查，返回“账号已被禁言”；仍可登录、投注、读历史消息。
 - 用户搜索：`GET /v1/admin/users?q=100006&currency=USDT,JADE&user_type=real&available_min=1.5&available_max=10000&limit=50&offset=0`。`user_type`可选real/virtual，省略全部；q支持公开用户ID、登录名、昵称。币种可逗号分隔或重复传currency，任一所选钱包满足余额范围即匹配用户，余额筛选为展示单位、不得跨币种相加。返回数组，每个用户新增`is_virtual/chat_muted/balances`，balances含currency、decimals、available、frozen、available、frozen。未传币种返回全部钱包。
 - 代理等级：读取用户列表的`agent_level`，不要根据`roles`是否存在agent角色判断。1–6表示代理，0表示非代理；设置等级不等于创建上下级关系。修复列表此前漏查代理等级的问题，调整等级不再清空已有佣金比例。
@@ -301,6 +309,12 @@ from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下�
 | `USDT_STAMINA` | USDT 体力 | USDT 投注任务奖励，用于 USDT 转盘 |
 | `JADE_STAMINA` | 玉石体力 | 玉石投注任务奖励，用于玉石转盘 |
 | `ORIGIN_STONE_STAMINA` | 源石体力 | 源石投注任务奖励，用于源石转盘 |
+
+## 注册即创建客服房间（0066）
+
+真实玩家注册或后台创建真实玩家时，在同一事务内创建上分deposit、下分withdrawal两个客服房间并添加玩家owner成员。失败时整个账号创建事务回滚。虚拟账号不自动建房；历史真实player用户由0066补建缺失房间，保留原房间ID、成员及消息。后台空房间不代表存在待处理请求，应根据消息/未读状态区分。
+
+前台仍调用 `POST /v1/chat/customer-service` 获取两个房间ID；接口保留获取或创建的幂等兜底能力，不需要传创建标记。注册响应结构不变。部署先执行0066迁移，再启动新API；未执行迁移时新版创建账号会失败。
 
 ## 默认哈希上限修复（0065）
 
@@ -809,7 +823,7 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 
 HTTP 历史消息、Socket 发送确认和 `chat.message.created` 使用相同的消息结构。前端通过 `message.sender.display_name` 显示名称，通过 `message.sender.avatar_url` 显示头像；头像为空时使用本地默认头像。`sender.user_id` 是公开数字 ID，前端不会收到内部 UUID。站内 `/v1/avatars/...` 头像地址可直接交给图片组件显示。系统消息可能没有 `sender`。
 
-消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服房间只有所属玩家和后台角色可读写，公共消息通过 WebSocket 的 `chat` topic 广播。当前后台角色不会自动成为客服房间 Socket 事件的定向接收者，后台客服页面仍需通过 HTTP 对账；具体边界见 WebSocket v1 手册。
+消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服消息定向推送给房间成员及 `admin`、`operator` 的在线连接，无需加入房间或订阅 `chat`；不会发送给其他玩家。发送者可能同时收到发送确认和事件，应按消息 `id` 去重。公共消息通过 WebSocket 的 `chat` topic 广播。断线期间不保证事件补发，重连后通过 HTTP 查询历史消息对账；推送依赖 worker、NATS 和 realtime 正常运行。
 
 ## 文件上传
 

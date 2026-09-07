@@ -14,6 +14,7 @@ import (
 var ErrInvalidAccessToken = errors.New("invalid access token")
 
 type AccessTokenClaims struct {
+	SessionID string   `json:"sid,omitempty"`
 	Subject   string   `json:"sub"`
 	Roles     []string `json:"roles"`
 	IssuedAt  int64    `json:"iat"`
@@ -22,7 +23,7 @@ type AccessTokenClaims struct {
 
 // IssueAccessToken creates a signed, short-lived JWT for authenticated API calls.
 // The signing key must contain at least 32 bytes of secret material.
-func IssueAccessToken(secret []byte, subject string, roles []string, issuedAt time.Time, lifetime time.Duration) (string, error) {
+func IssueAccessToken(secret []byte, subject string, roles []string, issuedAt time.Time, lifetime time.Duration, sessionIDs ...string) (string, error) {
 	if len(secret) < 32 || subject == "" || lifetime <= 0 {
 		return "", ErrInvalidAccessToken
 	}
@@ -30,7 +31,12 @@ func IssueAccessToken(secret []byte, subject string, roles []string, issuedAt ti
 	if err != nil {
 		return "", err
 	}
+	sessionID := ""
+	if len(sessionIDs) > 0 {
+		sessionID = sessionIDs[0]
+	}
 	claims, err := encodeTokenPart(AccessTokenClaims{
+		SessionID: sessionID,
 		Subject:   subject,
 		Roles:     append([]string(nil), roles...),
 		IssuedAt:  issuedAt.UTC().Unix(),

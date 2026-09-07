@@ -13,8 +13,14 @@ type claimsContextKey struct{}
 
 // Authenticator 校验 Bearer 访问令牌并执行基于角色的访问控制。
 type Authenticator struct {
-	secret []byte
-	now    func() time.Time
+	sessions identity.SessionValidator
+	secret   []byte
+	now      func() time.Time
+}
+
+func (authenticator *Authenticator) WithSessionValidator(validator identity.SessionValidator) *Authenticator {
+	authenticator.sessions = validator
+	return authenticator
 }
 
 func NewAuthenticator(secret string) *Authenticator {
@@ -59,6 +65,9 @@ func (authenticator *Authenticator) verify(request *http.Request) (identity.Acce
 	}
 	claims, err := identity.VerifyAccessToken(authenticator.secret, token, authenticator.now())
 	if err != nil {
+		return identity.AccessTokenClaims{}, false
+	}
+	if authenticator.sessions != nil && authenticator.sessions.ValidateSession(request.Context(), claims) != nil {
 		return identity.AccessTokenClaims{}, false
 	}
 	return claims, true

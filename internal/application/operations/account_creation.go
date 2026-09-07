@@ -158,6 +158,9 @@ func createPasswordAccount(ctx context.Context, tx pgx.Tx, spec passwordAccountS
 	if _, err = tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='player'`, id); err != nil {
 		return createdPasswordAccount{}, err
 	}
+	if _, err = tx.Exec(ctx, `SELECT ensure_user_customer_service_rooms($1)`, id); err != nil {
+		return createdPasswordAccount{}, err
+	}
 	if _, err = tx.Exec(ctx, `INSERT INTO wallets(id,user_id,currency) SELECT gen_random_uuid(),$1,code FROM currencies WHERE enabled AND create_on_registration`, id); err != nil {
 		return createdPasswordAccount{}, err
 	}

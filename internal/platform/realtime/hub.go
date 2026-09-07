@@ -18,6 +18,7 @@ import (
 )
 
 type Hub struct {
+	sessions   identity.SessionValidator
 	currencies amountjson.Catalog
 	secret     []byte
 	origins    []string
@@ -25,6 +26,39 @@ type Hub struct {
 	clients    map[string]map[*client]struct{}
 	nats       *nats.Conn
 	chat       ChatSender
+}
+
+func (hub *Hub) WithSessionValidator(validator identity.SessionValidator) *Hub {
+	hub.sessions = validator
+	return hub
+}
+
+func (hub *Hub) validSession(ctx context.Context, claims identity.AccessTokenClaims) bool {
+	if claims.ExpiresAt <= time.Now().Unix() {
+		return false
+	}
+	if hub.sessions == nil {
+		return true
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return hub.sessions.ValidateSession(checkCtx, claims) == nil
+}
+
+func (hub *Hub) monitorSession(ctx context.Context, item *client, claims identity.AccessTokenClaims) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !hub.validSession(ctx, claims) {
+				item.close(websocket.StatusPolicyViolation, "登录已失效，请重新登录")
+				return
+			}
+		}
+	}
 }
 
 type ChatSender interface {
@@ -73,7 +107,7 @@ func (hub *Hub) Close() {
 func (hub *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	token, protocol := accessToken(request)
 	claims, err := identity.VerifyAccessToken(hub.secret, token, time.Now().UTC())
-	if err != nil {
+	if err != nil || !hub.validSession(request.Context(), claims) {
 		http.Error(writer, "登录凭证缺失或无效，请重新登录", http.StatusUnauthorized)
 		return
 	}
@@ -94,10 +128,15 @@ func (hub *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	connectionCtx, cancel := context.WithCancel(request.Context())
 	defer cancel()
 	go item.writeLoop(connectionCtx)
+	go hub.monitorSession(connectionCtx, item, claims)
 	item.enqueue(encodeMessage(serverMessage{Type: "hello", Topics: item.topicList()}))
 	for {
 		messageType, payload, err := connection.Read(connectionCtx)
 		if err != nil {
+			return
+		}
+		if !hub.validSession(connectionCtx, claims) {
+			item.close(websocket.StatusPolicyViolation, "登录已失效，请重新登录")
 			return
 		}
 		if messageType != websocket.MessageText {

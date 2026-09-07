@@ -353,6 +353,10 @@ func TestRegisterCreatesPlayableAccount(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	userID := result.UserID
+	var customerRooms int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM chat_rooms r JOIN chat_room_members m ON m.room_id=r.id AND m.user_id=r.customer_user_id WHERE r.customer_user_id=$1 AND r.room_type='customer_service' AND m.member_role='owner'`, userID).Scan(&customerRooms); err != nil || customerRooms != 2 {
+		t.Fatalf("registration customer rooms=%d err=%v", customerRooms, err)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM agent_relations WHERE user_id=$1 OR parent_user_id=$1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
@@ -455,7 +459,8 @@ func TestLoginIssuesTokenWithRoles(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	})
 
-	service := NewService(identity.NewPostgresRepository(pool), testSecret, 15*time.Minute)
+	repository := identity.NewPostgresRepository(pool)
+	service := NewService(repository, testSecret, 15*time.Minute).WithSessions(repository, 24*time.Hour)
 	result, err := service.Login(ctx, loginName, password)
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -473,6 +478,37 @@ func TestLoginIssuesTokenWithRoles(t *testing.T) {
 
 	if _, err := service.Login(ctx, loginName, "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("wrong password error = %v, want ErrInvalidCredentials", err)
+	}
+	if err := repository.ValidateSession(ctx, claims); err != nil {
+		t.Fatalf("failed login revoked current session: %v", err)
+	}
+	refreshed, err := service.Refresh(ctx, result.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedClaims, err := identity.VerifyAccessToken([]byte(testSecret), refreshed.AccessToken, time.Now())
+	if err != nil || refreshedClaims.SessionID == "" || refreshedClaims.SessionID != claims.SessionID {
+		t.Fatal("refresh lost session binding", err)
+	}
+	latest, err := service.Login(ctx, loginName, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.ValidateSession(ctx, refreshedClaims) == nil {
+		t.Fatal("second login did not revoke first")
+	}
+	if _, err := service.Refresh(ctx, refreshed.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatal("revoked refresh accepted", err)
+	}
+	latestClaims, err := identity.VerifyAccessToken([]byte(testSecret), latest.AccessToken, time.Now())
+	if err != nil || repository.ValidateSession(ctx, latestClaims) != nil {
+		t.Fatal("latest login invalid", err)
+	}
+	if err := service.Logout(ctx, latest.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	if repository.ValidateSession(ctx, latestClaims) == nil {
+		t.Fatal("logout left access token active")
 	}
 	if _, err := service.Login(ctx, "nobody-"+userID, password); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("unknown user error = %v, want ErrInvalidCredentials", err)
