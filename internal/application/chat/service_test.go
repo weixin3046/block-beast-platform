@@ -178,6 +178,42 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 		t.Fatalf("staff reply: %v", err)
 	}
 	assertTargets(reply.ID)
+	if first.Sender.IsStaff || !reply.Sender.IsStaff {
+		t.Fatal("incorrect staff snapshot")
+	}
+	operatorReply, _, err := service.SendMessage(ctx, room.ID, staffIDs[1], "operator-reply", "reply", true)
+	if err != nil || operatorReply.Sender == nil || !operatorReply.Sender.IsStaff {
+		t.Fatal("operator badge missing", err)
+	}
+	var eventStaff bool
+	if err := pool.QueryRow(ctx, `SELECT (payload->'message'->'sender'->>'is_staff')::boolean FROM outbox_events WHERE aggregate_id=$1 AND payload->'message'->>'id'=$2`, room.ID, reply.ID).Scan(&eventStaff); err != nil || !eventStaff {
+		t.Fatal("event badge missing", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id=$1`, staffIDs[0]); err != nil {
+		t.Fatal(err)
+	}
+	repeated, fresh, err := service.SendMessage(ctx, room.ID, staffIDs[0], "staff-reply", "changed", false)
+	if err != nil || fresh || repeated.Sender == nil || !repeated.Sender.IsStaff {
+		t.Fatal("retry changed snapshot", err)
+	}
+	history, err := service.ListMessages(ctx, room.ID, userID, false, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundSnapshot := false
+	for _, message := range history {
+		if message.ID == reply.ID {
+			foundSnapshot = message.Sender != nil && message.Sender.IsStaff
+		}
+	}
+	if !foundSnapshot {
+		t.Fatal("history lost staff snapshot after role change")
+	}
+	// Passing a staff flag is not sufficient to forge a badge.
+	ordinary, _, err := service.SendMessage(ctx, room.ID, userID, "ordinary", "hello", true)
+	if err != nil || ordinary.Sender == nil || ordinary.Sender.IsStaff {
+		t.Fatal("ordinary player forged badge", err)
+	}
 	if _, _, err := service.SendMessage(ctx, room.ID, otherUserID, "unauthorized", "hello", false); !errors.Is(err, ErrRoomAccessDenied) {
 		t.Fatalf("unauthorized send: %v", err)
 	}

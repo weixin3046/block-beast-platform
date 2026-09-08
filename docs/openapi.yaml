@@ -3,6 +3,7 @@ info:
   title: Block Beast Platform API
   version: 0.2.0
   description: |
+    Socket个人投注结算事件game.bet.settled每位玩家每个round_id一条，bets包含中奖和未中奖主单，totals按币种汇总实际金额stake/payout/net_win；具体契约见docs/realtime-api.md。
     0066起真实玩家注册和后台创建账号时原子创建上分/下分客服房间，虚拟账号不自动创建；POST /v1/chat/customer-service仍提供幂等获取或创建，注册响应结构不变。
     0067起所有账号仅保留最新成功登录会话，旧访问令牌返回401、旧刷新令牌失效；请求字段不变，无需设备ID。刷新沿用会话。迁移撤销旧会话，升级后需重新登录；Socket定期检测撤销并以1008关闭。
     金额响应去掉小数末尾多余的零，仍为字符串：2223.000000返回"2223"，1.500返回"1.5"，0.000返回"0"；有效小数不截断，币种decimals与输入精度限制不变。HTTP和Socket一致，旧示例补零金额以此规则为准。
@@ -5981,10 +5982,15 @@ components:
     ChatMessageSender:
       type: object
       required:
+      - is_staff
       - user_id
       - display_name
       - avatar_url
       properties:
+        is_staff:
+          type: boolean
+          readOnly: true
+          description: 发送时是否为 admin/operator 的身份快照；true 可显示系统管理员标识。0068 之前的历史消息默认 false，不按当前角色反推。
         user_id:
           type: integer
           format: int64

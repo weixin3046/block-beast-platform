@@ -263,6 +263,33 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		result.PayoutMinor += payout
 	}
 
+	// One personal result per user and round, including losses. Keep currency
+	// totals separate; wallet deltas remain independent ledger events.
+	// The locked round's idempotent early return prevents duplicate outbox rows.
+	if _, err := tx.Exec(ctx, `
+		WITH settled AS (
+		 SELECT b.*,w.currency,u.public_id,r.sequence,g.code AS game_type
+		 FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
+		 JOIN rounds r ON r.id=b.round_id JOIN game_types g ON g.id=r.game_type_id
+		 WHERE b.round_id=$1 AND b.status IN ('won','lost') AND b.settled_at=$3
+		), totals AS (
+		 SELECT user_id,currency,sum(stake_minor) AS stake,sum(payout_minor) AS payout,
+		 count(*) AS bet_count FROM settled GROUP BY user_id,currency
+		)
+		INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload,occurred_at)
+		SELECT gen_random_uuid(),'round',s.round_id,$2,
+		 jsonb_build_object('user_ids',jsonb_build_array(s.user_id::text),'account_id',s.public_id,
+		 'round_id',s.round_id,'round_sequence',s.sequence,'game_type',s.game_type,'settled_at',$3::timestamptz,
+		 'bets',jsonb_agg(jsonb_build_object('bet_id',s.id,'game_room_id',s.game_room_id,
+		 'play_mode',s.play_mode,'selection',s.selection,'currency',s.currency,'status',s.status,
+		 'stake_minor',s.stake_minor,'payout_minor',s.payout_minor,'net_win_minor',s.payout_minor-s.stake_minor,
+		 'placement_count',s.placement_count,'is_simulated',s.is_simulated) ORDER BY s.id),
+		 'totals',(SELECT jsonb_agg(jsonb_build_object('currency',t.currency,'stake_minor',t.stake,
+		 'payout_minor',t.payout,'net_win_minor',t.payout-t.stake,'bet_count',t.bet_count) ORDER BY t.currency)
+		 FROM totals t WHERE t.user_id=s.user_id)),$3
+		FROM settled s GROUP BY s.user_id,s.public_id,s.round_id,s.sequence,s.game_type`, roundID, events.BetSettled, result.SettledAt); err != nil {
+		return SettlementResult{}, err
+	}
 	encodedOutcome, err := json.Marshal(outcome)
 	if err != nil {
 		return SettlementResult{}, err

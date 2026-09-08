@@ -87,6 +87,10 @@ GET /v1/tasks/bet-progress 返回 title、period_type、sort_order、max_complet
 
 `GET /v1/leaderboards?period=today&currency=POINTS&limit=50`新增 `self`，字段结构与items单条一致。即使本人不在前50名，也返回本人完整排名；未上榜返回null。today/yesterday/this_week/last_week均使用中国时区和对应币种；items和self使用同一数据库快照。身份取登录令牌，不支持传入self_user_id冒充他人。普通玩家看不到其他玩家余额，self可展示本人的余额；金额仅返回实际数量字符串。
 
+### 个人投注结算推送
+
+监听 Socket `type=event`、`subject=game.bet.settled`，每位玩家每个 round_id 只推送一条，按 account_id+round_id 去重。bets 包含本期正常结算的全部主单（含 won/lost），用 bet_id 更新订单；totals 按币种分别汇总 stake、payout、net_win、bet_count，不跨币种累加。金额为真实数量字符串，net_win=派奖−投入，不含返水。不同选项、房间和币种均包含在同一期这一条内；不同 round_id 分别推送。不要据此再次累加钱包余额；断线重连查询本人投注列表。完整字段、示例和必要部署顺序见 realtime-api.md。
+
 ### 单账号单登录会话（0067）
 
 所有账号（含管理员、operator、真实和虚拟玩家）只保留最新一次成功登录的会话。再次登录会撤销旧访问令牌和刷新令牌；登录失败不踢出已有会话。同一令牌的多标签页可共用会话，不采集设备指纹，也不限制同一设备切换账号。
@@ -821,7 +825,9 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 - `GET /v1/chat/rooms/{roomID}/messages`：查询可访问房间的最近消息。
 - 发送消息：使用 WebSocket `chat.send` 命令，不能再调用 HTTP `POST /v1/chat/rooms/{roomID}/messages`。
 
-HTTP 历史消息、Socket 发送确认和 `chat.message.created` 使用相同的消息结构。前端通过 `message.sender.display_name` 显示名称，通过 `message.sender.avatar_url` 显示头像；头像为空时使用本地默认头像。`sender.user_id` 是公开数字 ID，前端不会收到内部 UUID。站内 `/v1/avatars/...` 头像地址可直接交给图片组件显示。系统消息可能没有 `sender`。
+HTTP 历史消息、HTTP 发送响应、Socket 发送确认和 `chat.message.created` 使用相同的消息结构。前端通过 `message.sender.display_name` 显示名称，通过 `message.sender.avatar_url` 显示头像；头像为空时使用本地默认头像。`sender.user_id` 是公开数字 ID，前端不会收到内部 UUID。站内 `/v1/avatars/...` 头像地址可直接交给图片组件显示。系统消息可能没有 `sender`。
+
+0068 起 `sender.is_staff` 为布尔值，true 时显示“系统管理员”标识，false 不显示。后端按发送时数据库中的 admin/operator 角色保存快照，普通玩家为 false；不可通过请求参数设置，不要按昵称或固定用户 ID 判断。角色后续变化和重复发送不会改变原消息标识。迁移前历史消息因无法重建发送时角色，统一默认 false；无 sender 的系统消息不通过此字段判断。部署先执行 0068，再更新 API 和 Realtime。
 
 消息与 `chat.message.created` outbox 事件在同一个数据库事务中提交。客服消息定向推送给房间成员及 `admin`、`operator` 的在线连接，无需加入房间或订阅 `chat`；不会发送给其他玩家。发送者可能同时收到发送确认和事件，应按消息 `id` 去重。公共消息通过 WebSocket 的 `chat` topic 广播。断线期间不保证事件补发，重连后通过 HTTP 查询历史消息对账；推送依赖 worker、NATS 和 realtime 正常运行。
 

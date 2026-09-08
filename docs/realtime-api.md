@@ -4,6 +4,8 @@
 
 本文档描述当前后端已经实现的 WebSocket v1 协议。玩家端和管理后台可以按本文档直接完成连接、订阅、聊天、事件消费、断线恢复和 HTTP 状态对账。
 
+0068 起聊天 `message.sender.is_staff` 为后端保存的发送时身份快照：admin/operator 为 true，可显示“系统管理员”；普通玩家及迁移前历史消息默认 false。HTTP 历史、发送响应、chat_message_sent 与 chat.message.created 均使用该字段，客户端不能指定它。后续修改角色不改变历史标识；没有 sender 的系统消息应单独处理。
+
 > WebSocket 不属于 OpenAPI 的请求/响应模型，因此不会显示在 Swagger UI 中。HTTP 接口仍以 `docs/openapi.yaml` 为准。
 
 本服务使用浏览器原生 WebSocket JSON 协议，不是 Socket.IO；前端不要引入 `socket.io-client`。
@@ -219,7 +221,8 @@ interface ClientCommand {
       "sender": {
         "user_id": 100009,
         "display_name": "玩家一号",
-        "avatar_url": "/v1/avatars/100009?v=8f11a3b7"
+        "avatar_url": "/v1/avatars/100009?v=8f11a3b7",
+        "is_staff": false
       },
       "body": "我要上分",
       "status": "visible",
@@ -391,6 +394,18 @@ HTTP与Socket所有金额字符串去掉小数末尾多余的零，例如 `"1.50
 
 ### 6.4 `game.round.settled`
 
+个人结算推送 `game.bet.settled`：每位玩家每个 round_id 只生成一条，包含本期正常结算的全部 won/lost 主单，跨房间和币种也合在这一条。定向发给本人在线连接，无需订阅。前端按 account_id+round_id 去重，再按 bets 内 bet_id 更新订单，重复事件覆盖而非累加。取消和退款沿用既有事件，不计入本通知；断线后通过 HTTP 本人投注列表对账，不自动重放。不同玩法即使显示期号相同，round_id 不同仍分别通知。
+
+示例 payload：
+
+```json
+{"account_id":100006,"round_id":"轮次UUID","round_sequence":86036031,"game_type":"hash_9","settled_at":"2026-09-07T11:17:46Z","bets":[{"bet_id":"订单UUID","game_room_id":"房间UUID","play_mode":"road","selection":{"pick":"big"},"currency":"POINTS","status":"lost","stake":"10","payout":"0","net_win":"-10","placement_count":1,"is_simulated":false}],"totals":[{"currency":"POINTS","stake":"10","payout":"0","net_win":"-10","bet_count":1}]}
+```
+
+金额为真实数量字符串，net_win=派奖−投入，不含返水等额外奖励。bets 为单订单结果；totals 按币种独立汇总本期正常结算投入、派奖、净收益及主单数，绝不跨币种混加。虚拟投注也推送，is_simulated=true 不代表钱包变动。不得将本事件派奖再次累加到钱包；余额以钱包事件或查询为准。
+
+部署必须先更新全部 Realtime，再更新 Worker，或停服整体更新。旧网关会将 game.* 广播，不允许新 Worker 与旧 Realtime 混跑。本功能无需迁移，不补发上线前已结算订单。
+
 触发：轮次和所有接受中的投注已在同一事务中完成结算。
 
 ```json
@@ -503,7 +518,8 @@ payload 字段：`user_id`（内部路由 ID，不作玩家公开展示）、`cu
       "sender": {
         "user_id": 100009,
         "display_name": "玩家一号",
-        "avatar_url": "/v1/avatars/100009?v=8f11a3b7"
+        "avatar_url": "/v1/avatars/100009?v=8f11a3b7",
+        "is_staff": false
       },
       "body": "你好",
       "status": "visible",

@@ -187,7 +187,7 @@ func (hub *Hub) publish(message *nats.Msg) {
 
 func publicEventPayload(subject string, data []byte) []byte {
 	payload := append([]byte(nil), data...)
-	if !strings.HasPrefix(subject, "chat.") && subject != "game.round.settled" {
+	if !strings.HasPrefix(subject, "chat.") && subject != "game.round.settled" && subject != "game.bet.settled" {
 		return payload
 	}
 	var fields map[string]json.RawMessage
@@ -254,6 +254,15 @@ func chatCommandError(err error) string {
 }
 
 func eventTargets(subject string, data []byte) (userIDs []string, broadcast bool) {
+	if subject == "game.bet.settled" {
+		var payload struct {
+			UserIDs []string `json:"user_ids"`
+		}
+		if json.Unmarshal(data, &payload) != nil {
+			return nil, false
+		}
+		return payload.UserIDs, false
+	}
 	if strings.HasPrefix(subject, "game.") {
 		return nil, true
 	}

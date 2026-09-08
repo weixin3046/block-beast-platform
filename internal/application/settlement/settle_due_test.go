@@ -138,6 +138,9 @@ func TestSettleDueRoundsSettlesClosedRoundsByRules(t *testing.T) {
 	}
 	assertCount(t, ctx, pool, `SELECT count(*) FROM ledger_entries WHERE wallet_id = $1 AND entry_type = 'settlement_credit'`, walletID, 1)
 	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = $2`, []any{roundID, events.RoundSettled}, 1)
+	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE payload->>'round_id'=$1 AND event_type='game.bet.settled' AND jsonb_array_length(payload->'bets')=2 AND payload->'totals'->0->>'net_win_minor'='500'`, roundID, 1)
+	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events e CROSS JOIN LATERAL jsonb_array_elements(e.payload->'bets') b WHERE e.event_type='game.bet.settled' AND b->>'bet_id'=$1 AND b->>'status'='lost' AND b->>'net_win_minor'='-500'`, lostBetID, 1)
+	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events e CROSS JOIN LATERAL jsonb_array_elements(e.payload->'bets') b WHERE e.event_type='game.bet.settled' AND b->>'bet_id'=$1 AND b->>'status'='won' AND b->>'net_win_minor'='1000'`, wonBetID, 1)
 
 	// 重复执行必须幂等：已结算轮次不再出现在到期列表中，不会重复派奖。
 	settled, err = service.SettleDueRounds(ctx, source, 100)
@@ -147,6 +150,7 @@ func TestSettleDueRoundsSettlesClosedRoundsByRules(t *testing.T) {
 	if len(settled) != 0 {
 		t.Fatalf("repeat settled rounds = %+v, want none", settled)
 	}
+	assertCount(t, ctx, pool, `SELECT count(*) FROM outbox_events WHERE payload->>'round_id'=$1 AND event_type='game.bet.settled'`, roundID, 1)
 	if err := pool.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1`, walletID).Scan(&availableMinor); err != nil {
 		t.Fatalf("reread wallet: %v", err)
 	}

@@ -40,6 +40,7 @@ type CustomerServiceRooms struct {
 }
 
 type MessageSender struct {
+	IsStaff     bool   `json:"is_staff"`
 	UserID      int64  `json:"user_id"`
 	DisplayName string `json:"display_name"`
 	AvatarURL   string `json:"avatar_url"`
@@ -140,7 +141,7 @@ func (service *Service) ListMessages(ctx context.Context, roomID, userID string,
 		limit = 50
 	}
 	rows, err := service.pool.Query(ctx, `
-		SELECT m.id::text,m.room_id::text,m.body,m.status,m.client_request_id,m.created_at,
+		SELECT m.id::text,m.room_id::text,m.body,m.status,m.client_request_id,m.created_at,m.sender_is_staff,
 			u.public_id,u.display_name,
 			CASE WHEN u.avatar_url LIKE 'uploads/%'
 				THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '')
@@ -156,13 +157,14 @@ func (service *Service) ListMessages(ctx context.Context, roomID, userID string,
 	items := make([]Message, 0)
 	for rows.Next() {
 		var item Message
+		var senderIsStaff bool
 		var senderUserID *int64
 		var senderDisplayName, senderAvatarURL *string
-		if err := rows.Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt,
+		if err := rows.Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt, &senderIsStaff,
 			&senderUserID, &senderDisplayName, &senderAvatarURL); err != nil {
 			return nil, err
 		}
-		item.Sender = newMessageSender(senderUserID, senderDisplayName, senderAvatarURL)
+		item.Sender = newMessageSender(senderUserID, senderDisplayName, senderAvatarURL, senderIsStaff)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -194,17 +196,18 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 	}
 	messageID := uuid.NewString()
 	var item Message
+	var senderIsStaff bool
 	var senderPublicID *int64
 	var senderDisplayName, senderAvatarURL *string
 	err = tx.QueryRow(ctx, `
 		WITH saved AS (
-			INSERT INTO chat_messages (id,room_id,sender_user_id,body,client_request_id)
-			VALUES ($1,$2,$3,$4,$5)
+			INSERT INTO chat_messages (id,room_id,sender_user_id,body,client_request_id,sender_is_staff)
+			VALUES ($1,$2,$3,$4,$5,EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$3 AND r.code IN ('admin','operator')))
 			ON CONFLICT (room_id,sender_user_id,client_request_id) WHERE sender_user_id IS NOT NULL AND client_request_id IS NOT NULL
 			DO UPDATE SET client_request_id=EXCLUDED.client_request_id
-			RETURNING id,room_id,sender_user_id,body,status,client_request_id,created_at
+			RETURNING id,room_id,sender_user_id,body,status,client_request_id,created_at,sender_is_staff
 		)
-		SELECT saved.id::text,saved.room_id::text,saved.body,saved.status,saved.client_request_id,saved.created_at,
+		SELECT saved.id::text,saved.room_id::text,saved.body,saved.status,saved.client_request_id,saved.created_at,saved.sender_is_staff,
 			u.public_id,u.display_name,
 			CASE WHEN u.avatar_url LIKE 'uploads/%'
 				THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '')
@@ -212,12 +215,12 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 		FROM saved
 		LEFT JOIN users u ON u.id=saved.sender_user_id`,
 		messageID, roomID, senderUserID, body, clientRequestID).
-		Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt,
+		Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt, &senderIsStaff,
 			&senderPublicID, &senderDisplayName, &senderAvatarURL)
 	if err != nil {
 		return Message{}, false, err
 	}
-	item.Sender = newMessageSender(senderPublicID, senderDisplayName, senderAvatarURL)
+	item.Sender = newMessageSender(senderPublicID, senderDisplayName, senderAvatarURL, senderIsStaff)
 	created := item.ID == messageID
 	if created {
 		var roomType string
@@ -266,11 +269,11 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 	return item, created, tx.Commit(ctx)
 }
 
-func newMessageSender(userID *int64, displayName, avatarURL *string) *MessageSender {
+func newMessageSender(userID *int64, displayName, avatarURL *string, isStaff bool) *MessageSender {
 	if userID == nil {
 		return nil
 	}
-	sender := &MessageSender{UserID: *userID}
+	sender := &MessageSender{UserID: *userID, IsStaff: isStaff}
 	if displayName != nil {
 		sender.DisplayName = *displayName
 	}

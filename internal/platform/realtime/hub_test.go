@@ -42,6 +42,15 @@ func TestCustomerMessageDeliveredOnlyToTargetsWithoutSubscription(t *testing.T) 
 }
 
 func TestEventTargetSeparatesPublicAndPrivateEvents(t *testing.T) {
+	for _, raw := range []string{`{"user_ids":["owner"],"broadcast":true}`, `{}`, `invalid`} {
+		ids, broadcast := eventTargets("game.bet.settled", []byte(raw))
+		if broadcast || len(ids) > 1 {
+			t.Fatal("private settlement broadcast", ids, broadcast)
+		}
+	}
+	if strings.Contains(string(publicEventPayload("game.bet.settled", []byte(`{"bet_id":"bet","user_ids":["private"]}`))), "user_ids") {
+		t.Fatal("routing IDs leaked")
+	}
 	if userIDs, broadcast := eventTargets("game.round.settled", []byte(`{}`)); len(userIDs) != 0 || !broadcast {
 		t.Fatalf("game event target = %q, %v", userIDs, broadcast)
 	}
