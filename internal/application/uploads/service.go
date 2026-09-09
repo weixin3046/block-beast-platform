@@ -134,6 +134,17 @@ func (service *Service) PutContent(ctx context.Context, uploadID, ownerUserID, c
 
 func (service *Service) OpenContent(ctx context.Context, uploadID, ownerUserID string) (objectstorage.ReadSeekCloser, objectstorage.ObjectInfo, error) {
 	upload, err := service.find(ctx, uploadID, ownerUserID)
+	if errors.Is(err, ErrUploadNotFound) {
+		var owner string
+		err = service.pool.QueryRow(ctx, `SELECT up.owner_user_id::text FROM uploads up WHERE up.id=$1 AND EXISTS(SELECT 1 FROM users WHERE id=$2 AND status='active') AND EXISTS(SELECT 1 FROM chat_messages m JOIN chat_rooms r ON r.id=m.room_id WHERE m.image_upload_id=up.id AND m.status='visible' AND (r.room_type IN ('global','game') OR EXISTS(SELECT 1 FROM chat_room_members WHERE room_id=r.id AND user_id=$2) OR EXISTS(SELECT 1 FROM user_roles ur JOIN roles roles ON roles.id=ur.role_id WHERE ur.user_id=$2 AND roles.code IN ('admin','operator'))))`, uploadID, ownerUserID).Scan(&owner)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = ErrUploadNotFound
+		}
+		if err == nil {
+			upload, err = service.find(ctx, uploadID, owner)
+		}
+	}
+
 	if err != nil {
 		return nil, objectstorage.ObjectInfo{}, err
 	}

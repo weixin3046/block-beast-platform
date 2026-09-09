@@ -3698,7 +3698,8 @@ paths:
     get:
       tags:
       - Uploads
-      summary: 下载本人已确认的本地文件
+      summary: 下载本人文件或有权查看的聊天图片
+      description: 需已登录；聊天图片通过可见消息的房间权限授权。存储适配器须支持内容读取。
       security:
       - bearerAuth: []
       responses:
@@ -6359,6 +6360,14 @@ components:
       - status
       - created_at
       properties:
+        image_upload_id:
+          type: string
+          format: uuid
+          description: 图片消息的上传 ID，文字消息省略
+        image_url:
+          type: string
+          description: 需 Bearer Token 的图片读取地址，权限随可见消息的房间访问权限校验
+
         id:
           type: string
           format: uuid

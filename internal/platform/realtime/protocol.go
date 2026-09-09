@@ -15,12 +15,13 @@ const ProtocolVersion = 1
 var errInvalidCommand = errors.New("invalid realtime command")
 
 type clientCommand struct {
-	Version   int      `json:"v"`
-	Type      string   `json:"type"`
-	Topics    []string `json:"topics,omitempty"`
-	RequestID string   `json:"request_id,omitempty"`
-	RoomID    string   `json:"room_id,omitempty"`
-	Body      string   `json:"body,omitempty"`
+	ImageUploadID string   `json:"image_upload_id,omitempty"`
+	Version       int      `json:"v"`
+	Type          string   `json:"type"`
+	Topics        []string `json:"topics,omitempty"`
+	RequestID     string   `json:"request_id,omitempty"`
+	RoomID        string   `json:"room_id,omitempty"`
+	Body          string   `json:"body,omitempty"`
 }
 
 type serverMessage struct {

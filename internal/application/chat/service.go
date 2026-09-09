@@ -47,6 +47,8 @@ type MessageSender struct {
 }
 
 type Message struct {
+	ImageUploadID   string         `json:"image_upload_id,omitempty"`
+	ImageURL        string         `json:"image_url,omitempty"`
 	ID              string         `json:"id"`
 	RoomID          string         `json:"room_id"`
 	Sender          *MessageSender `json:"sender,omitempty"`
@@ -141,7 +143,7 @@ func (service *Service) ListMessages(ctx context.Context, roomID, userID string,
 		limit = 50
 	}
 	rows, err := service.pool.Query(ctx, `
-		SELECT m.id::text,m.room_id::text,m.body,m.status,m.client_request_id,m.created_at,m.sender_is_staff,
+		SELECT m.id::text,m.room_id::text,m.body,m.status,m.client_request_id,m.created_at,m.sender_is_staff,COALESCE(m.image_upload_id::text,''),
 			u.public_id,u.display_name,
 			CASE WHEN u.avatar_url LIKE 'uploads/%'
 				THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '')
@@ -160,9 +162,12 @@ func (service *Service) ListMessages(ctx context.Context, roomID, userID string,
 		var senderIsStaff bool
 		var senderUserID *int64
 		var senderDisplayName, senderAvatarURL *string
-		if err := rows.Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt, &senderIsStaff,
+		if err := rows.Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt, &senderIsStaff, &item.ImageUploadID,
 			&senderUserID, &senderDisplayName, &senderAvatarURL); err != nil {
 			return nil, err
+		}
+		if item.ImageUploadID != "" {
+			item.ImageURL = "/v1/uploads/" + item.ImageUploadID + "/content"
 		}
 		item.Sender = newMessageSender(senderUserID, senderDisplayName, senderAvatarURL, senderIsStaff)
 		items = append(items, item)
@@ -170,10 +175,22 @@ func (service *Service) ListMessages(ctx context.Context, roomID, userID string,
 	return items, rows.Err()
 }
 
-func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, clientRequestID, body string, staff bool) (Message, bool, error) {
+func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, clientRequestID, body string, staff bool, imageIDs ...string) (Message, bool, error) {
+	imageID := ""
+	if len(imageIDs) > 1 {
+		return Message{}, false, ErrInvalidMessage
+	}
+	if len(imageIDs) == 1 {
+		imageID = imageIDs[0]
+	}
+	if imageID != "" {
+		if _, err := uuid.Parse(imageID); err != nil {
+			return Message{}, false, ErrInvalidMessage
+		}
+	}
 	body = strings.TrimSpace(body)
 	clientRequestID = strings.TrimSpace(clientRequestID)
-	if body == "" || len([]rune(body)) > 2000 {
+	if (body == "" && imageID == "") || len([]rune(body)) > 2000 {
 		return Message{}, false, ErrInvalidMessage
 	}
 	if clientRequestID == "" || len(clientRequestID) > 128 {
@@ -194,6 +211,15 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 	if muted {
 		return Message{}, false, ErrChatMuted
 	}
+	if imageID != "" {
+		var allowed bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM uploads WHERE id=$1 AND owner_user_id=$2 AND status='confirmed' AND content_type IN ('image/jpeg','image/png','image/webp'))`, imageID, senderUserID).Scan(&allowed); err != nil {
+			return Message{}, false, err
+		}
+		if !allowed {
+			return Message{}, false, ErrInvalidMessage
+		}
+	}
 	messageID := uuid.NewString()
 	var item Message
 	var senderIsStaff bool
@@ -201,24 +227,27 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 	var senderDisplayName, senderAvatarURL *string
 	err = tx.QueryRow(ctx, `
 		WITH saved AS (
-			INSERT INTO chat_messages (id,room_id,sender_user_id,body,client_request_id,sender_is_staff)
-			VALUES ($1,$2,$3,$4,$5,EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$3 AND r.code IN ('admin','operator')))
+			INSERT INTO chat_messages (id,room_id,sender_user_id,body,client_request_id,sender_is_staff,image_upload_id)
+			VALUES ($1,$2,$3,$4,$5,EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$3 AND r.code IN ('admin','operator')),NULLIF($6,'')::uuid)
 			ON CONFLICT (room_id,sender_user_id,client_request_id) WHERE sender_user_id IS NOT NULL AND client_request_id IS NOT NULL
 			DO UPDATE SET client_request_id=EXCLUDED.client_request_id
-			RETURNING id,room_id,sender_user_id,body,status,client_request_id,created_at,sender_is_staff
+			RETURNING id,room_id,sender_user_id,body,status,client_request_id,created_at,sender_is_staff,image_upload_id
 		)
-		SELECT saved.id::text,saved.room_id::text,saved.body,saved.status,saved.client_request_id,saved.created_at,saved.sender_is_staff,
+		SELECT saved.id::text,saved.room_id::text,saved.body,saved.status,saved.client_request_id,saved.created_at,saved.sender_is_staff,COALESCE(saved.image_upload_id::text,''),
 			u.public_id,u.display_name,
 			CASE WHEN u.avatar_url LIKE 'uploads/%'
 				THEN '/v1/avatars/' || u.public_id::text || '?v=' || regexp_replace(u.avatar_url, '^.*/', '')
 				ELSE COALESCE(u.avatar_url,'') END
 		FROM saved
 		LEFT JOIN users u ON u.id=saved.sender_user_id`,
-		messageID, roomID, senderUserID, body, clientRequestID).
-		Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt, &senderIsStaff,
+		messageID, roomID, senderUserID, body, clientRequestID, imageID).
+		Scan(&item.ID, &item.RoomID, &item.Body, &item.Status, &item.ClientRequestID, &item.CreatedAt, &senderIsStaff, &item.ImageUploadID,
 			&senderPublicID, &senderDisplayName, &senderAvatarURL)
 	if err != nil {
 		return Message{}, false, err
+	}
+	if item.ImageUploadID != "" {
+		item.ImageURL = "/v1/uploads/" + item.ImageUploadID + "/content"
 	}
 	item.Sender = newMessageSender(senderPublicID, senderDisplayName, senderAvatarURL, senderIsStaff)
 	created := item.ID == messageID

@@ -62,7 +62,7 @@ func (hub *Hub) monitorSession(ctx context.Context, item *client, claims identit
 }
 
 type ChatSender interface {
-	SendMessage(ctx context.Context, roomID, senderUserID, clientRequestID, body string, staff bool) (chat.Message, bool, error)
+	SendMessage(ctx context.Context, roomID, senderUserID, clientRequestID, body string, staff bool, imageIDs ...string) (chat.Message, bool, error)
 }
 
 func NewHub(secret string, origins []string) *Hub {
@@ -235,7 +235,7 @@ func (hub *Hub) sendChatMessage(ctx context.Context, item *client, claims identi
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	message, created, err := hub.chat.SendMessage(requestCtx, command.RoomID, claims.Subject, command.RequestID, command.Body, claims.HasRole(identity.RoleAdmin, identity.RoleOperator))
+	message, created, err := hub.chat.SendMessage(requestCtx, command.RoomID, claims.Subject, command.RequestID, command.Body, claims.HasRole(identity.RoleAdmin, identity.RoleOperator), command.ImageUploadID)
 	if err != nil {
 		item.enqueue(encodeMessage(serverMessage{Type: "error", RequestID: command.RequestID, Error: chatCommandError(err)}))
 		return

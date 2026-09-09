@@ -118,6 +118,7 @@ interface ClientCommand {
   topics?: string[];
   room_id?: string;
   body?: string;
+  image_upload_id?: string;
 }
 ```
 
@@ -203,7 +204,7 @@ interface ClientCommand {
 约束：
 
 - `room_id` 必须是有效 UUID，并且当前用户有权访问房间。
-- `body` 去除首尾空白后必须为 1～2000 个 Unicode 字符。
+- `body` 去除首尾空白后最多 2000 个 Unicode 字符；未附 image_upload_id 时必须至少有 1 个字符。
 - `request_id` 必填，最长 128 个字符，在同一发送者和房间内用于幂等。
 - 网络超时后重发同一条消息时必须复用原 `request_id`。
 
@@ -851,3 +852,18 @@ realtime.subscribe("chat");
 - 管理后台专用的全量玩家资金订阅。
 
 需要上述能力时必须先扩展后端协议和事件 payload，再同步更新本文档，前端不得自行假设事件存在。
+
+
+## 聊天图片消息
+
+客服和公共聊天支持每条消息一张 JPEG、PNG 或 WebP 图片，可附带不超过 2000 字的文字。先使用现有 POST /v1/uploads/authorize，按返回的上传方式写入文件并完成确认，取得 upload.id；上传大小遵循上传接口限制。PDF 不能作为聊天图片。随后通过 WebSocket 发送：
+
+```json
+{"v":1,"type":"chat.send","room_id":"房间 UUID","request_id":"客户端生成的唯一标识","body":"可选说明","image_upload_id":"已确认的上传 UUID"}
+```
+
+纯图片允许 body 为空；无图片时仍必须有文字。图片必须属于发送者，禁止传外部图片 URL。重复请求复用 request_id，返回原消息，不替换原内容。发送确认、历史列表和 chat.message.created 均包含 image_upload_id、image_url，文字消息省略这两项。
+
+image_url 指向 GET /v1/uploads/{uploadID}/content，需要携带平台 Bearer Token；浏览器使用 fetch 获取 Blob 后通过 URL.createObjectURL 展示并适时 revokeObjectURL，不把 Token 放进 URL。上传者可读取本人文件；其他人只可读取其有权查看房间内的可见图片消息，隐藏或删除消息不再授予附件访问权限。图片同时发布到公共房间后，其他已登录用户可读取。
+
+部署前执行 0076_chat_images.sql，再更新 API、Realtime。后端接口已支持，前端需实现上传按钮和图片渲染。
