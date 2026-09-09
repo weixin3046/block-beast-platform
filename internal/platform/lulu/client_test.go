@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +158,28 @@ func TestTokenInvalidHTTPStatus(t *testing.T) {
 		_, err := c.call(context.Background(), "GET", "/player/transfer/log", nil)
 		if errors.Is(err, app.ErrTokenInvalid) != (status == 401 || status == 403) {
 			t.Fatalf("status %d: %v", status, err)
+		}
+	}
+}
+
+func TestTransferRecordsDirections(t *testing.T) {
+	for _, direction := range []string{"received", "sent"} {
+		c := fixture(t)
+		wantType := "0"
+		amount := "1"
+		if direction == "sent" {
+			wantType = "1"
+			amount = "-1"
+		}
+		c.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Query().Get("type") != wantType || r.URL.Query().Get("page") != "2" {
+				t.Fatal(r.URL)
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":0,"data":{"total":1,"list":[{"user_id":57870217,"item_id":102201,"item_num":` + amount + `,"time":1788948043000,"nickname":"test"}]}}`))}, nil
+		})
+		out, e := c.TransferRecords(context.Background(), direction, 2, 10)
+		if e != nil || len(out.Items) != 1 || out.Items[0].Amount != amount || out.Items[0].Direction != direction {
+			t.Fatalf("%+v %v", out, e)
 		}
 	}
 }

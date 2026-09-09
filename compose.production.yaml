@@ -132,6 +132,13 @@ services:
       nats:
         condition: service_healthy
 
+  lulu-worker:
+    <<: *application
+    command: ["/app/lulu-worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   realtime:
     <<: *application
     command: ["/app/realtime"]

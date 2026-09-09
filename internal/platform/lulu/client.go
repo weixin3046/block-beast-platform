@@ -202,7 +202,10 @@ func (c *Client) Receipts(ctx context.Context, since time.Time, save func(app.Re
 	seenPages := map[string]bool{}
 	for page := 1; page <= 1000; page++ {
 		obj, err := c.call(ctx, "GET", fmt.Sprintf("/player/transfer/log?page=%d&size=100&type=0", page), nil)
-		if err != nil || !success(obj) {
+		if err != nil {
+			return err
+		}
+		if !success(obj) {
 			return ErrProvider
 		}
 		data, ok := obj["data"].(map[string]any)
@@ -319,4 +322,59 @@ func (c *Client) PhoneLogin(ctx context.Context, phone, code string) (string, st
 		return "", "", ErrProvider
 	}
 	return uid, token, nil
+}
+
+func (c *Client) TransferRecords(ctx context.Context, direction string, page, size int) (app.TransferPage, error) {
+	out := app.TransferPage{ReceiverUID: c.receiver, Page: page, Size: size, Items: []app.TransferRecord{}}
+	typ := 0
+	if direction == "sent" {
+		typ = 1
+	} else if direction != "received" {
+		return out, app.ErrInvalid
+	}
+	obj, e := c.call(ctx, "GET", fmt.Sprintf("/player/transfer/log?page=%d&size=%d&type=%d", page, size, typ), nil)
+	if e != nil {
+		return out, e
+	}
+	if !success(obj) {
+		return out, ErrProvider
+	}
+	data, ok := obj["data"].(map[string]any)
+	if !ok {
+		return out, ErrProvider
+	}
+	list, ok := data["list"].([]any)
+	if !ok {
+		return out, ErrProvider
+	}
+	out.Total, e = integer(data["total"])
+	if e != nil || out.Total < 0 {
+		return out, ErrProvider
+	}
+	for _, v := range list {
+		r, ok := v.(map[string]any)
+		if !ok {
+			return out, ErrProvider
+		}
+		ms, e := integer(r["time"])
+		if e != nil {
+			return out, e
+		}
+		item, e := integer(r["item_id"])
+		if e != nil {
+			return out, e
+		}
+		amount, e := integer(r["item_num"])
+		if e != nil {
+			return out, e
+		}
+		uid := str(r["user_id"])
+		if !app.ValidUID(uid) || (typ == 0 && amount <= 0) || (typ == 1 && amount >= 0) {
+			return out, ErrProvider
+		}
+		identity := fmt.Sprintf("%s|%s|%d|%d|%d", c.receiver, uid, ms, amount, item)
+		sum := sha256.Sum256([]byte(identity))
+		out.Items = append(out.Items, app.TransferRecord{ID: "observed:" + hex.EncodeToString(sum[:]), Direction: direction, CounterpartyUID: uid, Nickname: str(r["nickname"]), ItemID: item, Amount: strconv.FormatInt(amount, 10), OccurredAt: time.UnixMilli(ms).UTC()})
+	}
+	return out, nil
 }

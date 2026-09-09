@@ -98,7 +98,7 @@ func TestLuluOpenAPIOperationsRequireBearerAuth(t *testing.T) {
 		body.WriteString(line)
 		body.WriteByte('\n')
 	}
-	if count != 11 {
-		t.Fatalf("expected 11 Lulu operations, checked %d", count)
+	if count != 12 {
+		t.Fatalf("expected 12 Lulu operations, checked %d", count)
 	}
 }

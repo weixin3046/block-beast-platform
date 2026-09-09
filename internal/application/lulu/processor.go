@@ -41,6 +41,9 @@ func (s *Service) RecordReceipt(ctx context.Context, r Receipt) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "lulu_match:"+r.ReceiverUID+":"+r.SenderUID); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, `INSERT INTO lulu_receipts(id,receiver_uid,sender_uid,amount,occurred_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING`, r.ID, r.ReceiverUID, r.SenderUID, r.Amount, r.OccurredAt); err != nil {
 		return err
 	}
@@ -56,10 +59,10 @@ func (s *Service) RecordReceipt(ctx context.Context, r Receipt) error {
 	if order != nil {
 		return tx.Commit(ctx)
 	}
-	// The user-approved policy credits actual receipts matching a pre-existing order.
+	// The user-approved policy credits actual receipts matching an order within its transfer window.
 	// UID is a routing claim, not proof of account ownership. Late receipts can complete expired orders.
 	var id string
-	err = tx.QueryRow(ctx, `SELECT id FROM lulu_orders WHERE kind='deposit' AND status IN ('requested','expired') AND receiver_uid=$1 AND lulu_uid=$2 AND amount=$3 AND created_at<=$4 AND expires_at>=$4 ORDER BY created_at LIMIT 1 FOR UPDATE`, r.ReceiverUID, r.SenderUID, r.Amount, r.OccurredAt).Scan(&id)
+	err = tx.QueryRow(ctx, `SELECT id FROM lulu_orders WHERE kind='deposit' AND status IN ('requested','expired') AND receiver_uid=$1 AND lulu_uid=$2 AND amount=$3 AND created_at-interval '3 minutes'<=$4 AND expires_at>=$4 ORDER BY created_at LIMIT 1 FOR UPDATE`, r.ReceiverUID, r.SenderUID, r.Amount, r.OccurredAt).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tx.Commit(ctx)
 	}
@@ -153,6 +156,34 @@ func (s *Service) RecoverSending(ctx context.Context) error {
 	return err
 }
 
+// ReconcileStored revisits eligible receipts independently of the upstream scan watermark.
+func (s *Service) ReconcileStored(ctx context.Context) error {
+	rows, err := s.pool.Query(ctx, `SELECT r.id,r.receiver_uid,r.sender_uid,r.amount,r.occurred_at FROM lulu_receipts r WHERE r.receiver_uid=$1 AND r.order_id IS NULL AND EXISTS(SELECT 1 FROM lulu_orders o WHERE o.kind='deposit' AND o.status IN ('requested','expired') AND o.receiver_uid=r.receiver_uid AND o.lulu_uid=r.sender_uid AND o.amount=r.amount AND r.occurred_at>=o.created_at-interval '3 minutes' AND r.occurred_at<=o.expires_at) ORDER BY r.occurred_at,r.id LIMIT 100`, s.Receiver)
+	if err != nil {
+		return err
+	}
+	receipts := []Receipt{}
+	for rows.Next() {
+		var r Receipt
+		if err = rows.Scan(&r.ID, &r.ReceiverUID, &r.SenderUID, &r.Amount, &r.OccurredAt); err != nil {
+			rows.Close()
+			return err
+		}
+		receipts = append(receipts, r)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, r := range receipts {
+		if err = s.RecordReceipt(ctx, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) Collect(ctx context.Context, p Provider, start time.Time) error {
 	cfg, configErr := s.Config(ctx)
 	if configErr != nil {
@@ -160,6 +191,9 @@ func (s *Service) Collect(ctx context.Context, p Provider, start time.Time) erro
 	}
 	if !cfg.Enabled || cfg.ReceiverUID != s.Receiver || (s.ConfigVersion != 0 && cfg.Version != s.ConfigVersion) {
 		return nil
+	}
+	if err := s.ReconcileStored(ctx); err != nil {
+		return err
 	}
 	if start.IsZero() {
 		return ErrInvalid
@@ -225,4 +259,10 @@ func (s *Service) Health(ctx context.Context, actor string) (Health, error) {
 	}
 	out.TokenInvalid = out.DownAt > 0 || out.LastError == "噜噜登录已失效，请重新获取短信验证码登录"
 	return out, err
+}
+
+// ExpireDeposits runs even while the payment channel is disabled.
+func (s *Service) ExpireDeposits(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, `UPDATE lulu_orders SET status='expired',updated_at=now() WHERE kind='deposit' AND status='requested' AND expires_at<now()`)
+	return err
 }

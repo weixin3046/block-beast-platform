@@ -220,4 +220,4 @@ ssh root@58.87.64.208 '
 
 ## LULU 彩石通道
 
-新增 `cmd/lulu-worker` 独立执行噜噜到账采集和审核后的转赠。平台 ORIGIN_STONE 与彩石 1:1，转赠为整数数量；玩家按单填写噜噜 UID，无长期绑定。通道默认关闭，原 Lulu 项目保持原样。玩家端及管理端接口见 [前端接入文档](docs/frontend-api.md#lulu-彩石充提)；协议实现与部署见 [LULU 后端说明](docs/lulu-integration.md)。
+生产配置和 `scripts/deploy-production.sh` 默认启动 `lulu-worker`，无需额外 profile。`cmd/lulu-worker` 独立执行噜噜到账采集和审核后的转赠。平台 ORIGIN_STONE 与彩石 1:1，转赠为整数数量；玩家按单填写噜噜 UID，无长期绑定。通道默认关闭，原 Lulu 项目保持原样。玩家端及管理端接口见 [前端接入文档](docs/frontend-api.md#lulu-彩石充提)；协议实现与部署见 [LULU 后端说明](docs/lulu-integration.md)。

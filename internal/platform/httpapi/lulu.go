@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/block-beast/platform/internal/application/lulu"
@@ -13,6 +15,7 @@ import (
 )
 
 type LuluService interface {
+	Transfers(context.Context, string, string, int, int) (lulu.TransferPage, error)
 	SendLoginCode(context.Context, string, string, int64) error
 	PhoneLogin(context.Context, string, string, string, int64) (lulu.Config, error)
 	Config(context.Context) (lulu.Config, error)
@@ -41,8 +44,15 @@ func luluError(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
 	}
+	var pending *lulu.PendingDepositError
+	if errors.As(err, &pending) {
+		writeJSON(w, 409, map[string]any{"error": fmt.Sprintf("噜噜账号 %s 有一笔待完成的充值订单，请先完成上一笔；如未转赠，请等待 %d 秒后重新提交。", pending.LuluUID, pending.RetryAfterSeconds), "code": "lulu_deposit_pending", "lulu_uid": pending.LuluUID, "retry_after_seconds": pending.RetryAfterSeconds})
+		return true
+	}
 	status, msg := 500, "LULU 操作失败"
 	switch {
+	case errors.Is(err, lulu.ErrTokenInvalid):
+		status, msg = 502, "噜噜登录已失效，请重新获取短信验证码登录"
 	case errors.Is(err, lulu.ErrLoginLimited):
 		status, msg = 429, "噜噜登录操作过于频繁，请稍后重试"
 	case errors.Is(err, lulu.ErrLoginFailed):
@@ -222,5 +232,37 @@ func (s *Server) luluSMSLogin(send bool) http.HandlerFunc {
 		if !luluError(w, err) {
 			writeJSON(w, 200, out)
 		}
+	}
+}
+
+func (s *Server) luluTransfers(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.luluActor(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	direction := q.Get("direction")
+	if direction == "" {
+		direction = "received"
+	}
+	page, size := 1, 50
+	var e error
+	if q.Has("page") {
+		page, e = strconv.Atoi(q.Get("page"))
+		if e != nil {
+			luluError(w, lulu.ErrInvalid)
+			return
+		}
+	}
+	if q.Has("size") {
+		size, e = strconv.Atoi(q.Get("size"))
+		if e != nil {
+			luluError(w, lulu.ErrInvalid)
+			return
+		}
+	}
+	out, e := s.lulu.Transfers(r.Context(), actor, direction, page, size)
+	if !luluError(w, e) {
+		writeJSON(w, 200, out)
 	}
 }

@@ -96,6 +96,9 @@ func TestOrdersAtomicityConcurrencyAndRecovery(t *testing.T) {
 	if _, err = s.Review(ctx, dep.ID, op, "reject", "deposit cannot be reviewed"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("deposit review: %v", err)
 	}
+	if dep.ExpiresAt.Sub(dep.CreatedAt) != 3*time.Minute {
+		t.Fatalf("unexpected deadline: %v", dep.ExpiresAt.Sub(dep.CreatedAt))
+	}
 	if dep.Currency != "ORIGIN_STONE" || dep.Amount != "100" {
 		t.Fatalf("wrong deposit units: %+v", dep)
 	}
@@ -110,6 +113,11 @@ func TestOrdersAtomicityConcurrencyAndRecovery(t *testing.T) {
 	}
 	if _, err = s.Create(ctx, other, "deposit", in); !errors.Is(err, ErrConflict) {
 		t.Fatalf("sender reservation: %v", err)
+	} else {
+		var pending *PendingDepositError
+		if !errors.As(err, &pending) || pending.LuluUID != in.LuluUID || pending.RetryAfterSeconds < 1 || pending.RetryAfterSeconds > 180 {
+			t.Fatalf("pending countdown: %v", err)
+		}
 	}
 	receipt := Receipt{ID: uuid.NewString(), ReceiverUID: s.Receiver, SenderUID: in.LuluUID, Amount: 100, OccurredAt: time.Now().UTC().Truncate(time.Microsecond)}
 	var wg sync.WaitGroup
@@ -232,7 +240,15 @@ func TestOrdersAtomicityConcurrencyAndRecovery(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	exec(`UPDATE lulu_orders SET status='expired' WHERE id=$1`, late.ID)
+	exec(`UPDATE lulu_orders SET expires_at=now()-interval '1 second',created_at=now()-interval '2 minutes' WHERE id=$1`, late.ID)
+	if e = s.ExpireDeposits(ctx); e != nil {
+		t.Fatal(e)
+	}
+	var expiredStatus string
+	if e = pool.QueryRow(ctx, `SELECT status FROM lulu_orders WHERE id=$1`, late.ID).Scan(&expiredStatus); e != nil || expiredStatus != "expired" {
+		t.Fatalf("expiry: %s %v", expiredStatus, e)
+	}
+	exec(`UPDATE lulu_orders SET expires_at=now()+interval '1 minute' WHERE id=$1`, late.ID)
 	if e = s.RecordReceipt(ctx, Receipt{ID: uuid.NewString(), ReceiverUID: s.Receiver, SenderUID: lateIn.LuluUID, Amount: 7, OccurredAt: time.Now().UTC().Truncate(time.Microsecond)}); e != nil {
 		t.Fatal(e)
 	}
@@ -268,8 +284,8 @@ func TestOrdersAtomicityConcurrencyAndRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	exec(`INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='operator'`, other)
-	if _, e = s.UpdateConfig(ctx, other, ConfigUpdate{ReceiverUID: s.Receiver, Enabled: false, Version: c.Version}); !errors.Is(e, ErrForbidden) {
-		t.Fatalf("operator changed config: %v", e)
+	if _, e = s.UpdateConfig(ctx, user, ConfigUpdate{ReceiverUID: s.Receiver, Enabled: false, Version: c.Version}); !errors.Is(e, ErrForbidden) {
+		t.Fatalf("player changed config: %v", e)
 	}
 	if _, e = s.UpdateConfig(ctx, op, ConfigUpdate{ReceiverUID: "bad", Enabled: true, Version: c.Version}); !errors.Is(e, ErrConfigInvalid) {
 		t.Fatalf("invalid config: %v", e)
@@ -352,16 +368,16 @@ func TestOrdersAtomicityConcurrencyAndRecovery(t *testing.T) {
 
 	login := &loginStub{uid: runtime.ReceiverUID, token: "sms-test-token"}
 	s.WithLoginFactory(func(base, key string) (LoginProvider, error) { return login, nil })
-	if e = s.SendLoginCode(ctx, other, "13800000000", runtime.Version); !errors.Is(e, ErrForbidden) {
+	if e = s.SendLoginCode(ctx, user, "13800000000", runtime.Version); !errors.Is(e, ErrForbidden) {
 		t.Fatal("nonadmin sent SMS", e)
 	}
-	if e = s.SendLoginCode(ctx, op, "13800000000", runtime.Version); e != nil {
+	if e = s.SendLoginCode(ctx, other, "13800000000", runtime.Version); e != nil {
 		t.Fatal(e)
 	}
 	if e = s.SendLoginCode(ctx, op, "13800000000", runtime.Version); !errors.Is(e, ErrLoginLimited) {
 		t.Fatal("missing SMS limit", e)
 	}
-	logged, e := s.PhoneLogin(ctx, op, "13800000000", "123456", runtime.Version)
+	logged, e := s.PhoneLogin(ctx, other, "13800000000", "123456", runtime.Version)
 	if e != nil || logged.ReceiverUID != runtime.ReceiverUID {
 		t.Fatal("SMS login", e)
 	}
@@ -465,5 +481,80 @@ func TestCollectionHealthRecovery(t *testing.T) {
 	d2, r, m, c := read()
 	if d2 != 0 || r < d || m < 0 || c != "噜噜登录已恢复，采集成功" {
 		t.Fatalf("recovery %d %d %d %s", d2, r, m, c)
+	}
+}
+
+func TestDepositThreeMinuteLookback(t *testing.T) {
+	dsn := os.Getenv("POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("POSTGRES_TEST_DSN is not set")
+	}
+	ctx := context.Background()
+	p, e := pgxpool.New(ctx, dsn)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer p.Close()
+	user := uuid.NewString()
+	receiver := "987123777"
+	if _, e = p.Exec(ctx, `INSERT INTO users(id,display_name) VALUES($1,'lookback')`, user); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = p.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='player'`, user); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = p.Exec(ctx, `UPDATE lulu_config SET receiver_uid=$1,enabled=true WHERE singleton`, receiver); e != nil {
+		t.Fatal(e)
+	}
+	s := NewService(p, receiver)
+	for _, tc := range []struct {
+		uid  string
+		age  time.Duration
+		late bool
+		want string
+	}{
+		{"123456111", 120 * time.Second, false, "confirmed"}, {"123456222", 181 * time.Second, false, "requested"}, {"123456333", 120 * time.Second, true, "confirmed"},
+	} {
+		r := Receipt{ID: uuid.NewString(), ReceiverUID: receiver, SenderUID: tc.uid, Amount: 1, OccurredAt: time.Now().UTC().Add(-tc.age).Truncate(time.Microsecond)}
+		if !tc.late {
+			if e = s.RecordReceipt(ctx, r); e != nil {
+				t.Fatal(e)
+			}
+		}
+		in := Input{RequestID: uuid.NewString(), LuluUID: tc.uid, Amount: "1"}
+		o, e := s.Create(ctx, user, "deposit", in)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if tc.late {
+			// Simulate a receipt persisted under the previous matching rule.
+			if _, e = p.Exec(ctx, `INSERT INTO lulu_receipts(id,receiver_uid,sender_uid,amount,occurred_at) VALUES($1,$2,$3,$4,$5)`, r.ID, r.ReceiverUID, r.SenderUID, r.Amount, r.OccurredAt); e != nil {
+				t.Fatal(e)
+			}
+			if e = s.ReconcileStored(ctx); e != nil {
+				t.Fatal(e)
+			}
+			if e = s.RecordReceipt(ctx, r); e != nil {
+				t.Fatal(e)
+			}
+		}
+		if e = s.RecordReceipt(ctx, r); e != nil {
+			t.Fatal(e)
+		}
+		repeat, e := s.Create(ctx, user, "deposit", in)
+		if e != nil || repeat.Status != tc.want || repeat.ID != o.ID {
+			t.Fatalf("%+v %v", repeat, e)
+		}
+		var count int
+		if e = p.QueryRow(ctx, `SELECT count(*) FROM ledger_entries WHERE business_id=$1`, o.ID).Scan(&count); e != nil {
+			t.Fatal(e)
+		}
+		want := 0
+		if tc.want == "confirmed" {
+			want = 1
+		}
+		if count != want {
+			t.Fatalf("ledger count %d want %d", count, want)
+		}
 	}
 }

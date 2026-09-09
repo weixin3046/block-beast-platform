@@ -4692,7 +4692,26 @@ paths:
         '404':
           description: 订单不存在
         '409':
-          description: 余额不足、幂等参数冲突或状态冲突
+          description: 已有待处理充值单或幂等参数冲突
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                  code:
+                    type: string
+                    const: lulu_deposit_pending
+                    description: 仅待处理充值单占用时返回
+                  lulu_uid:
+                    type: string
+                  retry_after_seconds:
+                    type: integer
+                    format: int64
+                    minimum: 1
+                    description: 原订单剩余有效秒数，向上取整；仅占用冲突返回
         '503':
           description: 通道未配置或停用
   "/v1/lulu/withdrawals":
@@ -4880,10 +4899,10 @@ paths:
     get:
       security:
       - bearerAuth: []
-      summary: 管理员读取 LULU 数据库配置和版本号
+      summary: 管理员或运营读取 LULU 数据库配置和版本号
       responses:
         '200':
-          description: 成功，仅 admin
+          description: 成功，admin/operator
           content:
             application/json:
               schema:
@@ -4891,11 +4910,11 @@ paths:
         '401':
           description: 未登录
         '403':
-          description: 非管理员
+          description: 非管理员或运营人员
     put:
       security:
       - bearerAuth: []
-      summary: 管理员更新通道配置和开关，全局二级密码保护
+      summary: 管理员或运营更新通道配置和开关，全局二级密码保护
       description: 版本号必须匹配；更换账号须先关闭通道且没有在途订单。UID 和 Token 仅通过短信登录更新，配置接口不接受 receiver_uid 或 token 字段；协议密钥加密保存且不回显。
       requestBody:
         required: true
@@ -4938,7 +4957,7 @@ paths:
         '401':
           description: 未登录或密码错误
         '403':
-          description: 非管理员
+          description: 非管理员或运营人员
         '409':
           description: 版本过期、账号切换未暂停或存在在途订单、操作密码未设置
         '429':
@@ -4950,7 +4969,7 @@ paths:
       security:
       - bearerAuth: []
       summary: 发送噜噜短信验证码
-      description: 仅 admin，全局二级密码保护；上游地址及协议密钥须先保存。发送验证码60秒限流，登录5秒限流。
+      description: admin/operator，全局二级密码保护；上游地址及协议密钥须先保存。发送验证码60秒限流，登录5秒限流。
       requestBody:
         required: true
         content:
@@ -4986,7 +5005,7 @@ paths:
         '401':
           description: 未登录或二级密码错误
         '403':
-          description: 非管理员
+          description: 非管理员或运营人员
         '409':
           description: 配置版本冲突或换号存在在途订单
         '429':
@@ -5000,7 +5019,7 @@ paths:
       security:
       - bearerAuth: []
       summary: 使用短信验证码登录并自动保存UID和Token
-      description: 仅 admin，全局二级密码保护；上游地址及协议密钥须先保存。发送验证码60秒限流，登录5秒限流。
+      description: admin/operator，全局二级密码保护；上游地址及协议密钥须先保存。发送验证码60秒限流，登录5秒限流。
       requestBody:
         required: true
         content:
@@ -5035,7 +5054,7 @@ paths:
         '401':
           description: 未登录或二级密码错误
         '403':
-          description: 非管理员
+          description: 非管理员或运营人员
         '409':
           description: 配置版本冲突或换号存在在途订单
         '429':
@@ -5044,6 +5063,80 @@ paths:
           description: 上游短信或登录失败，不透传上游原始响应
         '503':
           description: 加密主密钥或密码服务不可用
+  "/v1/admin/lulu/transfers":
+    get:
+      security:
+      - bearerAuth: []
+      summary: 查询当前噜噜账号上游转赠流水及订单关联
+      description: admin/operator；需要已启用且凭据完整。只读查询，不触发充值或提现。转出彩石按平台 UID、对方 UID、金额及自动扣款账本时间（与转赠时间前后相差不超过 30 秒，包含边界）唯一匹配；link_method 标明推断依据，不代表上游交易号核实。人工确认及超出此时间窗口的提现不参与匹配。
+      parameters:
+      - name: direction
+        in: query
+        schema:
+          type: string
+          enum: [received, sent]
+          default: received
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 1
+      - name: size
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: 上游分页结果，item_num 的正负方向保留在 amount 中
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receiver_uid: {type: string}
+                  page: {type: integer}
+                  size: {type: integer}
+                  total: {type: integer, format: int64}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        direction: {type: string, enum: [received, sent]}
+                        counterparty_uid: {type: string}
+                        nickname: {type: string}
+                        item_id: {type: integer, format: int64}
+                        amount: {type: string}
+                        occurred_at: {type: string, format: date-time}
+                        linked: {type: boolean}
+                        order_id: {type: string, format: uuid}
+                        order_status: {type: string}
+                        link_method:
+                          type: string
+                          enum: [receipt_id, account_uid_amount_completion_window]
+                          description: receipt_id 为充值流水关联；account_uid_amount_completion_window 为提现时间金额推断，仅供展示。
+                        link_reason:
+                          type: string
+                          enum: [no_matching_receipt, no_matching_withdrawal, ambiguous_withdrawal, ambiguous_transfer, unsupported_item, invalid_transfer_amount]
+        '400':
+          description: 分页或方向参数无效
+        '401':
+          description: 未登录
+        '403':
+          description: 非后台人员
+        '502':
+          description: 上游登录失效
+        '503':
+          description: 通道关闭或未配置
+        '500':
+          description: 上游查询或本地关联读取失败
+
 components:
   securitySchemes:
     bearerAuth:
@@ -8222,7 +8315,7 @@ components:
         expires_at:
           type: string
           format: date-time
-          description: 上分转账有效期，下分不使用该期限
+          description: 上分转账截止时间（下单后3分钟）；允许转赠提前于下单最多3分钟，下分不使用该期限
     LuluOrderPage:
       type: object
       properties:

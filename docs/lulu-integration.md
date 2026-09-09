@@ -7,7 +7,7 @@
 1. 停止 lulu-worker，停止 API 后按顺序应用迁移至 0074，再更新 API 和专用进程。0071 会暂停通道。0073 移除 matched 状态；如果存在历史 matched 订单会报错停止，须先在旧版本核对处理，迁移不会自动修改余额或删除订单。
 2. 在服务器配置 LULU_CONFIG_ENCRYPTION_KEY：32 随机字节的 Base64，可用 openssl rand -base64 32 生成，禁止写入仓库。API 和 lulu-worker 使用同一主密钥，备份数据库时须安全备份主密钥。
 3. 管理员按前端文档完成基础配置、短信登录、启用通道。
-4. 启动 ./lulu-worker，或使用 compose.lulu.yaml overlay 的 lulu profile。
+4. 运行 scripts/deploy-production.sh，默认构建并启动 API、worker、realtime、lulu-worker。lulu-worker 已并入 compose.production.yaml，不需要额外 overlay 或 profile；手动部署也可使用 docker compose --env-file .env.production -f compose.production.yaml up -d lulu-worker。通道未启用时常驻待命，已启用时会自动处理已审核付款。
 
 运行配置和凭据存于数据库，不读取旧 Token 文件和旧收付环境变量。Token 由短信登录获取；Token 和协议密钥采用 AES-256-GCM 分用途加密。审计仅记录公开配置和凭据变更标志。
 
@@ -51,3 +51,5 @@ POSTGRES_TEST_DSN='本地测试库DSN' go test -race ./internal/application/lulu
 ```
 
 0074 将噜噜通道改用既有 ORIGIN_STONE（精度 3），每彩石入账 1000 最小单位；订单及上游数量仍为整数彩石。迁移暂停通道并删除空的 LULU 钱包与币种。若存在在途订单、LULU 余额或账本历史则停止迁移，不自动删除或重写资金记录。其他配置或资金表仍引用 LULU 时外键同样阻止删除，需要先核对处理。源石余额与精度保持原样。必须停止旧 API 和 lulu-worker 后迁移，再部署新版本并启用通道。
+
+每轮采集先补匹配数据库中已有的未认领流水，每轮最多 100 笔符合订单窗口的记录，不受上游 10 分钟回看水位限制。关联、余额和账本继续使用原幂等事务。

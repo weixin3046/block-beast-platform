@@ -32,6 +32,14 @@ var (
 	uidPattern     = regexp.MustCompile(`^[1-9][0-9]{2,19}$`)
 )
 
+type PendingDepositError struct {
+	LuluUID           string
+	RetryAfterSeconds int64
+}
+
+func (e *PendingDepositError) Error() string { return "pending Lulu deposit" }
+func (e *PendingDepositError) Unwrap() error { return ErrConflict }
+
 func ValidUID(s string) bool { return uidPattern.MatchString(s) }
 func ParseAmount(s string) (int64, error) {
 	if s == "" || strings.TrimLeft(s, "0123456789") != "" {
@@ -65,11 +73,12 @@ type Input struct {
 	Amount    string `json:"amount"`
 }
 type Service struct {
-	loginFactory  LoginFactory
-	encryptionKey string
-	ConfigVersion int64
-	pool          *pgxpool.Pool
-	Receiver      string
+	transferFactory TransferFactory
+	loginFactory    LoginFactory
+	encryptionKey   string
+	ConfigVersion   int64
+	pool            *pgxpool.Pool
+	Receiver        string
 }
 
 func NewService(pool *pgxpool.Pool, receiver string) *Service {
@@ -201,13 +210,44 @@ func (s *Service) Create(ctx context.Context, user, kind string, in Input) (Orde
 		return out, err
 	}
 	if kind == "deposit" {
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "lulu_match:"+cfg.ReceiverUID+":"+in.LuluUID); err != nil {
+			return out, err
+		}
 		if _, err = tx.Exec(ctx, `UPDATE lulu_orders SET status='expired',updated_at=now() WHERE kind='deposit' AND status='requested' AND expires_at<now() AND receiver_uid=$1 AND lulu_uid=$2`, cfg.ReceiverUID, in.LuluUID); err != nil {
+			return out, err
+		}
+		var remaining int64
+		err = tx.QueryRow(ctx, `SELECT GREATEST(1,ceil(extract(epoch FROM expires_at-clock_timestamp())))::bigint FROM lulu_orders WHERE kind='deposit' AND status='requested' AND receiver_uid=$1 AND lulu_uid=$2 LIMIT 1`, cfg.ReceiverUID, in.LuluUID).Scan(&remaining)
+		if err == nil {
+			return out, &PendingDepositError{LuluUID: in.LuluUID, RetryAfterSeconds: remaining}
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return out, err
 		}
 	}
 	out, err = scan(tx.QueryRow(ctx, `INSERT INTO lulu_orders(user_id,kind,request_id,lulu_uid,receiver_uid,amount,status) VALUES($1,$2,$3,$4,$5,$6,'requested') RETURNING `+columns, user, kind, in.RequestID, in.LuluUID, cfg.ReceiverUID, n))
 	if err != nil {
 		return out, conflict(err)
+	}
+	if kind == "deposit" {
+		var receiptID string
+		err = tx.QueryRow(ctx, `SELECT id FROM lulu_receipts WHERE receiver_uid=$1 AND sender_uid=$2 AND amount=$3 AND order_id IS NULL AND occurred_at >= $4::timestamptz-interval '3 minutes' AND occurred_at <= $5 ORDER BY occurred_at,id LIMIT 1 FOR UPDATE`, out.ReceiverUID, out.LuluUID, n, out.CreatedAt, out.ExpiresAt).Scan(&receiptID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return out, err
+		}
+		if err == nil {
+			if _, err = tx.Exec(ctx, `UPDATE lulu_receipts SET order_id=$2 WHERE id=$1`, receiptID, out.ID); err != nil {
+				return out, err
+			}
+			if err = balance(ctx, tx, out, "lulu_deposit", n, 0, ""); err != nil {
+				return out, err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE lulu_orders SET status='confirmed',receipt_id=$2,updated_at=now() WHERE id=$1`, out.ID, receiptID); err != nil {
+				return out, err
+			}
+			out.Status = "confirmed"
+			out.ReceiptID = receiptID
+		}
 	}
 	if kind == "withdrawal" {
 		if err = balance(ctx, tx, out, "lulu_withdrawal_freeze", -n, n, ""); err != nil {
@@ -239,6 +279,9 @@ func (s *Service) List(ctx context.Context, user, actor, kind, status string, li
 	if err != nil {
 		return nil, err
 	}
+	if _, err = tx.Exec(ctx, `UPDATE lulu_orders SET status='expired',updated_at=now() WHERE kind='deposit' AND status='requested' AND expires_at<now() AND ($1='' OR user_id::text=$1)`, user); err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `SELECT `+columns+` FROM lulu_orders WHERE ($1='' OR user_id::text=$1) AND ($2='' OR kind=$2) AND ($3='' OR status=$3) ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`, user, kind, status, limit, offset)
 	if err != nil {
 		return nil, err
@@ -252,7 +295,11 @@ func (s *Service) List(ctx context.Context, user, actor, kind, status string, li
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return out, tx.Commit(ctx)
 }
 
 // Review records staff decisions and external reconciliation evidence.

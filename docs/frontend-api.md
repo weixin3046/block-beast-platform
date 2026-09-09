@@ -902,10 +902,10 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 | GET /v1/lulu/orders | 本人订单，可选 kind/status/limit/offset，返回 items |
 | GET /v1/admin/lulu/orders | 后台订单，同样筛选和分页 |
 | POST /v1/admin/lulu/orders/{orderID}/review | `{action,evidence,first_password}` 审核或对账，路径 UUID |
-| GET /v1/admin/lulu/config | 读取配置，仅 admin |
-| PUT /v1/admin/lulu/config | 保存配置，仅 admin，需二级密码及最新 version |
-| POST /v1/admin/lulu/send-code | 发送验证码，仅 admin，需二级密码 |
-| POST /v1/admin/lulu/login | 短信登录并保存 UID、Token，仅 admin，需二级密码 |
+| GET /v1/admin/lulu/config | 读取配置，admin/operator |
+| PUT /v1/admin/lulu/config | 保存配置，admin/operator，需二级密码及最新 version |
+| POST /v1/admin/lulu/send-code | 发送验证码，admin/operator，需二级密码 |
+| POST /v1/admin/lulu/login | 短信登录并保存 UID、Token，admin/operator，需二级密码 |
 | GET /v1/admin/lulu/health | 最近完整采集成功时间及去敏错误状态 |
 
 ### 玩家流程
@@ -917,8 +917,8 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
    {"request_id":"deposit-001","lulu_uid":"1234567","amount":"100"}
    ```
 
-   先成功创建订单，再在噜噜向返回的 `receiver_uid` 转赠 **100** 彩石。
-   订单转账窗口为创建后 30 分钟；同一平台收款号+转出 UID 最多有一笔有效待处理申请。
+   建议先成功创建订单，再在噜噜向返回的 `receiver_uid` 转赠 **100** 彩石。
+   订单转账窗口为创建前 3 分钟至创建后 3 分钟；同一平台收款号+转出 UID 最多有一笔有效待处理申请。
    多个不同噜噜号可给同一个平台玩家上分。相同用户+方向+request_id 防重，
    修改 UID 或金额后重用键返回 409。
 3. 采集进程读取真实到账，按收款号、转出 UID、整数数量、订单转账时间窗口匹配。
@@ -932,7 +932,7 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 这采用用户确认的“填写转出 UID + 查询实际转赠记录”归属政策，**并不验证 UID
 所有权**。别人抢先用相同 UID 和金额创建申请仍存在冒领风险；当前没有绑定、
 转赠备注验证或验证码。不能向玩家声称已经验证身份。需要强归属验证时应另行扩展。
-不要先转款后下单，窗口外、金额不符和未认领转入只存入 `lulu_receipts`，不自动加分。
+允许转赠后 3 分钟内下单，窗口外、金额不符和未认领转入只存入 `lulu_receipts`，不自动加分。
 
 ### 后台审核和对账
 
@@ -966,7 +966,7 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 
 ### LULU 后台收付设置
 
-仅 admin 可调用 `GET /v1/admin/lulu/config` 和 `PUT /v1/admin/lulu/config`。PUT 完整提交 `{enabled,version,second_password}`，验证后台全局二级密码。读取后携带最新 version 保存，成功返回新版本；过期版本、未暂停的账号切换或存在在途订单返回 409。玩家 `/v1/lulu/config` 与专用进程使用同一数据库配置，不再读取环境变量中的开关/收付号。协议密钥可通过 PUT 写入，Token 只通过短信登录获取，读取只返回配置状态，不返回凭据。
+admin/operator 可调用 `GET /v1/admin/lulu/config` 和 `PUT /v1/admin/lulu/config`。PUT 完整提交 `{enabled,version,second_password}`，验证后台全局二级密码。读取后携带最新 version 保存，成功返回新版本；过期版本、未暂停的账号切换或存在在途订单返回 409。玩家 `/v1/lulu/config` 与专用进程使用同一数据库配置，不再读取环境变量中的开关/收付号。协议密钥可通过 PUT 写入，Token 只通过短信登录获取，读取只返回配置状态，不返回凭据。
 
 Swagger 测试 LULU 接口时，在 Authorize 的 bearerAuth 中填写管理员登录返回的 access_token 原文（不加 `Bearer ` 前缀），请求应包含 `Authorization: Bearer <access_token>`。文档更新后刷新页面重新授权；账号再次登录会使旧会话失效。
 
@@ -997,7 +997,7 @@ GET 和 PUT 成功返回 receiver_uid、enabled、version、updated_at、api_url
 3. 收到短信后 POST `/v1/admin/lulu/login` 提交 `{phone,code,version,second_password}`。
 4. 登录成功自动取得UID、加密保存Token，返回配置和新version；首次登录仍保持关闭，确认配置后用新version启用。已有同UID的启用通道登录成功后继续运行。
 
-两个接口仅admin可用，使用平台管理员Token和全局二级密码。无需旧噜噜Token即可登录；手机号为11位数字，验证码为4–8位数字。验证码、Token和协议密钥不写入审计或响应。保存过程复核版本和账号切换规则；返回不同UID时须先暂停并处理旧在途单。版本冲突后重新读取配置，必要时重新获取短信验证码。
+两个接口admin/operator可用，使用平台管理员Token和全局二级密码。无需旧噜噜Token即可登录；手机号为11位数字，验证码为4–8位数字。验证码、Token和协议密钥不写入审计或响应。保存过程复核版本和账号切换规则；返回不同UID时须先暂停并处理旧在途单。版本冲突后重新读取配置，必要时重新获取短信验证码。
 
 发码整个通道60秒一次，登录5秒一次，失败也占用限流窗口；不自动重试短信。上游必须返回成功码，HTTP 200的业务失败不视为成功。接口失败不替换现有Token。Token失效后仍需人工输入短信验证码，未实现免验证码自动续期。手动Token配置入口已删除，提交 token 字段（包括空字符串）返回400；无Token文件读取兼容逻辑。发码成功返回 {"status":"sent"}；登录成功返回配置对象及新 version。
 
@@ -1044,3 +1044,18 @@ GET /v1/admin/bets 每条投注新增 balance（该投注币种的当前可用�
 image_url 指向 GET /v1/uploads/{uploadID}/content，需要携带平台 Bearer Token；浏览器使用 fetch 获取 Blob 后通过 URL.createObjectURL 展示并适时 revokeObjectURL，不把 Token 放进 URL。上传者可读取本人文件；其他人只可读取其有权查看房间内的可见图片消息，隐藏或删除消息不再授予附件访问权限。图片同时发布到公共房间后，其他已登录用户可读取。
 
 部署前执行 0076_chat_images.sql，再更新 API、Realtime。后端接口已支持，前端需实现上传按钮和图片渲染。
+
+噜噜充值允许先转赠、后下单，但转赠时间最多早于订单创建时间 3 分钟（含边界）。已采集的未认领流水在创建订单时匹配，晚采集的流水同样使用此窗口。收款 UID、转出 UID 和数量必须一致，同一流水只能入账一次；创建订单响应可能直接为 confirmed。超过 3 分钟的提前转赠不会自动入账，不验证转出 UID 所有权。
+
+0077 起新建噜噜充值订单付款期限为 3 分钟。采集进程每轮自动更新过期状态（通道关闭时也执行），列表查询也会更新过期状态。以 expires_at 为准；旧订单保留已给出的截止时间。若延迟采集到实际发生于有效窗口内的付款，expired 仍可转为 confirmed。
+
+噜噜重复创建待处理充值单返回 409，code=lulu_deposit_pending，包含 lulu_uid 和 retry_after_seconds（按原订单 expires_at 计算并向上取整的剩余秒数）。error 包含账号与等待提示；前端可据 retry_after_seconds 倒计时，但倒计时结束不代表已入账，应刷新订单状态。其他幂等或审核冲突不返回此 code。
+
+
+### 噜噜上游转赠流水
+
+GET /v1/admin/lulu/transfers?direction=received&page=1&size=50，direction=sent 查询转出。仅 admin/operator 携平台 Token 调用，后端使用当前配置的噜噜凭据；无需传 UID 或噜噜 Token。通道须开启。page 为 1–1000，size 为 1–100，默认 1/50。收到和转出分别分页，total 是上游返回总数，不代表无限历史覆盖。
+
+响应包含 receiver_uid、page、size、total、items。每条记录返回 id（观测指纹，不是上游交易号）、direction、counterparty_uid、nickname、item_id、amount（收到为正、转出为负的整数字符串）、occurred_at、linked。item_id=102201 是彩石，其他物品也原样展示。
+
+收到记录若已入账关联充值单，linked=true 并返回 order_id、order_status、link_method=receipt_id；否则 linked=false、link_reason=no_matching_receipt。转出彩石记录按当前平台 UID、对方 UID、金额及自动提现扣款账本完成时间（与转赠时间前后相差不超过 30 秒，包含边界）匹配，唯一候选返回 linked=true、order_id、order_status 和 link_method=account_uid_amount_completion_window。这是时间与金额推断的展示关联，不是上游交易号核实，前端应显示“匹配提现订单（时间金额匹配）”。不会据此确认提现或改变余额。无候选为 no_matching_withdrawal，多笔候选为 ambiguous_withdrawal，同页多条流水对应同一订单为 ambiguous_transfer，其他道具为 unsupported_item；均 linked=false。人工确认的提现不参与推断。扣款与转赠时间相差超过 30 秒时不匹配；不同分页存在相似流水时此推断也不能作为财务对账凭证。

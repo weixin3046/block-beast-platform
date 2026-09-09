@@ -10,6 +10,8 @@ import (
 
 const Fallback = "操作失败，请稍后重试"
 
+var pendingLuluMessage = regexp.MustCompile(`^噜噜账号 [1-9][0-9]{2,19} 有一笔待完成的充值订单，请先完成上一笔；如未转赠，请等待 [0-9]{1,12} 秒后重新提交。$`)
+
 var precisionError = regexp.MustCompile(`^amount must be positive: amount allows at most ([0-9]{1,2}) decimal places$`)
 
 // Chinese only exposes registered public messages. Unknown database/provider
@@ -23,6 +25,9 @@ func Chinese(message string) string {
 
 func Lookup(message string) (string, bool) {
 	message = strings.TrimSpace(message)
+	if pendingLuluMessage.MatchString(message) {
+		return message, true
+	}
 	if message == "金额参数无效" || message == "JSON字段不能重复" || message == "JSON嵌套过深" || message == "金额转换失败，请检查币种配置" || message == "币种服务不可用" || message == "金额必须是数字或十进制字符串" || message == "只能提交一个JSON对象" {
 		return message, true
 	}
@@ -55,20 +60,21 @@ func Lookup(message string) (string, bool) {
 }
 
 var messages = map[string]string{
-	"噜噜登录操作过于频繁，请稍后重试":       "噜噜登录操作过于频繁，请稍后重试",
-	"噜噜短信或登录失败，请核对验证码和上游配置":  "噜噜短信或登录失败，请核对验证码和上游配置",
-	"LULU 凭据加密配置不可用":         "LULU 凭据加密配置不可用",
-	"LULU 配置无效":              "LULU 配置无效",
-	"配置版本已过期，或需先关闭通道并处理在途订单": "配置版本已过期，或需先关闭通道并处理在途订单",
-	"LULU 服务未配置":             "LULU 服务未配置",
-	"LULU 操作失败":              "LULU 操作失败",
-	"参数无效，数量必须是正整数字符串":       "参数无效，数量必须是正整数字符串",
+	"噜噜登录操作过于频繁，请稍后重试":                  "噜噜登录操作过于频繁，请稍后重试",
+	"噜噜短信或登录失败，请核对验证码和上游配置":             "噜噜短信或登录失败，请核对验证码和上游配置",
+	"LULU 凭据加密配置不可用":                    "LULU 凭据加密配置不可用",
+	"LULU 配置无效":                         "LULU 配置无效",
+	"配置版本已过期，或需先关闭通道并处理在途订单":            "配置版本已过期，或需先关闭通道并处理在途订单",
+	"LULU 服务未配置":                        "LULU 服务未配置",
+	"LULU 操作失败":                         "LULU 操作失败",
+	"参数无效，数量必须是正整数字符串":                  "参数无效，数量必须是正整数字符串",
+	"噜噜登录已失效，请重新获取短信验证码登录":              "噜噜登录已失效，请重新获取短信验证码登录",
 	"玩家噜噜账号不能与平台收付账号相同，请填写玩家自己的噜噜账号 ID": "玩家噜噜账号不能与平台收付账号相同，请填写玩家自己的噜噜账号 ID",
-	"无权执行该操作":       "无权执行该操作",
-	"订单不存在":         "订单不存在",
-	"订单状态或请求参数冲突":   "订单状态或请求参数冲突",
-	"可用余额不足或冻结状态不符": "可用余额不足或冻结状态不符",
-	"LULU 通道未启用":    "LULU 通道未启用",
+	"无权执行该操作":                           "无权执行该操作",
+	"订单不存在":                             "订单不存在",
+	"订单状态或请求参数冲突":                       "订单状态或请求参数冲突",
+	"可用余额不足或冻结状态不符":                     "可用余额不足或冻结状态不符",
+	"LULU 通道未启用":                        "LULU 通道未启用",
 
 	"仅管理员或运营人员可以执行此操作":                "仅管理员或运营人员可以执行此操作",
 	"玩家账号参数无效":                        "玩家账号参数无效",

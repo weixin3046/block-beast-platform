@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# 构建镜像、启动基础设施、执行增量迁移并滚动更新三个应用进程。
+# 构建镜像、启动基础设施、执行增量迁移并滚动更新四个应用进程。
 
 set -Eeuo pipefail
 
@@ -24,9 +24,9 @@ COMPOSE=(docker compose --env-file "${ENV_FILE}" -f compose.production.yaml)
 export APP_ENV_FILE="${ENV_FILE}"
 
 "${COMPOSE[@]}" config --quiet
-"${COMPOSE[@]}" build api worker realtime
+"${COMPOSE[@]}" build api worker realtime lulu-worker
 "${COMPOSE[@]}" up -d --wait postgres nats
 "${COMPOSE[@]}" run --rm migrate
 "${COMPOSE[@]}" run --rm uploads-init
-"${COMPOSE[@]}" up -d --no-deps api worker realtime
+"${COMPOSE[@]}" up -d --no-deps api worker realtime lulu-worker
 "${COMPOSE[@]}" ps

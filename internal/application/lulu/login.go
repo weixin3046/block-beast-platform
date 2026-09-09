@@ -36,7 +36,7 @@ func (s *Service) loginPrepare(ctx context.Context, actor, phone, action string,
 		return cfg, nil, e
 	}
 	var allowed bool
-	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND r.code='admin')`, actor).Scan(&allowed); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND r.code IN ('admin','operator'))`, actor).Scan(&allowed); e != nil {
 		return cfg, nil, e
 	}
 	if !allowed {

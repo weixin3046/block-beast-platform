@@ -117,7 +117,7 @@ func TestLuluConfigAuthorizationAndPassword(t *testing.T) {
 		status, calls    int
 	}{
 		{"admin", "admin", `{"enabled":true,"version":1,"second_password":"test-secret"}`, nil, 200, 1},
-		{"operator", "operator", `{"enabled":true,"version":1,"second_password":"test-secret"}`, nil, 403, 0},
+		{"operator", "operator", `{"enabled":true,"version":1,"second_password":"test-secret"}`, nil, 200, 1},
 		{"player", "player", `{"enabled":true,"version":1,"second_password":"test-secret"}`, nil, 403, 0},
 		{"wrong password", "admin", `{"enabled":true,"version":1,"second_password":"test-secret"}`, adminsecurity.ErrIncorrect, 401, 0},
 		{"missing enabled", "admin", `{"version":1,"second_password":"test-secret"}`, nil, 400, 0},
@@ -174,7 +174,7 @@ func TestLuluSMSRoutesRequireAdminAndSecondPassword(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+issueTestToken(t, "admin-user", []string{role}))
 			w := httptest.NewRecorder()
 			s.Handler().ServeHTTP(w, req)
-			if role == "admin" {
+			if role == "admin" || role == "operator" {
 				if w.Code != 200 || stub.calls != 1 || pw.level != "second" {
 					t.Fatalf("admin %s: %d %s", path, w.Code, w.Body.String())
 				}
@@ -217,5 +217,35 @@ func TestLuluSameAccountErrorMessage(t *testing.T) {
 	w := httptest.NewRecorder()
 	if !luluError(w, lulu.ErrSameAccount) || w.Code != 400 || !strings.Contains(w.Body.String(), "玩家噜噜账号不能与平台收付账号相同") {
 		t.Fatalf("unexpected error response: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPendingDepositDisplaysUIDAndCountdown(t *testing.T) {
+	w := httptest.NewRecorder()
+	luluError(w, &lulu.PendingDepositError{LuluUID: "57870217", RetryAfterSeconds: 125})
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "噜噜账号 57870217") || !strings.Contains(w.Body.String(), "等待 125 秒") || !strings.Contains(w.Body.String(), `"retry_after_seconds":125`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+func (s *luluStub) Transfers(context.Context, string, string, int, int) (lulu.TransferPage, error) {
+	s.calls++
+	return lulu.TransferPage{Items: []lulu.TransferRecord{}}, nil
+}
+func TestTransferListStaffOnly(t *testing.T) {
+	for _, role := range []string{"player", "admin", "operator"} {
+		stub := &luluStub{}
+		s := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithLulu(stub))
+		r := httptest.NewRequest("GET", "/v1/admin/lulu/transfers?direction=sent", nil)
+		r.Header.Set("Authorization", "Bearer "+issueTestToken(t, "staff", []string{role}))
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		want := 200
+		if role == "player" {
+			want = 403
+		}
+		if w.Code != want {
+			t.Fatalf("%s %d", role, w.Code)
+		}
 	}
 }

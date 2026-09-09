@@ -59,12 +59,12 @@ func (s *Service) UpdateConfig(ctx context.Context, actor string, in ConfigUpdat
 		return out, err
 	}
 	defer tx.Rollback(ctx)
-	// Configuration changes are admin-only, including calls outside HTTP.
+	// Configuration changes require admin or operator, including calls outside HTTP.
 	var allowed bool
 	if err = admin(ctx, tx, actor); err != nil {
 		return out, err
 	}
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND r.code='admin')`, actor).Scan(&allowed)
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND r.code IN ('admin','operator'))`, actor).Scan(&allowed)
 	if err != nil {
 		return out, err
 	}

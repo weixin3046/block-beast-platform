@@ -57,6 +57,9 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if err = conn.Ping(ctx); err != nil {
 			return err
 		}
+		if err := settings.ExpireDeposits(ctx); err != nil {
+			return err
+		}
 		current, configErr := settings.Config(ctx)
 		if configErr != nil {
 			return configErr
