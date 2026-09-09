@@ -11,6 +11,8 @@ import (
 )
 
 type AdminBet struct {
+	Balance          string          `json:"balance"`
+	FrozenBalance    string          `json:"frozen_balance"`
 	PlacementCount   int64           `json:"placement_count"`
 	LastPlacedAt     time.Time       `json:"last_placed_at"`
 	Decimals         int             `json:"decimals"`
@@ -52,7 +54,7 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 			gt.code,gt.name,r.sequence,w.currency,COALESCE(b.game_room_id::text,''),
 			COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),b.selection,b.stake_minor,
 			COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-			b.payout_minor,b.status,b.created_at,b.settled_at,c.decimals,b.placement_count,COALESCE(b.last_placed_at,b.created_at)
+			b.payout_minor,b.status,b.created_at,b.settled_at,c.decimals,b.placement_count,COALESCE(b.last_placed_at,b.created_at),w.available_minor,w.frozen_minor
 		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
 		JOIN currencies c ON c.code=w.currency
 		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
@@ -68,10 +70,17 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 	out := []AdminBet{}
 	for rows.Next() {
 		var v AdminBet
+		var available, frozen int64
 		if err := rows.Scan(&v.BetID, &v.UserID, &v.LoginName, &v.DisplayName, &v.IsVirtual,
 			&v.GameType, &v.GameName, &v.RoundSequence, &v.Currency, &v.GameRoomID, &v.GameRoomCode,
 			&v.GameRoomName, &v.PlayMode, &v.Selection, &v.StakeMinor, &v.PayoutMultiplier,
-			&v.PayoutDivisor, &v.PayoutMinor, &v.Status, &v.CreatedAt, &v.SettledAt, &v.Decimals, &v.PlacementCount, &v.LastPlacedAt); err != nil {
+			&v.PayoutDivisor, &v.PayoutMinor, &v.Status, &v.CreatedAt, &v.SettledAt, &v.Decimals, &v.PlacementCount, &v.LastPlacedAt, &available, &frozen); err != nil {
+			return nil, err
+		}
+		if v.Balance, err = wallet.FormatDisplayAmount(available, v.Decimals); err != nil {
+			return nil, err
+		}
+		if v.FrozenBalance, err = wallet.FormatDisplayAmount(frozen, v.Decimals); err != nil {
 			return nil, err
 		}
 		v.PayoutRate = payoutRate(v.PayoutMultiplier, v.PayoutDivisor)

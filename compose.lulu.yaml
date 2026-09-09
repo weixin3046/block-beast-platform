@@ -1,0 +1,14 @@
+# Optional overlay: docker compose -f compose.production.yaml -f compose.lulu.yaml --profile lulu up -d lulu-worker
+services:
+  lulu-worker:
+    profiles: [lulu]
+    image: block-beast-platform:${APP_IMAGE_TAG:-latest}
+    command: ["/app/lulu-worker"]
+    env_file:
+      - ${APP_ENV_FILE:-.env.production}
+    restart: "on-failure"
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]

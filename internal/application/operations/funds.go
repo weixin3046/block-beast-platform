@@ -35,9 +35,9 @@ func (s *Service) dashboardFunds(ctx context.Context, result *Dashboard, from, t
 	rows, err := s.pool.Query(ctx, `
  WITH b AS(SELECT wallet_id,count(*) AS n,sum(stake_minor) AS stake,sum(payout_minor) AS payout FROM bets WHERE created_at >= $1 AND created_at < $2 GROUP BY wallet_id),
  l AS(SELECT wallet_id,
- sum(amount_minor) FILTER(WHERE business_type='deposit') AS deposit,
+ sum(amount_minor) FILTER(WHERE business_type IN ('deposit','lulu_deposit')) AS deposit,
  sum(amount_minor) FILTER(WHERE business_type='admin_credit') AS credit,
- -sum(amount_minor) FILTER(WHERE business_type IN ('admin_debit','point_withdrawal_debit') OR entry_type='withdrawal_debit') AS clearance,
+ -sum(amount_minor) FILTER(WHERE business_type IN ('admin_debit','point_withdrawal_debit','lulu_withdrawal_debit') OR entry_type='withdrawal_debit') AS clearance,
  sum(amount_minor) FILTER(WHERE business_type='admin_reward') AS gift,
  -sum(amount_minor) FILTER(WHERE business_type='admin_penalty') AS penalty
  FROM ledger_entries WHERE occurred_at >= $1 AND occurred_at < $2 GROUP BY wallet_id)

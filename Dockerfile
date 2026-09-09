@@ -9,7 +9,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -o /out/api ./cmd/api && \
     CGO_ENABLED=0 GOOS=linux go build -o /out/worker ./cmd/worker && \
-    CGO_ENABLED=0 GOOS=linux go build -o /out/realtime ./cmd/realtime
+    CGO_ENABLED=0 GOOS=linux go build -o /out/realtime ./cmd/realtime && \
+    CGO_ENABLED=0 GOOS=linux go build -o /out/lulu-worker ./cmd/lulu-worker
 
 FROM alpine:3.22
 WORKDIR /app

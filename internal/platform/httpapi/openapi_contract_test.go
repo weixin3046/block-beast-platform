@@ -54,3 +54,51 @@ var pathParameterPattern = regexp.MustCompile(`\{[^}]+\}`)
 func normalizeContractPath(path string) string {
 	return pathParameterPattern.ReplaceAllString(path, "{}")
 }
+
+// Global security is empty: each protected Lulu operation must opt into bearer auth.
+func TestLuluOpenAPIOperationsRequireBearerAuth(t *testing.T) {
+	data, err := os.ReadFile("../../../docs/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var path, method string
+	var body strings.Builder
+	count := 0
+	check := func() {
+		if method == "" || !strings.Contains(path, "/lulu/") {
+			return
+		}
+		count++
+		if !strings.Contains(body.String(), "      security:\n      - bearerAuth: []\n") {
+			t.Errorf("%s %s must declare bearerAuth so Swagger sends Authorization", method, path)
+		}
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "  \"/") && strings.HasSuffix(line, ":") {
+			check()
+			method = ""
+			path = strings.Trim(strings.TrimSuffix(strings.TrimSpace(line), ":"), "\"")
+			body.Reset()
+			continue
+		}
+		if line == "components:" {
+			check()
+			method = ""
+			break
+		}
+		if strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "      ") {
+			candidate := strings.TrimSuffix(strings.TrimSpace(line), ":")
+			switch candidate {
+			case "get", "post", "put", "delete", "patch":
+				check()
+				method = candidate
+				body.Reset()
+			}
+		}
+		body.WriteString(line)
+		body.WriteByte('\n')
+	}
+	if count != 11 {
+		t.Fatalf("expected 11 Lulu operations, checked %d", count)
+	}
+}

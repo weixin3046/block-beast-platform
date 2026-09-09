@@ -4640,6 +4640,409 @@ paths:
           description: 审核完成
         '409':
           "$ref": "#/components/responses/Conflict"
+  "/v1/lulu/config":
+    get:
+      security:
+      - bearerAuth: []
+      summary: 读取 LULU 收付配置
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluConfig'
+        '400':
+          description: 参数错误
+        '401':
+          description: 必须登录，即使本地开发也不允许匿名
+        '403':
+          description: 无权限或虚拟账号
+        '404':
+          description: 订单不存在
+        '409':
+          description: 余额不足、幂等参数冲突或状态冲突
+        '503':
+          description: 通道未配置或停用
+  "/v1/lulu/deposits":
+    post:
+      security:
+      - bearerAuth: []
+      summary: 创建上分订单；实际到账匹配后自动入账
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LuluCreate'
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluOrder'
+        '400':
+          description: 参数错误
+        '401':
+          description: 必须登录，即使本地开发也不允许匿名
+        '403':
+          description: 无权限或虚拟账号
+        '404':
+          description: 订单不存在
+        '409':
+          description: 余额不足、幂等参数冲突或状态冲突
+        '503':
+          description: 通道未配置或停用
+  "/v1/lulu/withdrawals":
+    post:
+      security:
+      - bearerAuth: []
+      summary: 创建下分订单并冻结余额
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LuluCreate'
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluOrder'
+        '400':
+          description: 参数错误
+        '401':
+          description: 必须登录，即使本地开发也不允许匿名
+        '403':
+          description: 无权限或虚拟账号
+        '404':
+          description: 订单不存在
+        '409':
+          description: 余额不足、幂等参数冲突或状态冲突
+        '503':
+          description: 通道未配置或停用
+  "/v1/lulu/orders":
+    get:
+      security:
+      - bearerAuth: []
+      summary: 查询本人 LULU 订单
+      parameters:
+        - in: query
+          name: kind
+          description: deposit 或 withdrawal，不传查全部
+          schema:
+            type: string
+        - in: query
+          name: status
+          description: 订单状态，不传查全部
+          schema:
+            type: string
+        - in: query
+          name: limit
+          description: 每页 1–100，默认 50
+          schema:
+            type: integer
+        - in: query
+          name: offset
+          description: 非负偏移量，默认 0
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluOrderPage'
+        '400':
+          description: 参数错误
+        '401':
+          description: 必须登录，即使本地开发也不允许匿名
+        '403':
+          description: 无权限或虚拟账号
+        '404':
+          description: 订单不存在
+        '409':
+          description: 余额不足、幂等参数冲突或状态冲突
+        '503':
+          description: 通道未配置或停用
+  "/v1/admin/lulu/orders":
+    get:
+      security:
+      - bearerAuth: []
+      summary: 后台查询 LULU 订单（admin/operator）
+      parameters:
+        - in: query
+          name: kind
+          description: deposit 或 withdrawal，不传查全部
+          schema:
+            type: string
+        - in: query
+          name: status
+          description: 订单状态，不传查全部
+          schema:
+            type: string
+        - in: query
+          name: limit
+          description: 每页 1–100，默认 50
+          schema:
+            type: integer
+        - in: query
+          name: offset
+          description: 非负偏移量，默认 0
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluOrderPage'
+        '400':
+          description: 参数错误
+        '401':
+          description: 必须登录，即使本地开发也不允许匿名
+        '403':
+          description: 无权限或虚拟账号
+        '404':
+          description: 订单不存在
+        '409':
+          description: 余额不足、幂等参数冲突或状态冲突
+        '503':
+          description: 通道未配置或停用
+  "/v1/admin/lulu/orders/{orderID}/review":
+    post:
+      security:
+      - bearerAuth: []
+      summary: 审核下分或核对结果不明订单；验证全局一级密码
+      parameters:
+        - in: path
+          name: orderID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LuluReview'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluOrder'
+        '400':
+          description: 参数错误
+        '401':
+          description: 必须登录，即使本地开发也不允许匿名
+        '403':
+          description: 无权限或虚拟账号
+        '404':
+          description: 订单不存在
+        '409':
+          description: 余额不足、幂等参数冲突或状态冲突
+        '503':
+          description: 通道未配置或停用
+  "/v1/admin/lulu/health":
+    get:
+      security:
+      - bearerAuth: []
+      summary: 后台查询采集状态（admin/operator）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluHealth'
+        '400':
+          description: 参数错误
+        '401':
+          description: 必须登录，即使本地开发也不允许匿名
+        '403':
+          description: 无权限或虚拟账号
+        '404':
+          description: 订单不存在
+        '409':
+          description: 余额不足、幂等参数冲突或状态冲突
+        '503':
+          description: 通道未配置或停用
+  "/v1/admin/lulu/config":
+    get:
+      security:
+      - bearerAuth: []
+      summary: 管理员读取 LULU 数据库配置和版本号
+      responses:
+        '200':
+          description: 成功，仅 admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluAdminConfig'
+        '401':
+          description: 未登录
+        '403':
+          description: 非管理员
+    put:
+      security:
+      - bearerAuth: []
+      summary: 管理员更新通道配置和开关，全局二级密码保护
+      description: 版本号必须匹配；更换账号须先关闭通道且没有在途订单。UID 和 Token 仅通过短信登录更新，配置接口不接受 receiver_uid 或 token 字段；协议密钥加密保存且不回显。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, version, second_password]
+              properties:
+                enabled:
+                  type: boolean
+                version:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                api_url:
+                  type: string
+                  description: HTTPS 上游地址，无账号密码、查询参数或片段；更改前暂停通道
+                protocol_key:
+                  type: string
+                  writeOnly: true
+                  description: 32 字节协议密钥的 Base64；留空或省略保留
+                scan_start_at:
+                  type: string
+                  format: date-time
+                  description: 首次采集起点，不允许未来；已有进度后禁止向后移动
+                second_password:
+                  type: string
+                  writeOnly: true
+      responses:
+        '200':
+          description: 保存成功，返回新版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluAdminConfig'
+        '400':
+          description: 配置或密码参数无效
+        '401':
+          description: 未登录或密码错误
+        '403':
+          description: 非管理员
+        '409':
+          description: 版本过期、账号切换未暂停或存在在途订单、操作密码未设置
+        '429':
+          description: 操作密码失败锁定
+        '503':
+          description: 操作密码服务不可用
+  "/v1/admin/lulu/send-code":
+    post:
+      security:
+      - bearerAuth: []
+      summary: 发送噜噜短信验证码
+      description: 仅 admin，全局二级密码保护；上游地址及协议密钥须先保存。发送验证码60秒限流，登录5秒限流。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone, version, second_password]
+              properties:
+                phone:
+                  type: string
+                  pattern: '^1[0-9]{10}$'
+                version:
+                  type: integer
+                  format: int64
+                second_password:
+                  type: string
+                  writeOnly: true
+      responses:
+        '200':
+          description: 验证码已发送
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: sent
+        '400':
+          description: 参数或配置不完整
+        '401':
+          description: 未登录或二级密码错误
+        '403':
+          description: 非管理员
+        '409':
+          description: 配置版本冲突或换号存在在途订单
+        '429':
+          description: 请求频率限制
+        '502':
+          description: 上游短信或登录失败，不透传上游原始响应
+        '503':
+          description: 加密主密钥或密码服务不可用
+  "/v1/admin/lulu/login":
+    post:
+      security:
+      - bearerAuth: []
+      summary: 使用短信验证码登录并自动保存UID和Token
+      description: 仅 admin，全局二级密码保护；上游地址及协议密钥须先保存。发送验证码60秒限流，登录5秒限流。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone, version, second_password, code]
+              properties:
+                phone:
+                  type: string
+                  pattern: '^1[0-9]{10}$'
+                version:
+                  type: integer
+                  format: int64
+                second_password:
+                  type: string
+                  writeOnly: true
+                code:
+                  type: string
+                  pattern: '^[0-9]{4,8}$'
+                  writeOnly: true
+      responses:
+        '200':
+          description: 登录成功，返回更新后的配置，不返回 Token 原文
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuluAdminConfig'
+        '400':
+          description: 参数或配置不完整
+        '401':
+          description: 未登录或二级密码错误
+        '403':
+          description: 非管理员
+        '409':
+          description: 配置版本冲突或换号存在在途订单
+        '429':
+          description: 请求频率限制
+        '502':
+          description: 上游短信或登录失败，不透传上游原始响应
+        '503':
+          description: 加密主密钥或密码服务不可用
 components:
   securitySchemes:
     bearerAuth:
@@ -7019,7 +7422,15 @@ components:
       - type: object
         required:
         - payout
+        - balance
+        - frozen_balance
         properties:
+          balance:
+            type: string
+            description: 玩家该投注币种的当前可用余额，实际金额，不是下注时快照
+          frozen_balance:
+            type: string
+            description: 玩家该投注币种的当前冻结余额，实际金额
           placement_count:
             type: integer
             format: int64
@@ -7727,3 +8138,161 @@ components:
         balance_after:
           type: string
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
+
+    LuluCreate:
+      type: object
+      additionalProperties: false
+      required: [request_id, lulu_uid, amount]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: 同一用户、方向下的幂等键；重用时参数必须相同
+        lulu_uid:
+          type: string
+          pattern: '^[1-9][0-9]{2,19}$'
+          description: 上分为转出噜噜号，下分为收款噜噜号，无长期绑定；不能等于平台收付 UID，相同返回 400 并提示账号不能相同
+        amount:
+          type: string
+          pattern: '^[0-9]+$'
+          description: 正整数，最大 9223372036854775；1 彩石 = 1 ORIGIN_STONE
+    LuluReview:
+      type: object
+      additionalProperties: false
+      required: [action, evidence, first_password]
+      properties:
+        action:
+          type: string
+          enum: [approve, reject, confirm_paid, confirm_not_paid]
+        evidence:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 审核或对账依据；unknown 的确认必须先核对真实出账
+        first_password:
+          type: string
+          writeOnly: true
+          description: 后台全局一级密码，不会写入审计
+    LuluOrder:
+      type: object
+      required: [id, user_id, kind, request_id, lulu_uid, receiver_uid, amount, currency, status, created_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: integer
+          format: int64
+          description: 平台用户公开 ID
+        kind:
+          type: string
+          enum: [deposit, withdrawal]
+        request_id:
+          type: string
+        lulu_uid:
+          type: string
+        receiver_uid:
+          type: string
+          description: 本单平台收付噜噜号快照
+        amount:
+          type: string
+        currency:
+          type: string
+          const: ORIGIN_STONE
+        status:
+          type: string
+          enum: [requested, approved, sending, unknown, confirmed, rejected, failed, expired]
+        receipt_id:
+          type: string
+        evidence:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: 上分转账有效期，下分不使用该期限
+    LuluOrderPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LuluOrder'
+    LuluConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        receiver_uid:
+          type: string
+        currency:
+          type: string
+          const: ORIGIN_STONE
+        decimals:
+          type: integer
+          const: 3
+        exchange_ratio:
+          type: string
+          const: '1:1'
+        deposit_verification:
+          type: string
+          const: transfer_record
+        withdrawal_review:
+          type: string
+          const: manual
+    LuluHealth:
+      type: object
+      properties:
+        last_cycle:
+          type: string
+          description: 最近完整采集尝试的去敏结果摘要；未采集为空
+        down_at:
+          type: integer
+          format: int64
+          description: Token 失效首次发现时间，Unix 毫秒；未掉线或恢复后为 0
+        recovered_at:
+          type: integer
+          format: int64
+          description: 最近一次掉线后完整采集成功时间，Unix 毫秒；尚无恢复为 0
+        last_down_ms:
+          type: integer
+          format: int64
+          description: 上次已恢复掉线的持续毫秒数，尚无恢复为 0
+
+        token_invalid:
+          type: boolean
+          description: 最近采集因上游 HTTP 401/403 失败，提示管理员重新短信登录
+        receiver_uid:
+          type: string
+        last_success_at:
+          type: [string, 'null']
+          format: date-time
+        last_error:
+          type: string
+
+    LuluAdminConfig:
+      type: object
+      required: [receiver_uid, enabled, version, updated_at]
+      properties:
+        api_url:
+          type: string
+        scan_start_at:
+          type: [string, 'null']
+          format: date-time
+        token_configured:
+          type: boolean
+        protocol_key_configured:
+          type: boolean
+        receiver_uid:
+          type: string
+        enabled:
+          type: boolean
+        version:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+          format: date-time

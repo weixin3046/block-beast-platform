@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	LuluEncryptionKey      string
 	Environment            string
 	APIAddress             string
 	APIAllowedOrigins      []string
@@ -52,6 +53,7 @@ type Config struct {
 func Load() Config {
 	environment := valueOrDefault("APP_ENV", "development")
 	return Config{
+		LuluEncryptionKey:      os.Getenv("LULU_CONFIG_ENCRYPTION_KEY"),
 		Environment:            environment,
 		APIAddress:             valueOrDefault("API_ADDRESS", ":8080"),
 		APIAllowedOrigins:      splitOrDefault("API_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),

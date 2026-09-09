@@ -17,9 +17,10 @@ import (
 	"github.com/block-beast/platform/internal/application/betting" // 下注应用服务
 	"github.com/block-beast/platform/internal/application/chain"   // 链上充提应用服务
 	"github.com/block-beast/platform/internal/application/chat"
-	"github.com/block-beast/platform/internal/application/credit" // 积分/体力充值应用服务
+	"github.com/block-beast/platform/internal/application/credit"
 	"github.com/block-beast/platform/internal/application/currency"
 	"github.com/block-beast/platform/internal/application/leaderboard"
+	"github.com/block-beast/platform/internal/application/lulu"
 	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/rebate"
@@ -34,6 +35,7 @@ import (
 	"github.com/block-beast/platform/internal/domain/wallet"    // 钱包仓储
 	"github.com/block-beast/platform/internal/platform/httpapi" // API路由/业务处理器
 	"github.com/block-beast/platform/internal/platform/localstorage"
+	luluprovider "github.com/block-beast/platform/internal/platform/lulu" // 积分/体力充值应用服务
 	"github.com/block-beast/platform/internal/platform/objectstorage"
 	"github.com/block-beast/platform/internal/platform/pqpa"
 	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL连接池
@@ -136,7 +138,7 @@ func main() {
 	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
-	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithTasks(taskService))
+	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithLulu(lulu.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey).WithLoginFactory(func(base, key string) (lulu.LoginProvider, error) { return luluprovider.NewLoginClient(base, key) })), httpapi.WithTasks(taskService))
 	operationsService := operations.NewService(pool)
 	options = append(options, httpapi.WithRebates(rebate.NewService(pool)))
 	options = append(options, httpapi.WithLoginWhitelist(operationsService))

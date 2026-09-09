@@ -28,7 +28,7 @@ func TestBetReportsIncludeRoundRoomOddsAndCancellationRefunds(t *testing.T) {
 	if _, err = pool.Exec(ctx, `INSERT INTO users(id,login_name,display_name) VALUES($1,$2,'report player')`, userID, "report-"+userID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,'POINTS',900)`, walletID, userID); err != nil {
+	if _, err = pool.Exec(ctx, `INSERT INTO wallets(id,user_id,currency,available_minor,frozen_minor) VALUES($1,$2,'POINTS',900,125)`, walletID, userID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = pool.Exec(ctx, `INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at) VALUES($1,$2,7654321,'open',$3,$4)`, roundID, gameTypeID, time.Now().UTC().Add(time.Hour), time.Now().UTC().Add(time.Hour+time.Second)); err != nil {
@@ -52,6 +52,9 @@ func TestBetReportsIncludeRoundRoomOddsAndCancellationRefunds(t *testing.T) {
 	bets, err := service.ListAdminBets(ctx, BetQuery{User: "report-" + userID, Limit: 10})
 	if err != nil || len(bets) != 1 {
 		t.Fatalf("admin bets = %+v, err = %v", bets, err)
+	}
+	if bets[0].Balance != "0.900" || bets[0].FrozenBalance != "0.125" {
+		t.Fatalf("wallet balances = %+v", bets[0])
 	}
 	if bets[0].RoundSequence != 7654321 || bets[0].GameRoomCode != "hash_rate_1940" || bets[0].PlayMode != "road" || bets[0].PayoutRate != "1.94" {
 		t.Fatalf("admin bet context = %+v", bets[0])

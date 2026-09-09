@@ -21,6 +21,7 @@ import (
 )
 
 type Server struct {
+	lulu                LuluService
 	adminBetVoids       AdminBetVoidService
 	adminPlayerCreator  AdminPlayerCreator
 	adminRelationBinder AdminRelationBinder
@@ -316,6 +317,17 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/admin/hash/config", server.protectRoles(server.secondPassword(server.updateHashConfig), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/game-rooms", server.protectRoles(server.adminGameRooms, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/rounds", server.protectRoles(server.adminRounds, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/lulu/send-code", server.protectRoles(server.secondPassword(server.luluSMSLogin(true)), identity.RoleAdmin))
+	mux.HandleFunc("POST /v1/admin/lulu/login", server.protectRoles(server.secondPassword(server.luluSMSLogin(false)), identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/admin/lulu/config", server.protectRoles(server.adminLuluConfig, identity.RoleAdmin))
+	mux.HandleFunc("PUT /v1/admin/lulu/config", server.protectRoles(server.secondPassword(server.updateLuluConfig), identity.RoleAdmin))
+	mux.HandleFunc("GET /v1/lulu/config", server.protect(server.luluConfig))
+	mux.HandleFunc("POST /v1/lulu/deposits", server.protect(server.createLuluOrder("deposit")))
+	mux.HandleFunc("POST /v1/lulu/withdrawals", server.protect(server.createLuluOrder("withdrawal")))
+	mux.HandleFunc("GET /v1/lulu/orders", server.protect(server.listLuluOrders(false)))
+	mux.HandleFunc("GET /v1/admin/lulu/orders", server.protectRoles(server.listLuluOrders(true), identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/lulu/orders/{orderID}/review", server.protectRoles(server.reviewLuluOrder, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/lulu/health", server.protectRoles(server.luluHealth, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/point-withdrawals", server.protect(server.requestPointWithdrawal))
 	mux.HandleFunc("GET /v1/point-withdrawals", server.protect(server.pointWithdrawals))
 	mux.HandleFunc("POST /v1/admin/point-withdrawals/{withdrawalID}/review", server.protectRoles(server.reviewPointWithdrawal, identity.RoleAdmin, identity.RoleOperator))

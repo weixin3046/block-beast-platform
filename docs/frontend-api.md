@@ -889,3 +889,143 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 状态码：参数错误 400、密码错误 401、权限不足 403、未设置 409、验证锁定 429（Retry-After: 900）、服务不可用 503。按账号和用途 first/second/manage 分开计算，15 分钟内失败 5 次锁定 15 分钟，成功验证清零；一个账号不会锁死其他账号。重置密码不会提前解除已触发的验证锁定。
 
 个人 `/v1/users/me/secondary-password` 的设置和验证流程完全不变，不用于上述后台操作。只修改本后端接口与文档，不关联或修改其他前台、后台项目。
+
+## LULU 彩石充提
+
+使用已有币种 `ORIGIN_STONE`，钱包 `decimals=3`，1 彩石 = 1 ORIGIN_STONE，金额请求使用正整数字符串。玩家无需长期绑定，按单填写转出/收款噜噜 UID。噜噜上下分仅接受整数彩石，前端仍传实际数量（例如 "100"），不乘 1000；后端按 3 位精度记账，所有订单和配置 currency 返回 ORIGIN_STONE，不再新增 LULU 币种。单笔最大 9223372036854775。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| GET /v1/lulu/config | 通道状态及平台收付 UID |
+| POST /v1/lulu/deposits | `{request_id,lulu_uid,amount}` 创建上分订单，随后转赠；实际到账自动匹配入账 |
+| POST /v1/lulu/withdrawals | 同样字段创建下分订单并冻结 ORIGIN_STONE |
+| GET /v1/lulu/orders | 本人订单，可选 kind/status/limit/offset，返回 items |
+| GET /v1/admin/lulu/orders | 后台订单，同样筛选和分页 |
+| POST /v1/admin/lulu/orders/{orderID}/review | `{action,evidence,first_password}` 审核或对账，路径 UUID |
+| GET /v1/admin/lulu/config | 读取配置，仅 admin |
+| PUT /v1/admin/lulu/config | 保存配置，仅 admin，需二级密码及最新 version |
+| POST /v1/admin/lulu/send-code | 发送验证码，仅 admin，需二级密码 |
+| POST /v1/admin/lulu/login | 短信登录并保存 UID、Token，仅 admin，需二级密码 |
+| GET /v1/admin/lulu/health | 最近完整采集成功时间及去敏错误状态 |
+
+### 玩家流程
+
+1. `GET /v1/lulu/config` 查看通道开关、平台收款 UID 和 1:1 比例。
+2. 上分前 `POST /v1/lulu/deposits`，例如：
+
+   ```json
+   {"request_id":"deposit-001","lulu_uid":"1234567","amount":"100"}
+   ```
+
+   先成功创建订单，再在噜噜向返回的 `receiver_uid` 转赠 **100** 彩石。
+   订单转账窗口为创建后 30 分钟；同一平台收款号+转出 UID 最多有一笔有效待处理申请。
+   多个不同噜噜号可给同一个平台玩家上分。相同用户+方向+request_id 防重，
+   修改 UID 或金额后重用键返回 409。
+3. 采集进程读取真实到账，按收款号、转出 UID、整数数量、订单转账时间窗口匹配。
+   实际到账一经匹配即自动入账，不要求后台批准。
+   余额、订单、到账归属、账本、余额通知 outbox 在同一事务提交。
+   `GET /v1/lulu/orders?kind=deposit` 查看 `confirmed`，随后刷新统一钱包。
+4. 下分 `POST /v1/lulu/withdrawals`，请求字段与上分相同，但 `lulu_uid` 是
+   **目标收款号**。创建成功立即冻结 ORIGIN_STONE。`GET /v1/lulu/orders?kind=withdrawal`
+   查看进度，余额通过现有钱包接口读取。
+
+这采用用户确认的“填写转出 UID + 查询实际转赠记录”归属政策，**并不验证 UID
+所有权**。别人抢先用相同 UID 和金额创建申请仍存在冒领风险；当前没有绑定、
+转赠备注验证或验证码。不能向玩家声称已经验证身份。需要强归属验证时应另行扩展。
+不要先转款后下单，窗口外、金额不符和未认领转入只存入 `lulu_receipts`，不自动加分。
+
+### 后台审核和对账
+
+本节订单审核和对账要求当前 active admin/operator 会话；审核操作另验证后台全局一级密码。配置和短信登录权限见下节。
+用户公开 ID 与现有接口一致，噜噜 UID 始终是字符串。
+
+- `GET /v1/admin/lulu/orders?kind=withdrawal&status=requested&limit=50&offset=0`
+- `POST /v1/admin/lulu/orders/{orderID}/review`
+
+  ```json
+  {"action":"approve","evidence":"收款账号和申请数量已核对","first_password":"后台一级密码"}
+  ```
+
+- `approve`：requested → approved，**不扣除冻结额，也不在 HTTP 请求里转赠**。
+- `reject`：requested → rejected，原子解冻。不能驳回已派发订单。
+- 专用进程：approved → sending，先持久化，再调用一次真实转赠。
+  明确成功 → confirmed，扣除冻结额；发送前查询失败 → failed，解冻；
+  发送后任何不明响应（含业务错误但无已验证的失败语义）→ unknown，保持冻结。
+- unknown 必须先人工核对真实转出记录，再提交 `confirm_paid`（完成扣款）或
+  `confirm_not_paid`（解冻），`evidence` 保存具体核对依据。
+- 进程崩溃遗留的 sending 在持有账号独占锁的进程启动时转 unknown。
+  不重发 unknown/sending。切勿通过人工下分接口再次扣该笔余额。
+- `GET /v1/admin/lulu/health` 返回最近一次完整采集成功时间及去敏错误状态；
+  不返回 Token、手机号、加密密钥或原始服务商报文。
+
+列表参数为 kind/status/limit/offset，按创建时间、ID 倒序，返回 `{items:[]}`。
+当前没有单独订单详情接口，可从列表找到订单 ID。审核成功结果可安全重试；
+相反决定或非允许状态返回 409。审计和资金变化在同一事务，密码不写审计。
+真实玩家才可创建订单，虚拟账号和非玩家不能充提。即使开发环境关闭鉴权，
+这些 API 也不允许匿名操作。
+
+### LULU 后台收付设置
+
+仅 admin 可调用 `GET /v1/admin/lulu/config` 和 `PUT /v1/admin/lulu/config`。PUT 完整提交 `{enabled,version,second_password}`，验证后台全局二级密码。读取后携带最新 version 保存，成功返回新版本；过期版本、未暂停的账号切换或存在在途订单返回 409。玩家 `/v1/lulu/config` 与专用进程使用同一数据库配置，不再读取环境变量中的开关/收付号。协议密钥可通过 PUT 写入，Token 只通过短信登录获取，读取只返回配置状态，不返回凭据。
+
+Swagger 测试 LULU 接口时，在 Authorize 的 bearerAuth 中填写管理员登录返回的 access_token 原文（不加 `Bearer ` 前缀），请求应包含 `Authorization: Bearer <access_token>`。文档更新后刷新页面重新授权；账号再次登录会使旧会话失效。
+
+后台 PUT `/v1/admin/lulu/config` 新增可选 `api_url`、`protocol_key`、`scan_start_at`。协议密钥空字符串或省略保留；token 字段不再接受；GET 新增 `api_url`、`scan_start_at`、`token_configured`、`protocol_key_configured`。首次启用须具备合法 UID、HTTPS 地址、协议密钥、登录 Token 和非未来采集时间；更换 UID 须通过新账号短信登录，修改 API 地址先暂停，已有水位禁止调晚起始时间。服务器须配置 LULU_CONFIG_ENCRYPTION_KEY，缺失或无法解密返回 503。
+
+
+首次保存基础配置的请求示例（version 使用最新值，地址、密钥和时间替换为实际值）：
+
+```json
+{
+  "enabled":false,
+  "version":3,
+  "api_url":"https://example.invalid",
+  "protocol_key":"32字节协议密钥的Base64",
+  "scan_start_at":"2026-09-08T00:00:00+08:00",
+  "second_password":"后台全局二级密码"
+}
+```
+
+GET 和 PUT 成功返回 receiver_uid、enabled、version、updated_at、api_url、scan_start_at、token_configured、protocol_key_configured。api_url、scan_start_at 省略保留；protocol_key 省略或空字符串保留，值必须为 32 字节密钥的 Base64。API 地址只允许 HTTPS，不含用户信息、查询参数和片段。UID 由短信登录取得，PUT 不接受 receiver_uid，后端保留当前账号；GET 仍返回该字段供只读展示。空配置也不允许接管在途订单。已有进度时调早采集起点不会重扫历史。停用不撤销已派发付款。
+
+### 噜噜短信登录
+
+日常流程与原采集器一致，不需要手工复制Token：
+
+1. 先保持通道关闭，用配置接口保存 api_url、protocol_key、scan_start_at；receiver_uid 由后端维护，禁止提交 receiver_uid 或 token 字段。
+2. GET 配置获取 version，POST `/v1/admin/lulu/send-code` 提交 `{phone,version,second_password}`。
+3. 收到短信后 POST `/v1/admin/lulu/login` 提交 `{phone,code,version,second_password}`。
+4. 登录成功自动取得UID、加密保存Token，返回配置和新version；首次登录仍保持关闭，确认配置后用新version启用。已有同UID的启用通道登录成功后继续运行。
+
+两个接口仅admin可用，使用平台管理员Token和全局二级密码。无需旧噜噜Token即可登录；手机号为11位数字，验证码为4–8位数字。验证码、Token和协议密钥不写入审计或响应。保存过程复核版本和账号切换规则；返回不同UID时须先暂停并处理旧在途单。版本冲突后重新读取配置，必要时重新获取短信验证码。
+
+发码整个通道60秒一次，登录5秒一次，失败也占用限流窗口；不自动重试短信。上游必须返回成功码，HTTP 200的业务失败不视为成功。接口失败不替换现有Token。Token失效后仍需人工输入短信验证码，未实现免验证码自动续期。手动Token配置入口已删除，提交 token 字段（包括空字符串）返回400；无Token文件读取兼容逻辑。发码成功返回 {"status":"sent"}；登录成功返回配置对象及新 version。
+
+### 请求、响应与错误处理
+
+所有接口使用平台会话 Authorization: Bearer <access_token>，不是噜噜 Token。订单归属于当前登录玩家。request_id 由前端自动生成（建议 UUID），不让玩家填写；同次操作超时重试复用原值。
+
+创建成功返回 201 和订单对象；列表、配置、登录、审核成功返回 200。订单字段包含 id（UUID）、user_id（平台公开数字 ID）、kind、request_id、lulu_uid、receiver_uid、amount（字符串）、currency、status、created_at、expires_at，以及可选 receipt_id、evidence。下分不使用 expires_at。
+
+审核仅支持下分，上分审核返回 409。上分状态为 requested → confirmed，超时未到账变为 expired；没有 matched 状态。延迟采集到的流水若实际发生于有效期内，过期订单仍可入账。采集默认每 5 秒一轮，网络耗时可能延迟，不能承诺 5 秒到账。订单变化后刷新钱包，不自行累加余额。
+
+| 状态码 | 处理 |
+| --- | --- |
+| 400 | 参数错误或提交已删除的 token 字段，修正请求 |
+| 401 / 403 | 检查登录、角色、账号状态及后台操作密码 |
+| 409 | 幂等参数、订单状态或配置版本冲突，重新查询后处理 |
+| 429 | 短信或登录限流，等待后再操作 |
+| 502 | 上游登录或短信请求失败 |
+| 503 | 通道或凭据加密配置不可用，联系后端排查 |
+
+字段约束和响应 schema 见 [OpenAPI](openapi.yaml)。前端接入流程统一维护在本节。
+
+噜噜订单列表 status 可省略或为空；非空仅允许 requested、approved、sending、unknown、confirmed、rejected、failed、expired。非法值（含旧 matched）返回 400。发码接口不接受 code 字段，空字符串或 null 同样返回 400；验证码只提交给登录接口。
+
+噜噜上分转出 UID、下分收款 UID 均不能与平台收付 UID 相同；否则返回 400：玩家噜噜账号不能与平台收付账号相同，请填写玩家自己的噜噜账号 ID。
+
+GET /v1/admin/bets 每条投注新增 balance（该投注币种的当前可用余额）和 frozen_balance（当前冻结余额），均为实际金额字符串，前端不再转换精度。余额为查询时的钱包状态，不是下注时余额，不汇总其他币种。
+
+后台轮询 GET /v1/admin/lulu/health：token_invalid=true 表示采集收到上游 HTTP 401/403，展示 last_error 并引导短信重新登录；不是主动推送。采集成功后清除提示。普通网络异常仅更新 last_error，不代表 Token 已失效。token_configured 只表示存有凭据，不代表凭据有效。
+
+噜噜 health 新增 last_cycle（最近采集成功或失败摘要）、down_at（当前 Token 掉线起点，Unix 毫秒）、recovered_at（最近恢复时间，Unix 毫秒）、last_down_ms（上次掉线持续毫秒数）。时间无记录为 0，摘要无记录为空。HTTP 401/403 首次设置 down_at，重复失败不覆盖；后续网络失败不清除 Token 掉线状态，只有完整采集成功才清除 down_at 并更新恢复时间和时长。登录成功本身不代表采集恢复。部署前执行 0075 迁移。
