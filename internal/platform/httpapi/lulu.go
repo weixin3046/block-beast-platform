@@ -15,6 +15,7 @@ import (
 )
 
 type LuluService interface {
+	AccountBalance(context.Context, string) (lulu.AccountBalance, error)
 	Transfers(context.Context, string, string, int, int) (lulu.TransferPage, error)
 	SendLoginCode(context.Context, string, string, int64) error
 	PhoneLogin(context.Context, string, string, string, int64) (lulu.Config, error)
@@ -51,6 +52,10 @@ func luluError(w http.ResponseWriter, err error) bool {
 	}
 	status, msg := 500, "LULU 操作失败"
 	switch {
+	case errors.Is(err, lulu.ErrBalanceTimeout):
+		status, msg = 504, "噜噜余额查询超时，请稍后重试"
+	case errors.Is(err, lulu.ErrBalanceUnavailable):
+		status, msg = 502, "噜噜余额查询失败，请稍后重试"
 	case errors.Is(err, lulu.ErrTokenInvalid):
 		status, msg = 502, "噜噜登录已失效，请重新获取短信验证码登录"
 	case errors.Is(err, lulu.ErrLoginLimited):
@@ -263,6 +268,18 @@ func (s *Server) luluTransfers(w http.ResponseWriter, r *http.Request) {
 	}
 	out, e := s.lulu.Transfers(r.Context(), actor, direction, page, size)
 	if !luluError(w, e) {
+		writeJSON(w, 200, out)
+	}
+}
+
+func (s *Server) luluBalance(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.luluActor(w, r)
+	if !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	out, err := s.lulu.AccountBalance(r.Context(), actor)
+	if !luluError(w, err) {
 		writeJSON(w, 200, out)
 	}
 }

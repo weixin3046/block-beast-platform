@@ -327,6 +327,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/lulu/orders", server.protect(server.listLuluOrders(false)))
 	mux.HandleFunc("GET /v1/admin/lulu/orders", server.protectRoles(server.listLuluOrders(true), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/lulu/orders/{orderID}/review", server.protectRoles(server.reviewLuluOrder, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("GET /v1/admin/lulu/balance", server.protectRoles(server.luluBalance, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/lulu/transfers", server.protectRoles(server.luluTransfers, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/lulu/health", server.protectRoles(server.luluHealth, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/point-withdrawals", server.protect(server.requestPointWithdrawal))

@@ -5063,6 +5063,37 @@ paths:
           description: 上游短信或登录失败，不透传上游原始响应
         '503':
           description: 加密主密钥或密码服务不可用
+  "/v1/admin/lulu/balance":
+    get:
+      security:
+      - bearerAuth: []
+      summary: 查询当前平台噜噜账号实时彩石余额
+      description: admin/operator 可用，无需二级密码或参数。通道暂停时仍可查询；复用后台凭据，实时请求上游，不缓存，不修改钱包。余额保留上游小数精度。
+      responses:
+        '200':
+          description: 实时查询成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receiver_uid, item_id, balance, queried_at]
+                properties:
+                  receiver_uid: {type: string}
+                  item_id: {type: integer, enum: [102201]}
+                  balance: {type: string, example: '5160.07704'}
+                  queried_at: {type: string, format: date-time}
+        '400':
+          description: 噜噜账号配置不完整
+        '401':
+          description: 平台登录凭证无效
+        '403':
+          description: 无后台权限
+        '502':
+          description: 噜噜登录失效或余额查询失败，返回中文 error
+        '503':
+          description: 服务或凭据解密不可用
+        '504':
+          description: 余额查询超时
   "/v1/admin/lulu/transfers":
     get:
       security:

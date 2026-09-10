@@ -249,3 +249,30 @@ func TestTransferListStaffOnly(t *testing.T) {
 		}
 	}
 }
+
+func (s *luluStub) AccountBalance(context.Context, string) (lulu.AccountBalance, error) {
+	return lulu.AccountBalance{ReceiverUID: "1234567", ItemID: 102201, Balance: "5160.07704"}, nil
+}
+
+func TestBalanceStaffOnly(t *testing.T) {
+	for _, role := range []string{"", "player", "admin", "operator"} {
+		stub := &luluStub{}
+		s := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithLulu(stub))
+		r := httptest.NewRequest("GET", "/v1/admin/lulu/balance", nil)
+		if role != "" {
+			r.Header.Set("Authorization", "Bearer "+issueTestToken(t, "staff", []string{role}))
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		want := 200
+		if role == "" {
+			want = 401
+		}
+		if role == "player" {
+			want = 403
+		}
+		if w.Code != want {
+			t.Fatalf("%s %d", role, w.Code)
+		}
+	}
+}

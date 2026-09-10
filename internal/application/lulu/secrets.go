@@ -61,13 +61,16 @@ type RuntimeConfig struct {
 }
 
 func (s *Service) RuntimeConfig(ctx context.Context) (RuntimeConfig, error) {
+	return s.runtimeConfig(ctx, false)
+}
+func (s *Service) runtimeConfig(ctx context.Context, includeDisabled bool) (RuntimeConfig, error) {
 	var r RuntimeConfig
 	var token, key []byte
 	e := s.pool.QueryRow(ctx, `SELECT `+configColumns+`,token_cipher,protocol_cipher FROM lulu_config WHERE singleton`).Scan(&r.ReceiverUID, &r.Enabled, &r.Version, &r.UpdatedAt, &r.APIURL, &r.ScanStartAt, &r.TokenConfigured, &r.ProtocolKeyConfigured, &token, &key)
 	if e != nil {
 		return r, e
 	}
-	if !r.Enabled {
+	if !r.Enabled && !includeDisabled {
 		return r, nil
 	}
 	r.Token, e = s.unseal(token, "token")

@@ -74,6 +74,7 @@ type Input struct {
 }
 type Service struct {
 	transferFactory TransferFactory
+	balanceFactory  BalanceFactory
 	loginFactory    LoginFactory
 	encryptionKey   string
 	ConfigVersion   int64

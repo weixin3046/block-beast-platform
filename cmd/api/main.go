@@ -138,7 +138,9 @@ func main() {
 	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
-	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithLulu(lulu.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey).WithTransferFactory(func(base, uid, token, key string) (lulu.TransferReader, error) {
+	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithLulu(lulu.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey).WithBalanceFactory(func(base, uid, token, key string) (lulu.BalanceReader, error) {
+		return luluprovider.NewCredentialClient(base, uid, token, key)
+	}).WithTransferFactory(func(base, uid, token, key string) (lulu.TransferReader, error) {
 		return luluprovider.NewCredentialClient(base, uid, token, key)
 	}).WithLoginFactory(func(base, key string) (lulu.LoginProvider, error) { return luluprovider.NewLoginClient(base, key) })), httpapi.WithTasks(taskService))
 	operationsService := operations.NewService(pool)

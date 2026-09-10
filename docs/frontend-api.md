@@ -1059,3 +1059,13 @@ GET /v1/admin/lulu/transfers?direction=received&page=1&size=50，direction=sent 
 响应包含 receiver_uid、page、size、total、items。每条记录返回 id（观测指纹，不是上游交易号）、direction、counterparty_uid、nickname、item_id、amount（收到为正、转出为负的整数字符串）、occurred_at、linked。item_id=102201 是彩石，其他物品也原样展示。
 
 收到记录若已入账关联充值单，linked=true 并返回 order_id、order_status、link_method=receipt_id；否则 linked=false、link_reason=no_matching_receipt。转出彩石记录按当前平台 UID、对方 UID、金额及自动提现扣款账本完成时间（与转赠时间前后相差不超过 30 秒，包含边界）匹配，唯一候选返回 linked=true、order_id、order_status 和 link_method=account_uid_amount_completion_window。这是时间与金额推断的展示关联，不是上游交易号核实，前端应显示“匹配提现订单（时间金额匹配）”。不会据此确认提现或改变余额。无候选为 no_matching_withdrawal，多笔候选为 ambiguous_withdrawal，同页多条流水对应同一订单为 ambiguous_transfer，其他道具为 unsupported_item；均 linked=false。人工确认的提现不参与推断。扣款与转赠时间相差超过 30 秒时不匹配；不同分页存在相似流水时此推断也不能作为财务对账凭证。
+
+### 当前平台噜噜账号余额
+
+`GET /v1/admin/lulu/balance`，admin/operator 携平台登录 Token 调用，无请求参数、无需操作密码；噜噜 Token、UID、协议密钥均由后端读取。通道暂停时也可查询。每次实时请求，整体超时 15 秒，不缓存。
+
+```json
+{"receiver_uid":"34445963","item_id":102201,"balance":"5160.07704","queried_at":"2026-09-09T15:30:00Z"}
+```
+
+balance 为保留原始精度的十进制字符串，表示平台噜噜账号的彩石库存，不是玩家 ORIGIN_STONE 钱包余额。查询不更改余额、订单或账本。失败返回中文 error，不能显示为 0：400 配置不完整；401 平台登录无效；403 无权限；502 噜噜登录失效或上游异常；503 凭据解密/服务不可用；504 查询超时。只有上游明确返回零，才展示零余额。
