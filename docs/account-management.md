@@ -78,6 +78,8 @@ roles 是全量替换，不是追加。此接口当前不接收 second_password�
 
 用户查询：`GET /v1/admin/users?user_type=real` 或 `user_type=virtual`，省略查全部；q 可按公开 ID、登录名、昵称搜索。
 
+按币种查询并按可用余额从高到低排序：`GET /v1/admin/users?currency=USDT&limit=50&offset=0`。多币种如 `currency=USDT,JADE` 以第一个币种 USDT 排序，不跨币种相加；缺少排序币种钱包的用户排最后。同额按创建时间、公开 ID 降序，排序在分页前完成。未传币种时保留创建时间、公开 ID 降序。
+
 投注查询：`GET /v1/admin/bets?player_type=real` 或 `player_type=virtual`，省略或 all 查全部。注意用户列表使用 user_type，投注列表使用 player_type。
 
 创建响应的 user_id 和用户列表的 id 都是公开数字 ID，管理路径用该值，不使用内部 UUID。执行 0078 迁移后，历史和新用户的 invitation_code 均与公开 ID 一致。部署脚本自动执行缺失迁移，但服务器必须先同步包含该迁移的代码；迁移编号不能重复。

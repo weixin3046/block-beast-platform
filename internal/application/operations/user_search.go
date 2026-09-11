@@ -45,7 +45,8 @@ func (s *Service) SearchUsers(ctx context.Context, f UserSearch) ([]User, error)
  WHERE ($1='' OR u.status=$1) AND ($2='' OR u.public_id::text=$2 OR u.login_name ILIKE '%'||$2||'%' OR u.display_name ILIKE '%'||$2||'%')
  AND ($3='' OR u.is_virtual=($3='virtual'))
  AND ((cardinality($4::text[])=0 AND $5='' AND $6='') OR EXISTS(SELECT 1 FROM wallets w JOIN currencies c ON c.code=w.currency WHERE w.user_id=u.id AND (cardinality($4::text[])=0 OR w.currency=ANY($4)) AND ($5='' OR w.available_minor::numeric/power(10::numeric,c.decimals)>=NULLIF($5,'')::numeric) AND ($6='' OR w.available_minor::numeric/power(10::numeric,c.decimals)<=NULLIF($6,'')::numeric)))
- ORDER BY u.created_at DESC,u.public_id DESC LIMIT $7 OFFSET $8`, f.Status, f.Query, f.UserType, append([]string{}, f.Currencies...), f.Minimum, f.Maximum, f.Limit, f.Offset)
+ ORDER BY (SELECT sw.available_minor FROM wallets sw WHERE sw.user_id=u.id AND sw.currency=($4::text[])[1]) DESC NULLS LAST,
+ u.created_at DESC,u.public_id DESC LIMIT $7 OFFSET $8`, f.Status, f.Query, f.UserType, append([]string{}, f.Currencies...), f.Minimum, f.Maximum, f.Limit, f.Offset)
 	if err != nil {
 		return nil, err
 	}

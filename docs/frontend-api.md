@@ -1084,4 +1084,6 @@ Socket删除事件示例：
 公共房间通过chat订阅广播；客服定向发送给成员及admin/operator，私聊仅发给成员。前端收到204或事件后按message_id移除消息并保留本地删除标记，重复事件安全忽略。删除事件可能早于延迟的创建事件或发送确认到达；已删除ID不得被后到的创建事件重新插入。重试发送旧request_id可能返回status=deleted，不能显示为新消息。断线重连重新查询历史并替换列表，不能只追加，以清除离线期间已删除的消息。
 # 后台投注用户类型筛选
 
+用户列表 `GET /v1/admin/users?currency=USDT` 按 USDT 可用余额降序；多币种时按第一个币种，缺少该钱包的用户排最后，不跨币种相加。同额按创建时间、公开 ID 降序；排序先于分页。未传币种保留创建时间、公开 ID 降序。
+
 `GET /v1/admin/bets?player_type=real` 查询真实用户；`player_type=virtual` 查询虚拟用户。省略、空值或 `all` 查询全部，其他值返回 400。按用户当前 `is_virtual` 属性过滤，可与 user、game_type、currency、status、from/to、limit/offset 组合，返回结构不变。

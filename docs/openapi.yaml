@@ -4464,7 +4464,7 @@ paths:
         in: query
         schema:
           type: string
-        description: 逗号分隔或重复参数，如USDT,JADE；返回对应钱包，任一币种命中余额条件即匹配用户
+        description: 逗号分隔或重复参数，如USDT,JADE；返回对应钱包，任一币种命中余额条件即匹配用户。按第一个币种可用余额降序，缺少该钱包的用户排最后；同额按创建时间、公开ID降序。排序先于分页；省略币种按创建时间、公开ID降序，不跨币种相加。
       - name: available_min
         in: query
         schema:
