@@ -40,6 +40,10 @@ func TestSnapshotAndIdempotentPayment(t *testing.T) {
 	if e = SnapshotTx(ctx, tx, bet); e != nil {
 		t.Fatal(e)
 	}
+	var legacyConfigID, roomConfigID *string
+	if e = tx.QueryRow(ctx, `SELECT config_id::text,room_config_id::text FROM bet_rebate_snapshots WHERE bet_id=$1`, bet).Scan(&legacyConfigID, &roomConfigID); e != nil || legacyConfigID != nil || roomConfigID == nil {
+		t.Fatalf("snapshot config ids legacy=%v room=%v err=%v", legacyConfigID, roomConfigID, e)
+	}
 	exec(`UPDATE users SET agent_level=6 WHERE id=$1`, parent)
 	chain, e := LoadTx(ctx, tx, bet)
 	if e != nil || len(chain) != 1 || chain[0].Level != 1 || chain[0].RatePerMille != 14 {

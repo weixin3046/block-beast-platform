@@ -67,15 +67,15 @@ GET /v1/tasks/bet-progress 返回 title、period_type、sort_order、max_complet
 
 设置代理等级与绑定上级是两件事：设置 `agent-level` 不会自动创建上下级关系。
 
-## 级差返水配置（0060–0061，本地新版结算已接入）
+## 级差返水配置（0060–0061、0083，本地新版结算已接入）
 
-后台 admin/operator 调用 `GET /v1/admin/rebate-configs?game_type=hash_9&game_room_id=94000000-0000-4000-8000-000000000001&currency=POINTS`，三个筛选参数均可省略。响应为配置数组，含 id、game_type、game_room_id、game_room_name、currency、enabled、version、levels、updated_at。初始化144组，即六房间×六区块×四投注币种。
+后台 admin/operator 调用 `GET /v1/admin/rebate-configs`，可选 `game_room_id` 查询一个房间。响应为房间配置数组，含 id、game_room_id、game_room_name、enabled、version、levels、updated_at；不再按币种或哈希玩法区分。六个赔率房间各有一套一级至六级比例，适用于该房间所有币种和哈希玩法。
 
 编辑使用 `PUT /v1/admin/rebate-configs/{configID}`，传 `version`（GET返回整数）、`enabled`（布尔）、`second_password`（后台二级密码）和完整 `levels` 数组。每项为 `{"level":1,"rate_per_mille":14}`，必须包含不重复的1–6级，比例随等级非递减且均为0–1000整数。14表示14‰即1.4%，前端不要转换金额精度。修改成功返回新版配置；版本冲突409需重新获取，不得盲目覆盖。
 
-新版API接受哈希投注时保存返水配置和代理链快照，之后修改配置、代理等级不影响已接受投注。所有玩法（上下路、竞猜、躲避）均以投注本金为返水基数；每位上级的级差金额按币种最小单位向下取整。模拟、取消、退款单不发放。配置停用或缺失不回退旧佣金；历史版本1订单仍走旧机制，新版本2订单不会叠加旧佣金。
+新版API接受哈希投注时保存房间级返水配置和代理链快照，之后修改配置、代理等级不影响已接受投注。所有玩法（上下路、竞猜、躲避）均以投注本金为返水基数；每位上级的级差金额按币种最小单位向下取整。模拟、取消、退款单不发放。配置停用或缺失不回退旧佣金；历史版本1订单仍走旧机制，新版本2订单不会叠加旧佣金。
 
-本地代码已接入实际结算，但不代表线上已生效：必须停旧API/Worker，依次执行0060、0061并更新同版本进程。已入账返水沿用 `business_type=commission`，前端显示“佣金/返水”，不要再重复计入派奖或赠分。旧 `/v1/admin/agents/{agentID}/commission-rate` 万分比配置只影响版本1历史单；新单应使用上述级差配置。
+0083 会由旧矩阵为每个房间生成一份统一配置；若同房间旧设置不同，以最后更新时间最新的一份为初始值，旧配置和旧投注快照保留不改。上线须停止旧API/Worker，执行0083并启动同版本进程，旧进程不能与新表结构混跑。已入账返水沿用 `business_type=commission`，前端显示“佣金/返水”，不要再重复计入派奖或赠分。旧 `/v1/admin/agents/{agentID}/commission-rate` 万分比配置只影响版本1历史单；新单应使用上述房间级差配置。
 
 ### 返水查询闭环
 

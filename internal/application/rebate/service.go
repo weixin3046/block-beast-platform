@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,16 +28,14 @@ type Level struct {
 }
 type Config struct {
 	ID        string    `json:"id"`
-	GameType  string    `json:"game_type"`
 	RoomID    string    `json:"game_room_id"`
 	RoomName  string    `json:"game_room_name"`
-	Currency  string    `json:"currency"`
 	Enabled   bool      `json:"enabled"`
 	Version   int64     `json:"version"`
 	Levels    []Level   `json:"levels"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
-type ConfigQuery struct{ GameType, RoomID, Currency string }
+type ConfigQuery struct{ RoomID string }
 type ConfigUpdate struct {
 	Version int64   `json:"version"`
 	Enabled bool    `json:"enabled"`
@@ -66,32 +63,24 @@ func validateLevels(levels []Level) error {
 	return nil
 }
 
-const configSelect = `SELECT c.id::text,gt.code,c.room_id::text,gr.name,c.currency,c.enabled,c.version,c.rates,c.updated_at FROM hash_rebate_configs c JOIN game_types gt ON gt.id=c.game_type_id JOIN game_rooms gr ON gr.id=c.room_id`
+const configSelect = `SELECT c.id::text,c.room_id::text,gr.name,c.enabled,c.version,c.rates,c.updated_at FROM room_rebate_configs c JOIN game_rooms gr ON gr.id=c.room_id`
 
 func scanConfig(row pgx.Row) (Config, error) {
 	var c Config
 	var rates []int
-	e := row.Scan(&c.ID, &c.GameType, &c.RoomID, &c.RoomName, &c.Currency, &c.Enabled, &c.Version, &rates, &c.UpdatedAt)
+	e := row.Scan(&c.ID, &c.RoomID, &c.RoomName, &c.Enabled, &c.Version, &rates, &c.UpdatedAt)
 	for i, r := range rates {
 		c.Levels = append(c.Levels, Level{i + 1, r})
 	}
 	return c, e
 }
 func (s *Service) ListConfigs(ctx context.Context, q ConfigQuery) ([]Config, error) {
-	q.Currency = strings.ToUpper(strings.TrimSpace(q.Currency))
 	if q.RoomID != "" {
 		if _, e := uuid.Parse(q.RoomID); e != nil {
 			return nil, ErrInvalid
 		}
 	}
-	if q.GameType != "" {
-		switch q.GameType {
-		case "hash_9", "hash_13", "hash_17", "hash_19", "hash_23", "hash_29":
-		default:
-			return nil, ErrInvalid
-		}
-	}
-	rows, e := s.pool.Query(ctx, configSelect+` WHERE ($1='' OR gt.code=$1) AND ($2='' OR c.room_id::text=$2) AND ($3='' OR c.currency=$3) ORDER BY gr.sort_order,gt.code,c.currency`, q.GameType, q.RoomID, q.Currency)
+	rows, e := s.pool.Query(ctx, configSelect+` WHERE ($1='' OR c.room_id::text=$1) ORDER BY gr.sort_order`, q.RoomID)
 	if e != nil {
 		return nil, e
 	}
@@ -142,7 +131,7 @@ func (s *Service) UpdateConfig(ctx context.Context, actor, id string, in ConfigU
 	for _, l := range in.Levels {
 		rates[l.Level-1] = l.RatePerMille
 	}
-	if _, e = tx.Exec(ctx, `UPDATE hash_rebate_configs SET enabled=$2,rates=$3,version=version+1,updated_at=now() WHERE id=$1`, id, in.Enabled, rates); e != nil {
+	if _, e = tx.Exec(ctx, `UPDATE room_rebate_configs SET enabled=$2,rates=$3,version=version+1,updated_at=now() WHERE id=$1`, id, in.Enabled, rates); e != nil {
 		return Config{}, e
 	}
 	result, e := scanConfig(tx.QueryRow(ctx, configSelect+` WHERE c.id=$1`, id))

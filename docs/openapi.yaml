@@ -254,13 +254,11 @@ paths:
   /v1/admin/rebate-configs:
     get:
       tags: [Operations]
-      summary: 查询哈希级差返水配置
+      summary: 查询按赔率房间统一的级差返水配置
       security:
       - bearerAuth: []
       parameters:
-      - {name: game_type, in: query, schema: {type: string, enum: [hash_9, hash_13, hash_17, hash_19, hash_23, hash_29]}}
       - {name: game_room_id, in: query, schema: {type: string, format: uuid}}
-      - {name: currency, in: query, schema: {type: string}}
       responses:
         '200':
           description: 配置数组；admin/operator可读
@@ -273,7 +271,7 @@ paths:
   /v1/admin/rebate-configs/{configID}:
     put:
       tags: [Operations]
-      summary: 修改单组级差返水配置（仅影响后续新投注）
+      summary: 修改单个赔率房间的级差返水配置（仅影响后续新投注及所有币种/哈希玩法）
       security:
       - bearerAuth: []
       parameters:
@@ -5465,13 +5463,11 @@ components:
         rate_per_mille: {type: integer, minimum: 0, maximum: 1000, description: '千分比整数，14表示14‰即1.4%'}
     RebateConfig:
       type: object
-      required: [id, game_type, game_room_id, game_room_name, currency, enabled, version, levels, updated_at]
+      required: [id, game_room_id, game_room_name, enabled, version, levels, updated_at]
       properties:
         id: {type: string, format: uuid}
-        game_type: {type: string}
         game_room_id: {type: string, format: uuid}
         game_room_name: {type: string}
-        currency: {type: string}
         enabled: {type: boolean}
         version: {type: integer, format: int64}
         updated_at: {type: string, format: date-time}

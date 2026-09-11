@@ -34,10 +34,10 @@ func TestConfigPersistenceAndPermissions(t *testing.T) {
 	defer p.Close()
 	s := NewService(p)
 	all, e := s.ListConfigs(ctx, ConfigQuery{})
-	if e != nil || len(all) != 144 {
+	if e != nil || len(all) != 6 {
 		t.Fatalf("configs=%d err=%v", len(all), e)
 	}
-	one, e := s.ListConfigs(ctx, ConfigQuery{GameType: "hash_9", RoomID: "94000000-0000-4000-8000-000000000001", Currency: "POINTS"})
+	one, e := s.ListConfigs(ctx, ConfigQuery{RoomID: "94000000-0000-4000-8000-000000000001"})
 	if e != nil || len(one) != 1 {
 		t.Fatal(one, e)
 	}

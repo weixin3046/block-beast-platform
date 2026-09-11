@@ -17,13 +17,13 @@ type rebateStub struct {
 
 func (s *rebateStub) ListConfigs(_ context.Context, q rebate.ConfigQuery) ([]rebate.Config, error) {
 	s.calls++
-	return []rebate.Config{{Currency: q.Currency, Levels: []rebate.Level{{Level: 1, RatePerMille: 14}}}}, nil
+	return []rebate.Config{{RoomID: q.RoomID, Levels: []rebate.Level{{Level: 1, RatePerMille: 14}}}}, nil
 }
 func TestRebateConfigRoles(t *testing.T) {
 	for _, role := range []string{"", "player", "admin", "operator"} {
 		stub := &rebateStub{}
 		s := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithRebates(stub))
-		r := httptest.NewRequest("GET", "/v1/admin/rebate-configs?currency=POINTS", nil)
+		r := httptest.NewRequest("GET", "/v1/admin/rebate-configs?game_room_id=94000000-0000-4000-8000-000000000001", nil)
 		if role != "" {
 			r.Header.Set("Authorization", "Bearer "+issueTestToken(t, "actor", []string{role}))
 		}

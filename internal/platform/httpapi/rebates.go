@@ -75,7 +75,7 @@ func (s *Server) rebateConfigs(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if r.Method == "GET" {
 		q := r.URL.Query()
-		result, err = s.rebates.ListConfigs(r.Context(), rebate.ConfigQuery{GameType: q.Get("game_type"), RoomID: q.Get("game_room_id"), Currency: q.Get("currency")})
+		result, err = s.rebates.ListConfigs(r.Context(), rebate.ConfigQuery{RoomID: q.Get("game_room_id")})
 	} else {
 		var in struct {
 			Version *int64         `json:"version"`

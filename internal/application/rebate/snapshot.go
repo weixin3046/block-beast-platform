@@ -11,19 +11,18 @@ import (
 // SnapshotTx freezes the complete eligible ancestor chain in the placing
 // transaction. A missing/disabled configuration never falls back to legacy rates.
 func SnapshotTx(ctx context.Context, tx pgx.Tx, betID string) error {
-	var user, currency string
+	var user string
 	var room *string
-	var gameType string
 	var simulated bool
-	if e := tx.QueryRow(ctx, `SELECT b.user_id::text,w.currency,b.game_room_id::text,r.game_type_id::text,b.is_simulated FROM bets b JOIN wallets w ON w.id=b.wallet_id JOIN rounds r ON r.id=b.round_id WHERE b.id=$1`, betID).Scan(&user, &currency, &room, &gameType, &simulated); e != nil {
+	if e := tx.QueryRow(ctx, `SELECT b.user_id::text,b.game_room_id::text,b.is_simulated FROM bets b WHERE b.id=$1`, betID).Scan(&user, &room, &simulated); e != nil {
 		return e
 	}
-	var configID *string
+	var roomConfigID *string
 	var version *int64
 	var enabled bool
 	var rates []int
 	if room != nil && !simulated {
-		e := tx.QueryRow(ctx, `SELECT id::text,version,enabled,rates FROM hash_rebate_configs WHERE game_type_id=$1 AND room_id=$2 AND currency=$3 FOR SHARE`, gameType, *room, currency).Scan(&configID, &version, &enabled, &rates)
+		e := tx.QueryRow(ctx, `SELECT id::text,version,enabled,rates FROM room_rebate_configs WHERE room_id=$1 FOR SHARE`, *room).Scan(&roomConfigID, &version, &enabled, &rates)
 		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 			return e
 		}
@@ -61,7 +60,7 @@ func SnapshotTx(ctx context.Context, tx pgx.Tx, betID string) error {
 	if e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, `INSERT INTO bet_rebate_snapshots(bet_id,config_id,config_version,enabled,ancestors) VALUES($1,$2,$3,$4,$5)`, betID, configID, version, enabled, raw); e != nil {
+	if _, e = tx.Exec(ctx, `INSERT INTO bet_rebate_snapshots(bet_id,room_config_id,config_version,enabled,ancestors) VALUES($1,$2,$3,$4,$5)`, betID, roomConfigID, version, enabled, raw); e != nil {
 		return e
 	}
 	_, e = tx.Exec(ctx, `UPDATE bets SET rebate_version=2 WHERE id=$1`, betID)
