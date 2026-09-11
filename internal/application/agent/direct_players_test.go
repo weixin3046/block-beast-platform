@@ -76,6 +76,14 @@ func TestListDirectPlayersReturnsMembersAndPeriodIncome(t *testing.T) {
 		t.Fatalf("wrong real page: %+v", result)
 	}
 	item := result.Items[0]
+	if item.AgentLevel != 0 {
+		t.Fatalf("ordinary player level=%d", item.AgentLevel)
+	}
+	exec(`UPDATE users SET agent_level=2 WHERE id=$1`, realID)
+	updated, e := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{PlayerType: "real"})
+	if e != nil || len(updated.Items) != 1 || updated.Items[0].AgentLevel != 2 {
+		t.Fatalf("updated level not returned: %+v %v", updated, e)
+	}
 	if item.LoginName != "real-direct" || item.IsVirtual || len(item.Income) != 1 || item.Income[0].Currency != "POINTS" || item.Income[0].AmountMinor != 7 {
 		t.Fatalf("wrong real member income: %+v", item)
 	}

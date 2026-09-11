@@ -1088,6 +1088,8 @@ Socket删除事件示例：
 
 ### 我的直属下级及收益
 
+`GET /v1/agents/me/direct-players` 每个 items 元素包含 `agent_level`：0 表示普通用户，1–6 表示当前代理等级。设置等级成功后重新查询此列表即可读取最新值。
+
 新增 `GET /v1/agents/me/income-summary`，携带本人 Token，无参数。返回 `timezone`、`as_of`、`items`；四项 period 为 `today`、`yesterday`、`this_week`、`last_week`，各自包含 `from`、`to`、`income:[{currency,amount}]`。北京时间自然日，周一作为周起点，开始包含结束不包含。金额为字符串，分币种统计本人收到的全部当前 paid 返佣（包含各级来源）；无收益为空数组，pending/reversed及时间未知记录不计入。本周包含今日，两个时段不可相加。依赖已有0082迁移。
 
 新增 `PUT /v1/agents/me/direct-players/{userID}/agent-level`，请求 `{"agent_level":2}`，成功返回 `{"user_id":10052,"agent_level":2}`（ID以实际值为准）。仅真实有效代理可设置自己的真实直属下级；下级当前等级及新等级都必须低于自己。三级代理可设0、1、2级，0恢复普通用户；不能操作自己、同级或更高级下级、已禁用用户。重复同值设置幂等，成功变更与审计同事务。等级变更影响后续下注的返水快照，已下注订单不追溯变更。未登录401、参数无效400、无权限403。不需要后台操作密码。

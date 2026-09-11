@@ -3494,6 +3494,7 @@ paths:
     get:
       tags: [Agent]
       summary: 查询本人直属下级及按币种收益
+      x-agent-level-description: 每个items元素包含agent_level整数，0为普通用户，1至6为当前代理等级。
       description: 返回 total 和 items，按公开 ID 升序分页；只查询登录用户自己的直属下级。每项含 user_id、login_name、display_name、avatar_url、is_virtual、created_at（注册时间）、income（currency 和实际金额字符串 amount）。收益按返佣产生时间统计当前状态 paid 的返佣，仅包含该下级本人投注为当前用户产生的收益。没有收益仍返回下级及空 income 数组。不传时间统计全部历史；历史未知时间仅在不传时间条件时计入。
       parameters:
       - {name: player_type, in: query, schema: {type: string, enum: [all, real, virtual], default: all}}

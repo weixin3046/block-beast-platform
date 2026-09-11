@@ -18,6 +18,7 @@ type DirectPlayerIncome struct {
 	AmountMinor int64  `json:"amount_minor"`
 }
 type DirectPlayer struct {
+	AgentLevel  int                  `json:"agent_level"`
 	UserID      int64                `json:"user_id"`
 	LoginName   string               `json:"login_name"`
 	DisplayName string               `json:"display_name"`
@@ -51,7 +52,7 @@ func (s *Service) ListDirectPlayers(ctx context.Context, parent string, q Direct
 	if err = tx.QueryRow(ctx, `SELECT count(*)`+members, parent, q.PlayerType).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := tx.Query(ctx, `SELECT u.id::text,u.public_id,COALESCE(u.login_name,''),u.display_name,COALESCE(u.avatar_url,''),u.is_virtual,u.created_at`+members+` ORDER BY u.public_id LIMIT $3 OFFSET $4`, parent, q.PlayerType, q.Limit, q.Offset)
+	rows, err := tx.Query(ctx, `SELECT u.id::text,u.public_id,COALESCE(u.login_name,''),u.display_name,COALESCE(u.avatar_url,''),u.is_virtual,u.created_at,COALESCE(u.agent_level,0)`+members+` ORDER BY u.public_id LIMIT $3 OFFSET $4`, parent, q.PlayerType, q.Limit, q.Offset)
 	if err != nil {
 		return out, err
 	}
@@ -60,7 +61,7 @@ func (s *Service) ListDirectPlayers(ctx context.Context, parent string, q Direct
 	for rows.Next() {
 		var id string
 		var item DirectPlayer
-		if err = rows.Scan(&id, &item.UserID, &item.LoginName, &item.DisplayName, &item.AvatarURL, &item.IsVirtual, &item.CreatedAt); err != nil {
+		if err = rows.Scan(&id, &item.UserID, &item.LoginName, &item.DisplayName, &item.AvatarURL, &item.IsVirtual, &item.CreatedAt, &item.AgentLevel); err != nil {
 			rows.Close()
 			return out, err
 		}
