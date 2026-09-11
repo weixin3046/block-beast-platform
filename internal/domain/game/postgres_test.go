@@ -126,8 +126,8 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list open rounds: %v", err)
 	}
-	if len(openRounds) != 1 || openRounds[0].RoundID != futureRoundID {
-		t.Fatalf("open rounds = %#v, want future round %q", openRounds, futureRoundID)
+	if len(openRounds) != 0 {
+		t.Fatalf("open rounds = %#v; preceding closed round must block future betting", openRounds)
 	}
 	state, err := repository.State(ctx, "test-"+gameTypeID)
 	if err != nil {

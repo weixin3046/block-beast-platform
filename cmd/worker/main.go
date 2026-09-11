@@ -130,6 +130,9 @@ func main() {
 		case <-settlementTicker.C:
 			processDueRounds(ctx, logger, roundRepository)
 			settleDueRounds(ctx, logger, settlementService, resultSource)
+			if err := roundRepository.ActivateScheduledRounds(ctx, time.Now().UTC()); err != nil {
+				logger.Error("activate scheduled rounds failed", "error", err)
+			}
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
 		case <-leaderboardTicker.C:

@@ -235,6 +235,7 @@ func TestHashMergedVirtualBalances(t *testing.T) {
 			if _, e = betting.NewService(p).CancelBet(ctx, bet.BetID, user); e != nil {
 				t.Fatal(e)
 			}
+			exec(`UPDATE rounds SET status='cancelled' WHERE id=$1`, round)
 		} else {
 			exec(`UPDATE rounds SET status='closed' WHERE id=$1`, round)
 			var raw json.RawMessage

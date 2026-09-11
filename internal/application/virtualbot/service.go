@@ -96,7 +96,7 @@ func (s *Service) runPlan(ctx context.Context, id string) (int, error) {
 	var round string
 	var seq int64
 	e = tx.QueryRow(ctx, `SELECT r.id::text,r.sequence FROM rounds r JOIN game_types gt ON gt.id=r.game_type_id
- WHERE gt.code=$1 AND gt.enabled AND r.status='open' AND r.bet_closes_at>now() ORDER BY r.sequence DESC LIMIT 1`, v.GameType).Scan(&round, &seq)
+ WHERE gt.code=$1 AND gt.enabled AND r.status='open' AND r.bet_closes_at>now() ORDER BY r.sequence ASC LIMIT 1`, v.GameType).Scan(&round, &seq)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return finish("waiting_round", "暂无可投注轮次", 0)
 	}

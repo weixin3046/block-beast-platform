@@ -51,6 +51,8 @@ Copy-Item .env.example .env
 
 ## 生产部署
 
+0080 单期投注升级：未来轮次预创建为 `scheduled`，仅最早未完成轮次开放。此次升级必须先停止旧 API/Worker，再执行部署脚本；操作步骤见 [单期投注升级](docs/deployment.md#0080-单期投注升级)。
+
 服务器使用独立的 `compose.production.yaml` 和 `.env.production`：
 
 ```bash

@@ -8,6 +8,7 @@ import (
 type RoundStatus string
 
 const (
+	RoundScheduled RoundStatus = "scheduled"
 	RoundOpen      RoundStatus = "open"
 	RoundClosed    RoundStatus = "closed"
 	RoundSettling  RoundStatus = "settling"

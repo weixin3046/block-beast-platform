@@ -154,3 +154,13 @@ docker compose --env-file .env.production -f compose.production.yaml start api
 备份文件必须复制到另一台服务器或云存储，不能只保存在原服务器。单机本地卷
 不支持跨主机 API 横向扩容；未来需要多台 API 时，应切换到 S3/COS/MinIO
 共享对象存储。
+# 0080 单期投注升级
+
+同步新版代码后，在部署目录执行以下命令。旧 Worker 会创建多期 open，必须先停止旧 API/Worker，再执行迁移；这次升级会短暂停止下注和结算。部署脚本本身不会提前停止这些进程。
+
+```sh
+docker compose --env-file .env.production -f compose.production.yaml stop api worker
+./scripts/deploy-production.sh .env.production
+```
+
+日志应包含 `0080_scheduled_rounds.sql` 的执行记录。该迁移将历史提前开放的后续轮次转为 scheduled，不删除投注、不修改钱包。新版 Worker 等前一期结算或取消后开放下一期；已过封盘时间的待开放轮次直接封盘后正常结算。新版 API 拒绝待开放期和存在更早未完成期的下注请求。迁移失败时先排查错误，不启动旧 Worker 继续写入。

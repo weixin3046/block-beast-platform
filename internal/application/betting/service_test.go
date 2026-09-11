@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/domain/wallet"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,6 +67,26 @@ func TestServicePlaceBetIsAtomicAndIdempotent(t *testing.T) {
 		Currency:        "USDT",
 		Selection:       json.RawMessage(`{"pick":"red"}`),
 		StakeMinor:      2_500,
+	}
+	futureID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at) VALUES($1,$2,2,'scheduled',$3)`, futureID, gameTypeID, time.Now().Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM rounds WHERE id=$1`, futureID) })
+	for _, futureStatus := range []string{"scheduled", "open"} {
+		if _, err := pool.Exec(ctx, `UPDATE rounds SET status=$2 WHERE id=$1`, futureID, futureStatus); err != nil {
+			t.Fatal(err)
+		}
+		futureRequest := request
+		futureRequest.RoundID = futureID
+		futureRequest.ClientRequestID = "future-" + futureStatus
+		if _, err := service.PlaceBet(ctx, futureRequest); !errors.Is(err, game.ErrBettingClosed) {
+			t.Fatalf("future round %s accepted or unexpected error: %v", futureStatus, err)
+		}
+	}
+	var unchanged int64
+	if err := pool.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id=$1`, walletID).Scan(&unchanged); err != nil || unchanged != 10000 {
+		t.Fatalf("rejected future bet changed balance: %d err=%v", unchanged, err)
 	}
 	first, err := service.PlaceBet(ctx, request)
 	if err != nil {

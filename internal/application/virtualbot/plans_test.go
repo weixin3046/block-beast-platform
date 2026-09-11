@@ -80,7 +80,7 @@ func TestPlanLifecycleAndRoundScheduling(t *testing.T) {
 	if e != nil || result.NextRoundSequence == nil || *result.NextRoundSequence != seq+9 {
 		t.Fatalf("schedule %+v %v", result, e)
 	}
-	exec("UPDATE rounds SET status='closed' WHERE id=$1", rounds[0])
+	exec("UPDATE rounds SET status='settled' WHERE id=$1", rounds[0])
 	exec("INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at) VALUES($1,'09000000-0000-4000-8000-000000000001',$2,'open',now()+interval '1 hour')", rounds[1], seq+9)
 	exec("UPDATE robot_plans SET last_checked_at=NULL WHERE id=$1", plan.ID)
 	if _, e = s.RunDue(ctx, 100); e != nil {

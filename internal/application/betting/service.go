@@ -504,6 +504,15 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 	if status != game.RoundOpen || !time.Now().UTC().Before(betClosesAt) {
 		return PlacedBet{}, game.ErrBettingClosed
 	}
+	var earlierUnfinished bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rounds prior JOIN rounds target
+	 ON prior.game_type_id=target.game_type_id AND prior.sequence<target.sequence
+	 WHERE target.id=$1 AND prior.status IN ('scheduled','open','closed','settling'))`, request.RoundID).Scan(&earlierUnfinished); err != nil {
+		return PlacedBet{}, err
+	}
+	if earlierUnfinished {
+		return PlacedBet{}, game.ErrBettingClosed
+	}
 	rules, err := game.ParseRules(rawRules)
 	if err != nil {
 		return PlacedBet{}, err

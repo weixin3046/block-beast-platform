@@ -21,7 +21,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
-// EnsureScheduledRounds keeps three future rounds available for every enabled
+// EnsureScheduledRounds prepares three future rounds for every enabled
 // room game. A TRON round sequence is its immutable target block height, selected
 // from the next block_interval multiple after tronHeight. K-line games settle on
 // minute boundaries.
@@ -125,7 +125,7 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 		var futureCount int
 		if err := tx.QueryRow(ctx, `
 			SELECT count(*) FROM rounds
-			WHERE game_type_id=$1 AND status='open' AND result_at>$2`,
+			WHERE game_type_id=$1 AND status IN ('scheduled','open','closed','settling') AND result_at>$2`,
 			item.id, now.UTC()).Scan(&futureCount); err != nil {
 			return created, err
 		}
@@ -133,7 +133,7 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 			betClosesAt := nextResult.Add(-item.closeBefore)
 			command, err := tx.Exec(ctx, `
 				INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at)
-				VALUES($1,$2,$3,'open',$4,$5)
+				VALUES($1,$2,$3,'scheduled',$4,$5)
 				ON CONFLICT(game_type_id,sequence) DO NOTHING`,
 				uuid.NewString(), item.id, nextSequence, betClosesAt, nextResult)
 			if err != nil {
@@ -150,6 +150,9 @@ func (repository *PostgresRepository) EnsureScheduledRounds(ctx context.Context,
 			}
 			nextResult = nextResult.Add(cycle)
 		}
+	}
+	if err := activateScheduledRounds(ctx, tx, now); err != nil {
+		return created, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return created, err
@@ -196,6 +199,9 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 		FROM rounds
 		JOIN game_types ON game_types.id = rounds.game_type_id
 		WHERE rounds.status = 'open' AND game_types.code = $1
+		AND rounds.bet_closes_at>now()
+		AND NOT EXISTS(SELECT 1 FROM rounds prior WHERE prior.game_type_id=rounds.game_type_id
+		 AND prior.sequence<rounds.sequence AND prior.status IN ('scheduled','open','closed','settling'))
 		ORDER BY rounds.bet_closes_at, rounds.id
 		LIMIT $2`, gameType, limit)
 	if err != nil {
@@ -426,7 +432,7 @@ func (repository *PostgresRepository) CloseDue(ctx context.Context, now time.Tim
 		WHERE id IN (
 			SELECT id
 			FROM rounds
-			WHERE status = 'open' AND bet_closes_at <= $1
+			WHERE status IN ('open','scheduled') AND bet_closes_at <= $1
 			ORDER BY bet_closes_at, id
 			LIMIT $2
 			FOR UPDATE SKIP LOCKED

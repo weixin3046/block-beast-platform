@@ -7229,6 +7229,7 @@ components:
         status:
           type: string
           enum:
+          - scheduled
           - open
           - closed
           - settling
