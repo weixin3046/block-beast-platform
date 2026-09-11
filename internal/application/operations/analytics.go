@@ -63,6 +63,13 @@ func (s *Service) Monitor(ctx context.Context, userQuery, gameType string, limit
 	return Monitor{ServerTime: time.Now().UTC(), Bets: bets, Rounds: rounds}, nil
 }
 func (s *Service) CurrentBets(ctx context.Context, userQuery, gameType string, limit int) ([]MonitorBet, error) {
+	return s.CurrentBetsFiltered(ctx, userQuery, gameType, limit, "real")
+}
+
+func (s *Service) CurrentBetsFiltered(ctx context.Context, userQuery, gameType string, limit int, playerType string) ([]MonitorBet, error) {
+	if playerType != "" && playerType != "all" && playerType != "real" && playerType != "virtual" {
+		return nil, ErrInvalidPlayerType
+	}
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
@@ -75,9 +82,9 @@ func (s *Service) CurrentBets(ctx context.Context, userQuery, gameType string, l
 		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
 		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
 		LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
-		WHERE b.status='accepted' AND NOT u.is_virtual AND ($1='' OR gt.code=$1)
+		WHERE b.status='accepted' AND ($4='' OR $4='all' OR ($4='real' AND NOT u.is_virtual) OR ($4='virtual' AND u.is_virtual)) AND ($1='' OR gt.code=$1)
 			AND ($2='' OR u.public_id::text=$2 OR u.login_name ILIKE '%'||$2||'%')
-		ORDER BY b.created_at DESC,b.id DESC LIMIT $3`, gameType, userQuery, limit)
+		ORDER BY b.created_at DESC,b.id DESC LIMIT $3`, gameType, userQuery, limit, playerType)
 	if err != nil {
 		return result, err
 	}

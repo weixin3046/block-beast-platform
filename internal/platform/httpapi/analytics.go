@@ -17,6 +17,7 @@ import (
 type AnalyticsService interface {
 	Monitor(ctx context.Context, userQuery, gameType string, limit int) (operations.Monitor, error)
 	CurrentBets(ctx context.Context, userQuery, gameType string, limit int) ([]operations.MonitorBet, error)
+	CurrentBetsFiltered(ctx context.Context, userQuery, gameType string, limit int, playerType string) ([]operations.MonitorBet, error)
 	RoundCountdowns(ctx context.Context) ([]operations.MonitorRound, error)
 	Dashboard(ctx context.Context, userQuery string, from, to time.Time, limit int) (operations.Dashboard, error)
 	RecordLogin(ctx context.Context, userID, ip, audience string) error
@@ -44,7 +45,12 @@ func (server *Server) adminMonitor(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) adminCurrentBets(w http.ResponseWriter, r *http.Request) {
-	items, err := server.analytics.CurrentBets(r.Context(), r.URL.Query().Get("user"), r.URL.Query().Get("game_type"), queryLimit(r, 100))
+	playerType := r.URL.Query().Get("player_type")
+	if playerType != "" && playerType != "all" && playerType != "real" && playerType != "virtual" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": operations.ErrInvalidPlayerType.Error()})
+		return
+	}
+	items, err := server.analytics.CurrentBetsFiltered(r.Context(), r.URL.Query().Get("user"), r.URL.Query().Get("game_type"), queryLimit(r, 100), playerType)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to load current bets"})
 		return

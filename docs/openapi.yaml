@@ -1371,9 +1371,16 @@ paths:
       tags:
       - Operations
       summary: 查询当前接受中的投注
+      description: 默认查询全部用户；player_type=real 仅真实用户，virtual 仅虚拟用户；按用户当前类型过滤，非法值返回400。
       security:
       - bearerAuth: []
       parameters:
+      - name: player_type
+        in: query
+        schema:
+          type: string
+          enum: [all, real, virtual]
+          default: all
       - name: user
         in: query
         schema:

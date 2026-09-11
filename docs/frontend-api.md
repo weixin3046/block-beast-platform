@@ -173,7 +173,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 4. `GET /v1/admin/robot-plans?q=100009&limit=50&offset=0` 查询计划和运行状态；q 支持公开用户 ID、账号名、昵称。返回 items/total，limit 为 1–100。`GET /v1/admin/robot-plans/{planID}` 查询单条。完整编辑调用 `PUT /v1/admin/robot-plans/{planID}`，提交上面除 request_id 外的全部字段，不允许改所属用户。开关调用 `PUT /v1/admin/robot-plans/{planID}/enabled`，只传 `{"enabled":false}` 或 true；删除调用 DELETE 同一路径（不带 /enabled）。admin/operator 均可管理，普通玩家返回 403，未登录 401。
 5. Worker 按轮次序号调度：首次启用先随机计算未来期号，不立即下单；到期随机选择一组玩法和区间内金额，每计划每期最多一单。错过期号重新安排未来期号，不补历史单。关闭、删除或账号非 active 时不执行。编辑配置会重置排期。查看 `next_round_sequence`、`last_seen_sequence`、`last_checked_at`、`last_status`、`last_error`、`last_bet_id`；状态包括 ready/stopped/scheduled/waiting_round/placed/failed。保存成功不是投注成功，以 last_bet_id 及后台投注记录为准。同一用户同一期只能使用一个赔率房间，多计划选择冲突房间会失败；多计划合计仍受单期投注限额约束。
 6. 新建虚拟账户无需初始余额（可省略 initial_balances）；Worker 按需创建零余额钱包。新虚拟投注为模拟订单：不扣款，中奖、取消、退款也不增加钱包余额；仍保存输赢和模拟派奖金额，不产生投注资金流水、佣金或活动累计。既有真实扣款订单继续按原规则结算，不根据账号当前类型篡改历史资金。
-7. 虚拟玩家仍参与混合排行榜并占名次及奖励位置；排行榜奖励与模拟投注派奖是不同业务。前台必须通过 is_virtual 明确标识虚拟玩家、说明混合排名及奖励规则，不得将模拟投注展示为真实用户资金流入。真实经营看板、跟踪投注、代理团队人数和流水排除虚拟用户，虚拟账户禁止下分，也禁止发送或领取红包（403），避免资金流向真实用户。
+7. 虚拟玩家仍参与混合排行榜并占名次及奖励位置；排行榜奖励与模拟投注派奖是不同业务。前台必须通过 is_virtual 明确标识虚拟玩家、说明混合排名及奖励规则，不得将模拟投注展示为真实用户资金流入。真实经营看板、代理团队人数和流水排除虚拟用户；跟踪投注通过 player_type 筛选，默认全部。虚拟账户禁止下分，也禁止发送或领取红包（403），避免资金流向真实用户。
 
 旧 `PUT /v1/admin/virtual-accounts/{userID}/automation` 已停用，返回 410；不会自动把旧的固定秒数配置转换为新计划。升级需要执行 0054、0055 迁移，并更新 API 和 Worker 后按上述步骤创建计划。
 
@@ -607,7 +607,7 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 
 后台监控和统计仅提供后端 JSON 契约，不依赖任何管理端前端项目：
 
-- `GET /v1/admin/monitor/bets?user=&game_type=&limit=100` 返回当前接受中的真实玩家投注及完整期号、房间、模式和赔率快照；`GET /v1/admin/monitor/rounds` 单独返回每个启用玩法当前轮次的 `bet_closes_at` / `result_at` 和 `server_time`。兼容接口 `GET /v1/admin/monitor` 仍返回两者。
+- `GET /v1/admin/monitor/bets?player_type=all&user=&game_type=&limit=100` 返回当前接受中的投注及完整期号、房间、模式和赔率快照。player_type 省略、空值或 all 查询全部；real 仅真实用户，virtual 仅虚拟用户，非法值返回400，按用户当前类型在分页前筛选。`GET /v1/admin/monitor/rounds` 单独返回每个启用玩法当前轮次的 `bet_closes_at` / `result_at` 和 `server_time`。兼容聚合接口 `GET /v1/admin/monitor` 保持仅真实用户投注和轮次信息。
 - `GET /v1/admin/bets` 跨玩家查询投注并返回相同的期号、房间和赔率字段；`GET /v1/admin/ledger` 查询统一流水；`GET /v1/admin/refunds-clearances` 查询结算退款、主动取消退款和下分/清退明细，投注退款记录包含关联 `bet_id`、期号和房间。三个接口均支持时间、用户和分页筛选。
 - `GET /v1/admin/dashboard?user=&from=&to=` 返回玩家统计及按币种全局统计；全局数据自动排除虚拟账户。
 - `GET /v1/admin/users/{userID}/login-ips` 返回玩家用过的 IP，并在每个 IP 下嵌套该地址登录过的其他用户；也可用 `GET /v1/admin/login-ips/{ip}/users` 直接反查。
