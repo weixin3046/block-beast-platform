@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -88,6 +89,18 @@ func TestListDirectPlayersReturnsMembersAndPeriodIncome(t *testing.T) {
 		t.Fatalf("wrong real member income: %+v", item)
 	}
 
+	page, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{Limit: 1})
+	if err != nil || !page.HasMore || page.NextCursor == "" {
+		t.Fatalf("first page %+v %v", page, err)
+	}
+	next, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{Limit: 1, Cursor: page.NextCursor})
+	if err != nil || next.HasMore || next.NextCursor != "" || len(next.Items) != 1 || next.Items[0].LoginName != "virtual-direct" {
+		t.Fatalf("cursor page %+v %v", next, err)
+	}
+	_, err = NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{Cursor: "invalid"})
+	if !errors.Is(err, ErrPlayerQueryInvalid) {
+		t.Fatalf("invalid cursor %v", err)
+	}
 	all, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{PlayerType: "all", Limit: 1, Offset: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -127,30 +140,42 @@ func TestListDirectPlayersReturnsMembersAndPeriodIncome(t *testing.T) {
 		today := incomePeriods(time.Now())[0]
 		exec(`UPDATE commission_entries SET status='paid',created_at=$2 WHERE id=$1`, realCommissionID, today.From.Add(-time.Hour))
 		exec(`UPDATE commission_entries SET created_at=$2 WHERE id=$1`, virtualCommissionID, today.From)
-		result, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{From: today.From, To: today.To})
-		if err != nil || result.Total != 3 || len(result.Items) != 3 {
+		result, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{From: today.From, To: today.To, Limit: 1})
+		if err != nil || result.Total != 1 || len(result.Items) != 1 {
 			t.Fatalf("descendants: %+v %v", result, err)
 		}
-		first, second, third := result.Items[0], result.Items[1], result.Items[2]
-		if first.Depth != 1 || second.Depth != 2 || third.Depth != 3 || second.ParentUserID != first.UserID || third.ParentUserID != second.UserID {
-			t.Fatalf("hierarchy: %+v", result)
+
+		first := result.Items[0]
+		if !first.HasChildren || first.Depth != 1 || len(first.TodayIncome) != 0 || len(first.HistoryIncome) != 1 || first.HistoryIncome[0].AmountMinor != 7 {
+			t.Fatalf("root %+v", first)
 		}
-		if len(first.Income) != 0 || len(first.TodayIncome) != 0 || len(first.HistoryIncome) != 1 || first.HistoryIncome[0].AmountMinor != 7 {
-			t.Fatalf("parent must not include descendant income: %+v", first)
+		children, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{ParentUserID: first.UserID, Limit: 1})
+		if err != nil || len(children.Items) != 1 {
+			t.Fatalf("children %+v %v", children, err)
 		}
-		if len(second.TodayIncome) != 1 || second.TodayIncome[0].AmountMinor != 9 || len(second.HistoryIncome) != 1 || second.HistoryIncome[0].AmountMinor != 9 || len(second.Income) != 1 {
-			t.Fatalf("own income: %+v", second)
+		second := children.Items[0]
+		if second.Depth != 2 || !second.HasChildren || second.ParentUserID != first.UserID || len(second.TodayIncome) != 1 || second.TodayIncome[0].AmountMinor != 9 {
+			t.Fatalf("child %+v", second)
 		}
-		if len(third.TodayIncome) != 0 || len(third.HistoryIncome) != 0 {
-			t.Fatalf("no income member: %+v", third)
+		leaves, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{ParentUserID: second.UserID})
+		if err != nil || len(leaves.Items) != 1 || leaves.Items[0].HasChildren || leaves.Items[0].Depth != 3 || len(leaves.Items[0].HistoryIncome) != 0 {
+			t.Fatalf("leaf %+v %v", leaves, err)
 		}
-		real, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{PlayerType: "real"})
-		if err != nil || real.Total != 2 || real.Items[1].Depth != 3 {
-			t.Fatalf("filter must traverse virtual intermediary: %+v %v", real, err)
+		filtered, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{ParentUserID: first.UserID, PlayerType: "real"})
+		if err != nil || filtered.Total != 0 || len(filtered.Items) != 0 {
+			t.Fatalf("filter must only apply to current layer %+v %v", filtered, err)
 		}
-		other, err := NewService(p).ListDirectPlayers(ctx, realID, DirectPlayerQuery{})
-		if err != nil || other.Total != 2 || len(other.Items[0].HistoryIncome) != 0 {
-			t.Fatalf("other beneficiary income leaked: %+v %v", other, err)
+		own, err := NewService(p).ListDirectPlayers(ctx, realID, DirectPlayerQuery{ParentUserID: second.UserID})
+		if err != nil || len(own.Items) != 1 || len(own.Items[0].HistoryIncome) != 0 {
+			t.Fatalf("recipient leaked %+v %v", own, err)
+		}
+		_, err = NewService(p).ListDirectPlayers(ctx, virtualID, DirectPlayerQuery{ParentUserID: first.UserID})
+		if !errors.Is(err, ErrPlayerQueryForbidden) {
+			t.Fatalf("ancestor access: %v", err)
+		}
+		_, err = NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{ParentUserID: 99999999})
+		if !errors.Is(err, ErrPlayerQueryForbidden) {
+			t.Fatalf("unknown access: %v", err)
 		}
 	})
 }

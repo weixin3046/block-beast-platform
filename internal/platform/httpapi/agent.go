@@ -235,8 +235,25 @@ func (server *Server) directPlayers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "agent service is unavailable"})
 		return
 	}
-	out, err := server.agents.ListDirectPlayers(r.Context(), claims.Subject, agentapp.DirectPlayerQuery{PlayerType: kind, From: from, To: to, Limit: queryLimit(r, 50), Offset: queryOffset(r)})
+	var parentID int64
+	if raw := r.URL.Query().Get("parent_user_id"); raw != "" {
+		var err error
+		parentID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || parentID <= 0 {
+			writeJSON(w, 400, map[string]string{"error": "上级用户编号无效"})
+			return
+		}
+	}
+	out, err := server.agents.ListDirectPlayers(r.Context(), claims.Subject, agentapp.DirectPlayerQuery{ParentUserID: parentID, Cursor: r.URL.Query().Get("cursor"), PlayerType: kind, From: from, To: to, Limit: queryLimit(r, 50), Offset: queryOffset(r)})
 	if err != nil {
+		if errors.Is(err, agentapp.ErrPlayerQueryForbidden) {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, agentapp.ErrPlayerQueryInvalid) {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, 500, map[string]string{"error": "查询直属下级失败"})
 		return
 	}

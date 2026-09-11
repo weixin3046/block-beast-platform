@@ -1094,9 +1094,11 @@ Socket删除事件示例：
 
 新增 `PUT /v1/agents/me/direct-players/{userID}/agent-level`，请求 `{"agent_level":2}`，成功返回 `{"user_id":10052,"agent_level":2}`（ID以实际值为准）。仅真实有效代理可升级自己的真实直属下级；新等级必须严格高于下级当前等级、且严格低于自己。三级代理可将0级直属下级升为1或2级；不能给下级降级、重复设置同一等级、设为同级或更高，也不能操作自己、同级或更高级下级、已禁用用户。后台管理员等级接口不受此限制。成功变更与审计同事务。等级变更影响后续下注的返水快照，已下注订单不追溯变更。未登录401、参数无效400、无权限403。不需要后台操作密码。
 
-`GET /v1/agents/me/direct-players?player_type=all&limit=50&offset=0` 使用当前登录身份，返回 `{total,items}`；按公开 ID 升序分页，包含全部层级下级（不含自己），以平铺列表返回。每项包含 `user_id`、`login_name`、`display_name`、`avatar_url`、`is_virtual`、`created_at`（用户注册时间）、`agent_level`、`depth`（直属为1，下下级为2，依次递增）、`parent_user_id`（直属上级公开ID）、`income`、`today_income`、`history_income`。`player_type=all|real|virtual` 默认全部；类型筛选不截断下级关系遍历。设置代理等级的 PUT 接口仍只允许操作直属下级。
+`GET /v1/agents/me/direct-players` 按层加载，默认只查当前登录人的直属下级；展开节点传 `parent_user_id`（公开ID），只返回该节点的直属下级。只允许查询自己或自己的后代，否则403；未知节点同样403。返回 `{parent_user_id,total,items,has_more,next_cursor}`，total 为当前层类型筛选后的总数，items 最多100人，不递归携带 children。每项保留用户资料、agent_level、depth（相对登录人，直属1）、parent_user_id、income、today_income、history_income，并新增 `has_children`（是否存在直属下级，不受类型筛选影响）。前端按需请求并将结果挂入本地 children。`player_type=all|real|virtual` 仅筛选当前层，不跨层搜索或补祖先。等级设置仍仅限登录人的直属下级。
 
-`today_income` 为北京时间今日零点至次日零点的收益；`history_income` 为全部历史累计收益（包含今日，不可与今日相加）。两者均按币种返回 `[{"currency":"USDT","amount":"1.25"}]`，无收益为空数组，不受 `from` / `to` 影响。每项只计算该用户本人投注给当前登录代理产生的 paid 返水，不合并该用户下属团队收益，也不统计支付给其他代理的返水。本次扩展无需新增迁移。
+分页默认50、最多100，按公开ID升序。首次不传 cursor；has_more=true 时把 next_cursor 原样作为下一次 cursor，并保持 parent_user_id 和筛选条件一致；末页 next_cursor 为空字符串。不强制计算整个团队人数。兼容旧 offset（仅当前层），cursor 不可与非零 offset 同用；无效 cursor 返回400。例：`/v1/agents/me/direct-players?parent_user_id=10052&limit=50&cursor=10060`。
+
+`today_income` 为北京时间今日零点至次日零点的收益；`history_income` 为全部历史累计收益（包含今日，不可与今日相加）。两者均按币种返回 `[{"currency":"USDT","amount":"1.25"}]`，无收益为空数组，不受 `from` / `to` 影响。每项只计算该用户本人投注给当前登录代理产生的 paid 返水，不合并该用户下属团队收益，也不统计支付给其他代理的返水。0084 增加直属关系查询索引，部署时需执行迁移。
 
 `income` 是该下级本人投注为当前用户产生、且当前状态为 paid 的返佣，按币种返回，例如 `[{"currency":"USDT","amount":"1.25"}]`。无收益的下级仍展示，income 为空数组。`from` / `to` 按收益产生时间筛选，开始包含、结束不包含，不过滤下级注册时间；不传则统计全部历史。未知历史收益时间在带时间条件时不计入，撤销和待发返佣不计入；不包含下级的下级产生的收益。
 

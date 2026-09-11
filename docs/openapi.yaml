@@ -3491,10 +3491,12 @@ paths:
   "/v1/agents/me/direct-players":
     get:
       tags: [Agent]
-      summary: 查询本人全部层级下级及按币种收益
+      summary: 按层分页查询下级及本人产生的收益
       x-agent-level-description: 每个items元素包含agent_level整数，0为普通用户，1至6为当前代理等级。
-      description: 返回 total 和 items，按公开 ID 升序分页，平铺返回登录用户全部层级下级，不含自己。每项含 user_id、login_name、display_name、avatar_url、is_virtual、agent_level、created_at（注册时间）、depth（直属1，下下级2，依次递增）、parent_user_id（直属上级公开ID）、income、today_income、history_income。三个收益数组均含 currency 和实际金额字符串 amount，只统计该成员本人投注给当前登录代理产生的 paid 返佣，不汇总其团队，不含其他收款人的收益。income 受 from/to 筛选，不传时间统计全部历史；历史未知时间仅在不传时间条件时计入。today_income 按北京时间自然日统计，history_income 为含今日的全部累计收益，两者不受 from/to 影响。无收益仍返回成员及空数组。类型筛选不截断关系遍历。等级修改接口仍仅限直属下级。
+      description: 按层加载，默认返回登录人的直属下级；parent_user_id 指定自己或后代节点，返回其直属下级，越权或不存在均403。返回 parent_user_id、total（当前层筛选后总数）、items、has_more、next_cursor。按公开ID升序，cursor用于续页，末页为空字符串；不可与非零offset同用。每项含 user_id、login_name、display_name、avatar_url、is_virtual、agent_level、created_at、depth（相对登录人）、parent_user_id、has_children（是否存在直属下级，不受筛选影响）、income、today_income、history_income，不递归返回children。player_type只筛选当前层。收益数组含currency和实际金额字符串amount，只统计该成员本人投注给当前登录代理产生的paid返佣；展开节点不会改变收款人。income受from/to筛选，today_income为北京时间今日，history_income为含今日的累计，两者不受时间筛选影响。无收益为空数组。
       parameters:
+      - {name: parent_user_id, in: query, schema: {type: integer, format: int64, minimum: 1}, description: 展开节点公开ID，默认本人，仅限本人或后代}
+      - {name: cursor, in: query, schema: {type: string}, description: 上页next_cursor，不能与非零offset同用}
       - {name: player_type, in: query, schema: {type: string, enum: [all, real, virtual], default: all}}
       - {name: from, in: query, schema: {type: string, format: date-time}, description: 收益开始时间，包含}
       - {name: to, in: query, schema: {type: string, format: date-time}, description: 收益结束时间，不包含，必须晚于 from}
@@ -3504,11 +3506,13 @@ paths:
       - bearerAuth: []
       responses:
         '200':
-          description: 全部层级下级列表与本人产生的收益
+          description: 当前层分页列表，含parent_user_id、total、items、has_more、next_cursor
         '400':
           description: 类型或时间无效
         '401':
           description: 未登录
+        '403':
+          description: 节点不属于本人团队或不存在
         '503':
           description: 服务不可用
   "/v1/agents/me/team-summary":
