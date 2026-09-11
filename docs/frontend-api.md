@@ -1086,7 +1086,7 @@ Socket删除事件示例：
 
 ### 后台收益记录查询（0082）
 
-### 我的直属下级及收益
+### 我的全部下级及收益
 
 `GET /v1/agents/me/direct-players` 每个 items 元素包含 `agent_level`：0 表示普通用户，1–6 表示当前代理等级。设置等级成功后重新查询此列表即可读取最新值。
 
@@ -1094,7 +1094,9 @@ Socket删除事件示例：
 
 新增 `PUT /v1/agents/me/direct-players/{userID}/agent-level`，请求 `{"agent_level":2}`，成功返回 `{"user_id":10052,"agent_level":2}`（ID以实际值为准）。仅真实有效代理可升级自己的真实直属下级；新等级必须严格高于下级当前等级、且严格低于自己。三级代理可将0级直属下级升为1或2级；不能给下级降级、重复设置同一等级、设为同级或更高，也不能操作自己、同级或更高级下级、已禁用用户。后台管理员等级接口不受此限制。成功变更与审计同事务。等级变更影响后续下注的返水快照，已下注订单不追溯变更。未登录401、参数无效400、无权限403。不需要后台操作密码。
 
-`GET /v1/agents/me/direct-players?player_type=all&limit=50&offset=0` 使用当前登录身份，返回 `{total,items}`；按公开 ID 升序分页。每项包含 `user_id`、`login_name`、`display_name`、`avatar_url`、`is_virtual`、`created_at`（用户注册时间）和 `income`。`player_type=all|real|virtual` 默认全部，只查询直属下级。
+`GET /v1/agents/me/direct-players?player_type=all&limit=50&offset=0` 使用当前登录身份，返回 `{total,items}`；按公开 ID 升序分页，包含全部层级下级（不含自己），以平铺列表返回。每项包含 `user_id`、`login_name`、`display_name`、`avatar_url`、`is_virtual`、`created_at`（用户注册时间）、`agent_level`、`depth`（直属为1，下下级为2，依次递增）、`parent_user_id`（直属上级公开ID）、`income`、`today_income`、`history_income`。`player_type=all|real|virtual` 默认全部；类型筛选不截断下级关系遍历。设置代理等级的 PUT 接口仍只允许操作直属下级。
+
+`today_income` 为北京时间今日零点至次日零点的收益；`history_income` 为全部历史累计收益（包含今日，不可与今日相加）。两者均按币种返回 `[{"currency":"USDT","amount":"1.25"}]`，无收益为空数组，不受 `from` / `to` 影响。每项只计算该用户本人投注给当前登录代理产生的 paid 返水，不合并该用户下属团队收益，也不统计支付给其他代理的返水。本次扩展无需新增迁移。
 
 `income` 是该下级本人投注为当前用户产生、且当前状态为 paid 的返佣，按币种返回，例如 `[{"currency":"USDT","amount":"1.25"}]`。无收益的下级仍展示，income 为空数组。`from` / `to` 按收益产生时间筛选，开始包含、结束不包含，不过滤下级注册时间；不传则统计全部历史。未知历史收益时间在带时间条件时不计入，撤销和待发返佣不计入；不包含下级的下级产生的收益。
 

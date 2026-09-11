@@ -117,4 +117,40 @@ func TestListDirectPlayersReturnsMembersAndPeriodIncome(t *testing.T) {
 	if other.Total != 0 || len(other.Items) != 0 {
 		t.Fatalf("another parent's members leaked: %+v", other)
 	}
+	t.Run("descendants and own source income", func(t *testing.T) {
+		leafID := uuid.NewString()
+		exec(`INSERT INTO users(id,display_name) VALUES($1,'三级下级')`, leafID)
+		defer p.Exec(ctx, `DELETE FROM users WHERE id=$1`, leafID)
+		exec(`INSERT INTO agent_relations(user_id,parent_user_id,path) VALUES($1,$2,'leaf_direct'::ltree)`, leafID, virtualID)
+		defer p.Exec(ctx, `DELETE FROM agent_relations WHERE user_id=$1`, leafID)
+		exec(`UPDATE agent_relations SET parent_user_id=$2 WHERE user_id=$1`, virtualID, realID)
+		today := incomePeriods(time.Now())[0]
+		exec(`UPDATE commission_entries SET status='paid',created_at=$2 WHERE id=$1`, realCommissionID, today.From.Add(-time.Hour))
+		exec(`UPDATE commission_entries SET created_at=$2 WHERE id=$1`, virtualCommissionID, today.From)
+		result, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{From: today.From, To: today.To})
+		if err != nil || result.Total != 3 || len(result.Items) != 3 {
+			t.Fatalf("descendants: %+v %v", result, err)
+		}
+		first, second, third := result.Items[0], result.Items[1], result.Items[2]
+		if first.Depth != 1 || second.Depth != 2 || third.Depth != 3 || second.ParentUserID != first.UserID || third.ParentUserID != second.UserID {
+			t.Fatalf("hierarchy: %+v", result)
+		}
+		if len(first.Income) != 0 || len(first.TodayIncome) != 0 || len(first.HistoryIncome) != 1 || first.HistoryIncome[0].AmountMinor != 7 {
+			t.Fatalf("parent must not include descendant income: %+v", first)
+		}
+		if len(second.TodayIncome) != 1 || second.TodayIncome[0].AmountMinor != 9 || len(second.HistoryIncome) != 1 || second.HistoryIncome[0].AmountMinor != 9 || len(second.Income) != 1 {
+			t.Fatalf("own income: %+v", second)
+		}
+		if len(third.TodayIncome) != 0 || len(third.HistoryIncome) != 0 {
+			t.Fatalf("no income member: %+v", third)
+		}
+		real, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{PlayerType: "real"})
+		if err != nil || real.Total != 2 || real.Items[1].Depth != 3 {
+			t.Fatalf("filter must traverse virtual intermediary: %+v %v", real, err)
+		}
+		other, err := NewService(p).ListDirectPlayers(ctx, realID, DirectPlayerQuery{})
+		if err != nil || other.Total != 2 || len(other.Items[0].HistoryIncome) != 0 {
+			t.Fatalf("other beneficiary income leaked: %+v %v", other, err)
+		}
+	})
 }
