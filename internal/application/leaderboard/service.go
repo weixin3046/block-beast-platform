@@ -172,7 +172,8 @@ func (s *Service) refreshPeriod(ctx context.Context, kind string, start time.Tim
 		SELECT $1,w.currency,b.user_id,u.public_id,u.display_name,COALESCE(u.avatar_url,''),u.is_virtual,sum(b.stake_minor),min(b.created_at),sum(b.payout_minor),max(w.available_minor)
 		FROM bets b JOIN wallets w ON w.id=b.wallet_id JOIN users u ON u.id=b.user_id JOIN leaderboard_periods p ON p.id=$1
 		WHERE b.status IN ('won','lost') AND b.created_at>=p.starts_at AND b.created_at<p.ends_at
-		GROUP BY w.currency,b.user_id,u.public_id,u.display_name,u.avatar_url,u.is_virtual`, id)
+		GROUP BY w.currency,b.user_id,u.public_id,u.display_name,u.avatar_url,u.is_virtual
+		HAVING sum(b.payout_minor)>sum(b.stake_minor)`, id)
 	if err != nil {
 		return err
 	}

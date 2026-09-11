@@ -3851,7 +3851,7 @@ paths:
     get:
       tags:
       - Leaderboards
-      summary: 查询中国时区的日榜或周榜
+      summary: 查询中国时区的日榜或周榜（仅净收益大于0的用户）
       security:
       - bearerAuth: []
       parameters:

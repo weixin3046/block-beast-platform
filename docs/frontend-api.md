@@ -850,7 +850,7 @@ Worker 会把超时未确认记录批量标记为 `expired`。本地文件位于
 
 ## 日榜与周榜
 
-`GET /v1/leaderboards?period=today&currency=USDT&limit=50`。`period` 只能是 `today`、`yesterday`、`this_week`、`last_week`，周期均按中国时区（UTC+8）计算；同一排行币种内按已结算有效投注额降序，同额按最早有效投注时间和公开用户 ID 排序。响应含周期边界、进行中/冻结状态、玩家公开资料、有效流水和已实际发放的奖励。
+`GET /v1/leaderboards?period=today&currency=USDT&limit=50`。`period` 只能是 `today`、`yesterday`、`this_week`、`last_week`，周期均按中国时区（UTC+8）计算；仅统计已结算投注且总派奖严格大于总投注（净收益大于0）的用户。同一排行币种内按总派奖降序，同额按最早有效投注时间和公开用户 ID 排序。响应含周期边界、进行中/冻结状态、玩家公开资料、有效流水和已实际发放的奖励。
 
 Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` 投注后冻结排名并自动发奖。虚拟账户同样参与排行和发奖，但不计入全局环境统计。后台用 `GET/PUT /v1/admin/leaderboard-reward-rules` 按 `daily|weekly + currency` 配置名次区间、奖励币种、奖励金额及开关；`PUT` 需提交当前 `version`，首次保存传 `0`。`GET /v1/admin/leaderboard-rewards` 查询实际发奖记录。
 
