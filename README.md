@@ -4,6 +4,8 @@
 
 ## 当前进程
 
+账号操作速查：[真实用户、虚拟账号和后台账号创建说明](docs/account-management.md)。
+
 - `cmd/api`：HTTP API、鉴权入口和管理端入口。
 - `cmd/worker`：结算、返水、排行榜、充值确认与通知等异步任务的运行入口。
 - `cmd/realtime`：实时连接网关的运行入口。
