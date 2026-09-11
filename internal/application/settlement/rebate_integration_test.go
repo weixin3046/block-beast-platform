@@ -89,8 +89,8 @@ func TestRebateSnapshotConcurrentSettlement(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// road: 14/2/4; dodge net win 80: 1/0/0, rounded down.
-	for i, want := range []int64{15, 2, 4} {
+	// Both road and dodge use their 1,000-stake as the rebate base.
+	for i, want := range []int64{28, 4, 8} {
 		var got int64
 		if err := p.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE user_id=$1 AND currency='POINTS'`, parents[i]).Scan(&got); err != nil {
 			t.Fatal(err)
@@ -103,14 +103,14 @@ func TestRebateSnapshotConcurrentSettlement(t *testing.T) {
 	if err := p.QueryRow(ctx, `SELECT count(*) FROM rebate_allocations WHERE bet_id=ANY($1::uuid[])`, bets).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 4 {
-		t.Fatalf("allocation count=%d want=4", count)
+	if count != 6 {
+		t.Fatalf("allocation count=%d want=6", count)
 	}
 	if err := p.QueryRow(ctx, `SELECT count(*) FROM ledger_entries l JOIN commission_entries c ON c.id::text=l.business_id WHERE c.source_bet_id=ANY($1::uuid[]) AND l.business_type='commission'`, bets).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 4 {
-		t.Fatalf("ledger count=%d want=4", count)
+	if count != 6 {
+		t.Fatalf("ledger count=%d want=6", count)
 	}
 	// Pagination does not truncate totals; viewer scoping cannot expose a
 	// different beneficiary, and public amounts never carry minor units.

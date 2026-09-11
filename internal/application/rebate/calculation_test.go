@@ -14,8 +14,8 @@ func TestCalculate(t *testing.T) {
 		want          []int64
 	}{
 		{"three increasing levels", "road", 1000000, 0, []Ancestor{{UserID: "a", Level: 1, RatePerMille: 14}, {UserID: "b", Level: 2, RatePerMille: 16}, {UserID: "c", Level: 3, RatePerMille: 20}}, []int64{14000, 2000, 4000}},
-		{"dodge net win", "dodge", 100000, 108000, []Ancestor{{Level: 1, RatePerMille: 14}}, []int64{112}},
-		{"dodge loss", "dodge", 100000, 0, []Ancestor{{Level: 1, RatePerMille: 14}}, nil},
+		{"dodge win uses stake", "dodge", 100000, 108000, []Ancestor{{Level: 1, RatePerMille: 14}}, []int64{1400}},
+		{"dodge loss still uses stake", "dodge", 100000, 0, []Ancestor{{Level: 1, RatePerMille: 14}}, []int64{1400}},
 		{"skip equal and lower levels", "guess", 1000000, 0, []Ancestor{{Level: 2, RatePerMille: 16}, {Level: 2, RatePerMille: 16}, {Level: 1, RatePerMille: 14}, {Level: 3, RatePerMille: 20}}, []int64{16000, 4000}},
 		{"virtual intermediary", "road", 1000000, 0, []Ancestor{{Level: 1, RatePerMille: 14, IsVirtual: true}, {Level: 2, RatePerMille: 16}}, []int64{16000}},
 		{"round down", "road", 1, 0, []Ancestor{{Level: 1, RatePerMille: 1}}, nil},

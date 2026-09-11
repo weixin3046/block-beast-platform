@@ -19,23 +19,18 @@ type Allocation struct {
 	AmountMinor          int64 `json:"amount_minor"`
 }
 
-// Calculate rounds each recipient's differential down independently. Even a
-// sub-unit allocation consumes its level/rate; its remainder is never passed on.
+// Calculate uses the submitted stake as the rebate base for every supported
+// play mode. Each recipient's differential is rounded down independently.
 func Calculate(stake, payout int64, mode string, chain []Ancestor) ([]Allocation, error) {
 	if stake < 0 || payout < 0 {
 		return nil, ErrInvalid
 	}
-	base := stake
 	switch mode {
-	case "road", "guess":
-	case "dodge":
-		base = 0
-		if payout > stake {
-			base = payout - stake
-		}
+	case "road", "guess", "dodge":
 	default:
 		return nil, ErrInvalid
 	}
+	base := stake
 	var result []Allocation
 	level, rate := 0, 0
 	for _, a := range chain {
