@@ -3456,12 +3456,19 @@ paths:
       tags:
       - Admin
       summary: 查询全部返佣订单
-      description: 返回收款用户的 login_name（账号）和 display_name（昵称），与 agent_id 对应；保留原订单字段。
+      description: 返回收款用户的 login_name/display_name（与 agent_id 对应），以及来源投注用户 source_user_id（公开数字 ID）、source_login_name、source_display_name。created_at 为收益产生时间；无法从账本恢复的历史时间为 null。按 created_at 倒序、ID 倒序，未知时间排最后，最多返回 50 条。带时间筛选时不返回未知时间记录。
+      parameters:
+      - {name: status, in: query, schema: {type: string}, description: 返佣状态筛选}
+      - {name: currency, in: query, schema: {type: string}, description: 返佣币种精确筛选；可与状态、时间组合}
+      - {name: from, in: query, schema: {type: string, format: date-time}, description: 收益产生时间下限（包含），RFC3339 带时区；可单独传入}
+      - {name: to, in: query, schema: {type: string, format: date-time}, description: 收益产生时间上限（不包含），须晚于 from；可单独传入}
       security:
       - bearerAuth: []
       responses:
         '200':
           description: 返佣订单列表
+        '400':
+          description: 时间格式无效或结束时间不晚于开始时间
   "/v1/admin/commissions/{commissionID}/reverse":
     post:
       tags:

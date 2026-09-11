@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	agentapp "github.com/block-beast/platform/internal/application/agent"
 	"github.com/block-beast/platform/internal/application/audit"
@@ -16,7 +17,7 @@ type AgentService interface {
 	GetRelation(ctx context.Context, userID string) (agentapp.Relation, error)
 	SetCommissionRate(ctx context.Context, agentID string, rateBasisPoints int, operatorID string) error
 	ListCommissions(ctx context.Context, agentID string, limit int) ([]agentapp.Commission, error)
-	ListAllCommissions(ctx context.Context, status string, limit int) ([]agentapp.Commission, error)
+	ListAllCommissions(ctx context.Context, status, currency string, limit int, from, to time.Time) ([]agentapp.AdminCommission, error)
 	TeamSummary(ctx context.Context, agentID string) (agentapp.TeamSummary, error)
 	ReverseCommission(ctx context.Context, commissionID string) error
 	GrantCommission(ctx context.Context, requestID, agentID, currency string, amount int64, remark, operatorID string) (string, error)
@@ -73,7 +74,11 @@ func (server *Server) teamSummary(writer http.ResponseWriter, request *http.Requ
 }
 
 func (server *Server) adminCommissions(writer http.ResponseWriter, request *http.Request) {
-	items, err := server.agents.ListAllCommissions(request.Context(), request.URL.Query().Get("status"), 50)
+	from, to, ok := reportTimes(writer, request)
+	if !ok {
+		return
+	}
+	items, err := server.agents.ListAllCommissions(request.Context(), request.URL.Query().Get("status"), request.URL.Query().Get("currency"), 50, from, to)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list commissions"})
 		return

@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,6 +46,15 @@ type Commission struct {
 	Status      string `json:"status"`
 }
 
+// AdminCommission adds source player details without changing the personal API.
+type AdminCommission struct {
+	Commission
+	SourceUserID      int64      `json:"source_user_id"`
+	SourceLoginName   string     `json:"source_login_name"`
+	SourceDisplayName string     `json:"source_display_name"`
+	CreatedAt         *time.Time `json:"created_at"`
+}
+
 type TeamSummary struct {
 	DirectPlayers int64        `json:"direct_players"`
 	Metrics       []TeamMetric `json:"metrics"`
@@ -76,26 +87,38 @@ func (service *Service) ListCommissions(ctx context.Context, agentID string, lim
 	return items, rows.Err()
 }
 
-func (service *Service) ListAllCommissions(ctx context.Context, status string, limit int) ([]Commission, error) {
+func (service *Service) ListAllCommissions(ctx context.Context, status, currency string, limit int, from, to time.Time) ([]AdminCommission, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	query := `SELECT ce.id::text,ce.source_bet_id::text,ce.beneficiary_user_id::text,ce.currency,ce.amount_minor,ce.status,COALESCE(u.login_name,''),u.display_name FROM commission_entries ce JOIN users u ON u.id=ce.beneficiary_user_id`
+	query := `SELECT ce.id::text,ce.source_bet_id::text,ce.beneficiary_user_id::text,ce.currency,ce.amount_minor,ce.status,COALESCE(u.login_name,''),u.display_name,src.public_id,COALESCE(src.login_name,''),src.display_name,ce.created_at FROM commission_entries ce JOIN users u ON u.id=ce.beneficiary_user_id JOIN bets b ON b.id=ce.source_bet_id JOIN users src ON src.id=b.user_id WHERE TRUE`
 	args := []any{limit}
 	if status != "" {
-		query += ` WHERE ce.status=$2`
+		query += ` AND ce.status=$2`
 		args = append(args, status)
 	}
-	query += ` ORDER BY ce.id DESC LIMIT $1`
+	if currency != "" {
+		args = append(args, currency)
+		query += fmt.Sprintf(" AND ce.currency = $%d", len(args))
+	}
+	if !from.IsZero() {
+		args = append(args, from)
+		query += fmt.Sprintf(" AND ce.created_at >= $%d", len(args))
+	}
+	if !to.IsZero() {
+		args = append(args, to)
+		query += fmt.Sprintf(" AND ce.created_at < $%d", len(args))
+	}
+	query += ` ORDER BY ce.created_at DESC NULLS LAST, ce.id DESC LIMIT $1`
 	rows, err := service.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]Commission, 0)
+	items := make([]AdminCommission, 0)
 	for rows.Next() {
-		var item Commission
-		if err := rows.Scan(&item.ID, &item.BetID, &item.AgentID, &item.Currency, &item.AmountMinor, &item.Status, &item.LoginName, &item.DisplayName); err != nil {
+		var item AdminCommission
+		if err := rows.Scan(&item.ID, &item.BetID, &item.AgentID, &item.Currency, &item.AmountMinor, &item.Status, &item.LoginName, &item.DisplayName, &item.SourceUserID, &item.SourceLoginName, &item.SourceDisplayName, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
