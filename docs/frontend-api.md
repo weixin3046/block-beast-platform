@@ -1102,6 +1102,8 @@ Socket删除事件示例：
 
 ### 个人返佣和账本筛选
 
+`GET /v1/agents/me/commissions` 每条记录还返回 `source_user_id`（产生返水的投注人公开数字ID）、`source_login_name`（账号）、`source_display_name`（昵称）。账号昵称为当前资料，沿来源订单的投注用户关联；`agent_id` 仍为收款人。无账号时 source_login_name 返回空字符串。
+
 `GET /v1/agents/me/commissions?currency=USDT&from=2026-09-11T00:00:00%2B08:00&to=2026-09-12T00:00:00%2B08:00` 返回原数组，新增 `game_type`、`game_name`（游戏配置名称，如9区块）、`sequence`（期数）、`created_at`（返佣时间）、`play_mode`（如guess/dodge/road）和 `selection`（投注选项）。时间未知为null，带时间条件不返回；按时间、ID倒序，未知排最后。limit默认50，上限100。查询范围始终是本人收到的返佣，保留各状态。
 
 `GET /v1/users/me/ledger?currency=USDT&business_type=commission&entry_type=commission_credit&from=2026-09-11T00:00:00%2B08:00&to=2026-09-12T00:00:00%2B08:00` 新增时间和类型条件，按账本 `occurred_at` 筛选；business_type为业务类别，entry_type为具体流水类型，按响应中的类型值精确匹配，不匹配返回空数组。继续支持currency、limit、cursor；翻页需保留相同条件，更换筛选时清空cursor。

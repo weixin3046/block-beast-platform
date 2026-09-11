@@ -111,6 +111,13 @@ func TestAdminCommissionBeneficiaryNames(t *testing.T) {
 	if e != nil || len(details) != 1 {
 		t.Fatalf("details=%+v err=%v", details, e)
 	}
+	var sourceID int64
+	if err := p.QueryRow(ctx, `SELECT public_id FROM users WHERE id=$1`, player).Scan(&sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if details[0].SourceUserID != sourceID || details[0].SourceLoginName != "player-"+player || details[0].SourceDisplayName != "投注昵称" || details[0].AgentID != user {
+		t.Fatalf("wrong source player: %+v", details[0])
+	}
 	if details[0].GameName != "test" || details[0].GameType != gt || details[0].Sequence != 1 || details[0].CreatedAt == nil || !details[0].CreatedAt.Equal(at) || string(details[0].Selection) != "{}" {
 		t.Fatalf("wrong game metadata %+v", details[0])
 	}
