@@ -242,7 +242,7 @@ from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下�
 
 ### 排行榜新增字段及时间
 
-`GET /v1/leaderboards?period=today&currency=USDT`的周期字段原本在根对象：`period`今天/昨天/本周/上周，`period_type`日/周，`starts_at/ends_at`中国时区周期对应的时间边界，`refreshed_at`快照刷新时间。新增根`decimals`；items新增`total_bet`（仅盈利投注的本金）、`total_payout`（仅盈利投注含本金派奖）、`net_win`（派奖减本金，即榜单展示收益）、`first_bet_at`（周期内首笔盈利投注时间）、`available`（刷新时可用余额快照）。亏损、持平、取消和退款投注不计入榜单，也不会扣减已累计的盈利成绩。余额仅向本人或后台返回，不公开其他玩家余额。历史冻结榜单没有保存的派奖/余额字段省略，不使用0或当前余额冒充历史数据。周期排名按总奖励（`total_payout`）降序；`total_bet`仅展示，不参与排名。
+`GET /v1/leaderboards?period=today&currency=USDT`的周期字段原本在根对象：`period`今天/昨天/本周/上周，`period_type`日/周，`starts_at/ends_at`中国时区周期对应的时间边界，`refreshed_at`快照刷新时间。新增根`decimals`；items新增`total_bet`（仅盈利投注的本金）、`total_payout`（仅盈利投注含本金派奖）、`net_win`（派奖减本金，即榜单展示收益和排序分数）、`first_bet_at`（周期内首笔盈利投注时间）、`available`（刷新时可用余额快照）。亏损、持平、取消和退款投注不计入榜单，也不会扣减已累计的盈利成绩。余额仅向本人或后台返回，不公开其他玩家余额。历史冻结榜单没有保存的派奖/余额字段省略，不使用0或当前余额冒充历史数据。周期排名按 `net_win` 降序；同额按首笔盈利投注时间和公开用户 ID 排序。
 
 ### 投注与转盘的金额单位
 
@@ -850,7 +850,7 @@ Worker 会把超时未确认记录批量标记为 `expired`。本地文件位于
 
 ## 日榜与周榜
 
-`GET /v1/leaderboards?period=today&currency=USDT&limit=50`。`period` 只能是 `today`、`yesterday`、`this_week`、`last_week`，周期均按中国时区（UTC+8）计算；只累计每一笔派奖严格大于本金的已结算投注。亏损和持平投注不进入汇总、不影响此前已累计的盈利；用户只要本周期至少有一笔盈利投注即可上榜。同一排行币种内按总奖励降序，同额按最早盈利投注时间和公开用户 ID 排序。响应含周期边界、进行中/冻结状态、玩家公开资料、有效流水和已实际发放的奖励。
+`GET /v1/leaderboards?period=today&currency=USDT&limit=50`。`period` 只能是 `today`、`yesterday`、`this_week`、`last_week`，周期均按中国时区（UTC+8）计算；只累计每一笔派奖严格大于本金的已结算投注。亏损和持平投注不进入汇总、不影响此前已累计的盈利；用户只要本周期至少有一笔盈利投注即可上榜。同一排行币种内按累计 `net_win`（总派奖减总本金）降序，同额按最早盈利投注时间和公开用户 ID 排序。响应含周期边界、进行中/冻结状态、玩家公开资料、有效流水和已实际发放的奖励。
 
 Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` 投注后冻结排名并自动发奖。虚拟账户同样参与排行和发奖，但不计入全局环境统计。后台用 `GET/PUT /v1/admin/leaderboard-reward-rules` 按 `daily|weekly + currency` 配置名次区间、奖励币种、奖励金额及开关；`PUT` 需提交当前 `version`，首次保存传 `0`。`GET /v1/admin/leaderboard-rewards` 查询实际发奖记录。
 
