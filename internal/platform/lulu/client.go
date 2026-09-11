@@ -36,11 +36,11 @@ type Client struct {
 
 func newClient(base, receiver, sharedBase64 string) (*Client, error) {
 	u, err := url.Parse(base)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !app.ValidUID(receiver) {
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !app.ValidUID(receiver) {
 		return nil, ErrProvider
 	}
 	shared, err := base64.StdEncoding.DecodeString(sharedBase64)
-	if err != nil || len(shared) < 32 {
+	if err != nil || !app.ValidProtocolKey(sharedBase64) {
 		return nil, ErrProvider
 	}
 	derive := func(label string) []byte {

@@ -11,8 +11,8 @@ import (
 )
 
 type AdminBet struct {
-	Balance          string          `json:"balance"`
-	FrozenBalance    string          `json:"frozen_balance"`
+	Balance          *string         `json:"balance"`
+	FrozenBalance    *string         `json:"frozen_balance"`
 	PlacementCount   int64           `json:"placement_count"`
 	LastPlacedAt     time.Time       `json:"last_placed_at"`
 	Decimals         int             `json:"decimals"`
@@ -54,11 +54,18 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 			gt.code,gt.name,r.sequence,w.currency,COALESCE(b.game_room_id::text,''),
 			COALESCE(gr.code,''),COALESCE(gr.name,''),COALESCE(b.play_mode,''),b.selection,b.stake_minor,
 			COALESCE(b.payout_multiplier_snapshot,0),COALESCE(b.payout_divisor_snapshot,0),
-			b.payout_minor,b.status,b.created_at,b.settled_at,c.decimals,b.placement_count,COALESCE(b.last_placed_at,b.created_at),w.available_minor,w.frozen_minor
+			b.payout_minor,b.status,b.created_at,b.settled_at,c.decimals,b.placement_count,COALESCE(b.last_placed_at,b.created_at),debit.balance_after_minor,debit.frozen_after_minor
 		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
 		JOIN currencies c ON c.code=w.currency
 		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
 		LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
+		LEFT JOIN LATERAL (
+			SELECT le.balance_after_minor,le.frozen_after_minor
+			FROM ledger_entries le
+			WHERE le.wallet_id=b.wallet_id AND le.business_id=b.id::text
+				AND le.business_type='bet' AND le.entry_type='bet_debit'
+			ORDER BY le.occurred_at DESC,le.id DESC LIMIT 1
+		) debit ON true
 		WHERE ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%')
 			AND ($2='' OR gt.code=$2) AND ($3='' OR w.currency=$3) AND ($4='' OR b.status=$4)
 			AND ($5::timestamptz IS NULL OR b.created_at >= $5) AND ($6::timestamptz IS NULL OR b.created_at < $6)
@@ -70,18 +77,26 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 	out := []AdminBet{}
 	for rows.Next() {
 		var v AdminBet
-		var available, frozen int64
+		var available, frozen *int64
 		if err := rows.Scan(&v.BetID, &v.UserID, &v.LoginName, &v.DisplayName, &v.IsVirtual,
 			&v.GameType, &v.GameName, &v.RoundSequence, &v.Currency, &v.GameRoomID, &v.GameRoomCode,
 			&v.GameRoomName, &v.PlayMode, &v.Selection, &v.StakeMinor, &v.PayoutMultiplier,
 			&v.PayoutDivisor, &v.PayoutMinor, &v.Status, &v.CreatedAt, &v.SettledAt, &v.Decimals, &v.PlacementCount, &v.LastPlacedAt, &available, &frozen); err != nil {
 			return nil, err
 		}
-		if v.Balance, err = wallet.FormatDisplayAmount(available, v.Decimals); err != nil {
-			return nil, err
+		if available != nil {
+			formatted, err := wallet.FormatDisplayAmount(*available, v.Decimals)
+			if err != nil {
+				return nil, err
+			}
+			v.Balance = &formatted
 		}
-		if v.FrozenBalance, err = wallet.FormatDisplayAmount(frozen, v.Decimals); err != nil {
-			return nil, err
+		if frozen != nil {
+			formatted, err := wallet.FormatDisplayAmount(*frozen, v.Decimals)
+			if err != nil {
+				return nil, err
+			}
+			v.FrozenBalance = &formatted
 		}
 		v.PayoutRate = payoutRate(v.PayoutMultiplier, v.PayoutDivisor)
 		if v.Stake, err = wallet.FormatDisplayAmount(v.StakeMinor, v.Decimals); err != nil {

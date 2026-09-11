@@ -130,15 +130,15 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 
 ```json
 {
-  "login_name":"virtual-demo-01",
-  "display_name":"演示玩家",
+  "login_name":"sadewf",
+  "count":99,
   "avatar_url":"",
   "password":"请替换为至少12字符的密码",
   "initial_balances":{"POINTS":1000,"USDT":100}
 }
 ```
 
-账号 ID 由后端生成，保存响应的 `user_id`。初始余额传真实金额，不乘精度；不需要的币种省略，不传零。创建默认不开启挂机。账号有 player 角色，可使用 `POST /v1/auth/login` 正常登录；不需要先登录玩家账号才能保存挂机配置。创建接口没有请求幂等键，网络超时应先按登录名查询确认，避免盲目重试。
+`count` 省略时创建一个账号；填写 1–100 时以 `login_name` 为前缀生成可排序账号，例如上述请求生成 `sadewf1` 到 `sadewf99`。整批账号使用同一个密码；昵称留空时每个账号生成随机 2–5 个汉字昵称。账号 ID 由后端生成，保存响应的 `user_id`。初始余额传真实金额，不乘精度；不需要的币种省略，不传零。创建默认不开启挂机。账号有 player 角色，可使用 `POST /v1/auth/login` 正常登录；不需要先登录玩家账号才能保存挂机配置。创建接口没有请求幂等键，网络超时应先按登录名查询确认，避免盲目重试。
 
 `display_name` 可省略或传空白，后端生成“用户+公开用户ID”；自定义昵称去除首尾空白后最多100字节。`avatar_url` 可省略或为空；指定头像时，使用同一个后台操作人的令牌调用 `POST /v1/uploads/authorize` → 按返回的上传地址、方法和请求头上传图片 → `POST /v1/uploads/{upload_id}/confirm`，把已确认记录的 `storage_key` 传给创建接口。仅支持 JPEG/PNG/WebP，不接受外链、未确认图片或其他操作人的上传。不需要转交上传记录所有权，也不需要登录机器人上传。
 
@@ -173,7 +173,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 4. `GET /v1/admin/robot-plans?q=100009&limit=50&offset=0` 查询计划和运行状态；q 支持公开用户 ID、账号名、昵称。返回 items/total，limit 为 1–100。`GET /v1/admin/robot-plans/{planID}` 查询单条。完整编辑调用 `PUT /v1/admin/robot-plans/{planID}`，提交上面除 request_id 外的全部字段，不允许改所属用户。开关调用 `PUT /v1/admin/robot-plans/{planID}/enabled`，只传 `{"enabled":false}` 或 true；删除调用 DELETE 同一路径（不带 /enabled）。admin/operator 均可管理，普通玩家返回 403，未登录 401。
 5. Worker 按轮次序号调度：首次启用先随机计算未来期号，不立即下单；到期随机选择一组玩法和区间内金额，每计划每期最多一单。错过期号重新安排未来期号，不补历史单。关闭、删除或账号非 active 时不执行。编辑配置会重置排期。查看 `next_round_sequence`、`last_seen_sequence`、`last_checked_at`、`last_status`、`last_error`、`last_bet_id`；状态包括 ready/stopped/scheduled/waiting_round/placed/failed。保存成功不是投注成功，以 last_bet_id 及后台投注记录为准。同一用户同一期只能使用一个赔率房间，多计划选择冲突房间会失败；多计划合计仍受单期投注限额约束。
 6. 新建虚拟账户无需初始余额（可省略 initial_balances）；Worker 按需创建零余额钱包。新虚拟投注为模拟订单：不扣款，中奖、取消、退款也不增加钱包余额；仍保存输赢和模拟派奖金额，不产生投注资金流水、佣金或活动累计。既有真实扣款订单继续按原规则结算，不根据账号当前类型篡改历史资金。
-7. 虚拟玩家仍参与混合排行榜并占名次及奖励位置；排行榜奖励与模拟投注派奖是不同业务。前台必须通过 is_virtual 明确标识虚拟玩家、说明混合排名及奖励规则，不得将模拟投注展示为真实用户资金流入。真实经营看板、代理团队人数和流水排除虚拟用户，虚拟账户禁止下分，也禁止发送或领取红包（403），避免资金流向真实用户。
+7. 虚拟玩家仍参与混合排行榜并占名次及奖励位置；排行榜奖励与模拟投注派奖是不同业务。前台必须通过 is_virtual 明确标识虚拟玩家、说明混合排名及奖励规则，不得将模拟投注展示为真实用户资金流入。真实经营看板、跟踪投注、代理团队人数和流水排除虚拟用户，虚拟账户禁止下分，也禁止发送或领取红包（403），避免资金流向真实用户。
 
 旧 `PUT /v1/admin/virtual-accounts/{userID}/automation` 已停用，返回 410；不会自动把旧的固定秒数配置转换为新计划。升级需要执行 0054、0055 迁移，并更新 API 和 Worker 后按上述步骤创建计划。
 
@@ -230,6 +230,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 | bet_count | 时间范围内创建的投注单数，含取消、退款及待结算；不是有效投注单数 |
 | stake | 上述投注本金总额（含取消和退款），实际金额字符串 |
 | payout | 上述投注当前已记录的游戏派奖总额，含本金，不是净盈利 |
+| bet_loss | 投注总输款：时间范围内创建、当前状态为 lost 的非模拟订单本金总额，返回非负金额字符串；合单本金只算一次，不是净亏损，不含人工扣分 |
 | deposit | 时间范围内链上充值入账，不含后台上分 |
 | credit | 时间范围内后台人工上分 |
 | clearance | 人工下分、积分提现审核扣款、链上提现最终成功扣款；不含冻结、拒绝和投注退款 |
@@ -241,7 +242,7 @@ from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下�
 
 ### 排行榜新增字段及时间
 
-`GET /v1/leaderboards?period=today&currency=USDT`的周期字段原本在根对象：`period`今天/昨天/本周/上周，`period_type`日/周，`starts_at/ends_at`中国时区周期对应的时间边界，`refreshed_at`快照刷新时间。新增根`decimals`；items新增`total_bet`（有效投注展示金额）、`total_payout`（有效投注含本金派奖）、`net_win`（派奖减有效投注）、`first_bet_at`（周期内首笔有效投注时间）、`available`（刷新时可用余额快照）。余额仅向本人或后台返回，不公开其他玩家余额。历史冻结榜单没有保存的派奖/余额字段省略，不使用0或当前余额冒充历史数据。周期排名仍按effective_stake降序，不改成净赢排序。
+`GET /v1/leaderboards?period=today&currency=USDT`的周期字段原本在根对象：`period`今天/昨天/本周/上周，`period_type`日/周，`starts_at/ends_at`中国时区周期对应的时间边界，`refreshed_at`快照刷新时间。新增根`decimals`；items新增`total_bet`（有效投注展示金额）、`total_payout`（有效投注含本金派奖）、`net_win`（派奖减有效投注）、`first_bet_at`（周期内首笔有效投注时间）、`available`（刷新时可用余额快照）。余额仅向本人或后台返回，不公开其他玩家余额。历史冻结榜单没有保存的派奖/余额字段省略，不使用0或当前余额冒充历史数据。周期排名按总奖励（`total_payout`）降序；`total_bet`仅展示，不参与排名。
 
 ### 投注与转盘的金额单位
 
@@ -606,7 +607,7 @@ const balances = await fetch(`${api}/v1/wallets/${user_id}/all`, {
 
 后台监控和统计仅提供后端 JSON 契约，不依赖任何管理端前端项目：
 
-- `GET /v1/admin/monitor/bets?user=&game_type=&limit=100` 返回当前接受中的投注及完整期号、房间、模式和赔率快照；`GET /v1/admin/monitor/rounds` 单独返回每个启用玩法当前轮次的 `bet_closes_at` / `result_at` 和 `server_time`。兼容接口 `GET /v1/admin/monitor` 仍返回两者。
+- `GET /v1/admin/monitor/bets?user=&game_type=&limit=100` 返回当前接受中的真实玩家投注及完整期号、房间、模式和赔率快照；`GET /v1/admin/monitor/rounds` 单独返回每个启用玩法当前轮次的 `bet_closes_at` / `result_at` 和 `server_time`。兼容接口 `GET /v1/admin/monitor` 仍返回两者。
 - `GET /v1/admin/bets` 跨玩家查询投注并返回相同的期号、房间和赔率字段；`GET /v1/admin/ledger` 查询统一流水；`GET /v1/admin/refunds-clearances` 查询结算退款、主动取消退款和下分/清退明细，投注退款记录包含关联 `bet_id`、期号和房间。三个接口均支持时间、用户和分页筛选。
 - `GET /v1/admin/dashboard?user=&from=&to=` 返回玩家统计及按币种全局统计；全局数据自动排除虚拟账户。
 - `GET /v1/admin/users/{userID}/login-ips` 返回玩家用过的 IP，并在每个 IP 下嵌套该地址登录过的其他用户；也可用 `GET /v1/admin/login-ips/{ip}/users` 直接反查。
@@ -970,7 +971,7 @@ admin/operator 可调用 `GET /v1/admin/lulu/config` 和 `PUT /v1/admin/lulu/con
 
 Swagger 测试 LULU 接口时，在 Authorize 的 bearerAuth 中填写管理员登录返回的 access_token 原文（不加 `Bearer ` 前缀），请求应包含 `Authorization: Bearer <access_token>`。文档更新后刷新页面重新授权；账号再次登录会使旧会话失效。
 
-后台 PUT `/v1/admin/lulu/config` 新增可选 `api_url`、`protocol_key`、`scan_start_at`。协议密钥空字符串或省略保留；token 字段不再接受；GET 新增 `api_url`、`scan_start_at`、`token_configured`、`protocol_key_configured`。首次启用须具备合法 UID、HTTPS 地址、协议密钥、登录 Token 和非未来采集时间；更换 UID 须通过新账号短信登录，修改 API 地址先暂停，已有水位禁止调晚起始时间。服务器须配置 LULU_CONFIG_ENCRYPTION_KEY，缺失或无法解密返回 503。
+后台 PUT `/v1/admin/lulu/config` 新增可选 `api_url`、`protocol_key`、`scan_start_at`。协议密钥空字符串或省略保留；token 字段不再接受；GET 新增 `api_url`、`scan_start_at`、`token_configured`、`protocol_key_configured`。首次启用须具备合法 UID、HTTP/HTTPS 地址、协议密钥、登录 Token 和非未来采集时间；更换 UID 须通过新账号短信登录，修改 API 地址先暂停，已有水位禁止调晚起始时间。服务器须配置 LULU_CONFIG_ENCRYPTION_KEY，缺失或无法解密返回 503。
 
 
 首次保存基础配置的请求示例（version 使用最新值，地址、密钥和时间替换为实际值）：
@@ -980,13 +981,13 @@ Swagger 测试 LULU 接口时，在 Authorize 的 bearerAuth 中填写管理员�
   "enabled":false,
   "version":3,
   "api_url":"https://example.invalid",
-  "protocol_key":"32字节协议密钥的Base64",
+  "protocol_key":"24或32字节协议密钥的Base64",
   "scan_start_at":"2026-09-08T00:00:00+08:00",
   "second_password":"后台全局二级密码"
 }
 ```
 
-GET 和 PUT 成功返回 receiver_uid、enabled、version、updated_at、api_url、scan_start_at、token_configured、protocol_key_configured。api_url、scan_start_at 省略保留；protocol_key 省略或空字符串保留，值必须为 32 字节密钥的 Base64。API 地址只允许 HTTPS，不含用户信息、查询参数和片段。UID 由短信登录取得，PUT 不接受 receiver_uid，后端保留当前账号；GET 仍返回该字段供只读展示。空配置也不允许接管在途订单。已有进度时调早采集起点不会重扫历史。停用不撤销已派发付款。
+GET 和 PUT 成功返回 receiver_uid、enabled、version、updated_at、api_url、scan_start_at、token_configured、protocol_key_configured。api_url、scan_start_at 省略保留；protocol_key 省略或空字符串保留，值必须为 24 或 32 字节密钥的 Base64。API 地址允许 HTTP 或 HTTPS，不含用户信息、查询参数和片段。UID 由短信登录取得，PUT 不接受 receiver_uid，后端保留当前账号；GET 仍返回该字段供只读展示。空配置也不允许接管在途订单。已有进度时调早采集起点不会重扫历史。停用不撤销已派发付款。
 
 ### 噜噜短信登录
 
@@ -1024,7 +1025,7 @@ GET 和 PUT 成功返回 receiver_uid、enabled、version、updated_at、api_url
 
 噜噜上分转出 UID、下分收款 UID 均不能与平台收付 UID 相同；否则返回 400：玩家噜噜账号不能与平台收付账号相同，请填写玩家自己的噜噜账号 ID。
 
-GET /v1/admin/bets 每条投注新增 balance（该投注币种的当前可用余额）和 frozen_balance（当前冻结余额），均为实际金额字符串，前端不再转换精度。余额为查询时的钱包状态，不是下注时余额，不汇总其他币种。
+GET /v1/admin/bets 每条投注的 balance 和 frozen_balance 分别为该订单最后一次下注扣款后的可用余额和冻结余额快照，均为实际金额字符串，前端不再转换精度。合单取最后一次追加扣款流水，不受后续充值、派奖或退款影响。没有扣款流水（如模拟投注）时两者返回 null；历史流水缺少冻结快照时 frozen_balance 返回 null。前端将 null 展示为“—”，不要当作零余额。
 
 后台轮询 GET /v1/admin/lulu/health：token_invalid=true 表示采集收到上游 HTTP 401/403，展示 last_error 并引导短信重新登录；不是主动推送。采集成功后清除提示。普通网络异常仅更新 last_error，不代表 Token 已失效。token_configured 只表示存有凭据，不代表凭据有效。
 
@@ -1069,3 +1070,15 @@ GET /v1/admin/lulu/transfers?direction=received&page=1&size=50，direction=sent 
 ```
 
 balance 为保留原始精度的十进制字符串，表示平台噜噜账号的彩石库存，不是玩家 ORIGIN_STONE 钱包余额。查询不更改余额、订单或账本。失败返回中文 error，不能显示为 0：400 配置不完整；401 平台登录无效；403 无权限；502 噜噜登录失效或上游异常；503 凭据解密/服务不可用；504 查询超时。只有上游明确返回零，才展示零余额。
+
+### 删除聊天消息
+
+调用 `DELETE /v1/chat/rooms/{roomID}/messages/{messageID}`，携带 Bearer Token，无请求体。用户只能删除自己发送的消息；admin/operator 可删除有权访问房间中的消息（客服无需加入，私聊必须是成员）。无时间限制，不要求后台二级密码。成功及重复删除均返回204；UUID无效400、未登录401、无权限403、房间或消息不存在/消息不属于该房间404、服务不可用503。
+
+采用软删除，保留原记录及发送幂等键；历史列表不再返回该消息。状态变更、`chat.message.delete` 审计和 `chat.message.deleted` outbox事件同事务，重复删除不重复通知。图片消息删除后不再授予附件访问权限；上传者本人或通过其他可见消息获得的访问权限保留。
+
+Socket删除事件示例：
+```json
+{"v":1,"type":"event","subject":"chat.message.deleted","payload":{"room_id":"房间UUID","message_id":"消息UUID","status":"deleted","broadcast":false},"occurred_at":"2026-09-10T00:00:00Z"}
+```
+公共房间通过chat订阅广播；客服定向发送给成员及admin/operator，私聊仅发给成员。前端收到204或事件后按message_id移除消息并保留本地删除标记，重复事件安全忽略。删除事件可能早于延迟的创建事件或发送确认到达；已删除ID不得被后到的创建事件重新插入。重试发送旧request_id可能返回status=deleted，不能显示为新消息。断线重连重新查询历史并替换列表，不能只追加，以清除离线期间已删除的消息。

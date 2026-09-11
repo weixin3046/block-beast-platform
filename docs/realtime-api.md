@@ -69,6 +69,7 @@ type RealtimeSubject =
   | "chain.deposit.credited"
   | "wallet.withdrawal.requested"
   | "chat.message.created"
+  | "chat.message.deleted"
   | "chat.red_packet.created"
   | "chat.red_packet.claimed"
   | "chat.red_packet.refunded";
@@ -867,3 +868,15 @@ realtime.subscribe("chat");
 image_url 指向 GET /v1/uploads/{uploadID}/content，需要携带平台 Bearer Token；浏览器使用 fetch 获取 Blob 后通过 URL.createObjectURL 展示并适时 revokeObjectURL，不把 Token 放进 URL。上传者可读取本人文件；其他人只可读取其有权查看房间内的可见图片消息，隐藏或删除消息不再授予附件访问权限。图片同时发布到公共房间后，其他已登录用户可读取。
 
 部署前执行 0076_chat_images.sql，再更新 API、Realtime。后端接口已支持，前端需实现上传按钮和图片渲染。
+
+### 删除聊天消息
+
+调用 `DELETE /v1/chat/rooms/{roomID}/messages/{messageID}`，携带 Bearer Token，无请求体。用户只能删除自己发送的消息；admin/operator 可删除有权访问房间中的消息（客服无需加入，私聊必须是成员）。无时间限制，不要求后台二级密码。成功及重复删除均返回204；UUID无效400、未登录401、无权限403、房间或消息不存在/消息不属于该房间404、服务不可用503。
+
+采用软删除，保留原记录及发送幂等键；历史列表不再返回该消息。状态变更、`chat.message.delete` 审计和 `chat.message.deleted` outbox事件同事务，重复删除不重复通知。图片消息删除后不再授予附件访问权限；上传者本人或通过其他可见消息获得的访问权限保留。
+
+Socket删除事件示例：
+```json
+{"v":1,"type":"event","subject":"chat.message.deleted","payload":{"room_id":"房间UUID","message_id":"消息UUID","status":"deleted","broadcast":false},"occurred_at":"2026-09-10T00:00:00Z"}
+```
+公共房间通过chat订阅广播；客服定向发送给成员及admin/operator，私聊仅发给成员。前端收到204或事件后按message_id移除消息并保留本地删除标记，重复事件安全忽略。删除事件可能早于延迟的创建事件或发送确认到达；已删除ID不得被后到的创建事件重新插入。重试发送旧request_id可能返回status=deleted，不能显示为新消息。断线重连重新查询历史并替换列表，不能只追加，以清除离线期间已删除的消息。

@@ -50,7 +50,7 @@ func (s *Service) unseal(value []byte, purpose string) (string, error) {
 }
 func validAPIURL(value string) bool {
 	u, e := url.Parse(value)
-	return e == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && len(value) <= 2048
+	return e == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && len(value) <= 2048
 }
 
 // RuntimeConfig never crosses an HTTP or audit boundary.
@@ -84,3 +84,9 @@ func validToken(t string) bool {
 	return len(t) <= 16384 && strings.TrimSpace(t) == t && !strings.ContainsAny(t, "\r\n")
 }
 func validateStart(t *time.Time) bool { return t == nil || (!t.IsZero() && !t.After(time.Now())) }
+
+// ValidProtocolKey validates the upstream shared secret, not the storage key.
+func ValidProtocolKey(value string) bool {
+	raw, err := base64.StdEncoding.DecodeString(value)
+	return err == nil && (len(raw) == 24 || len(raw) == 32)
+}

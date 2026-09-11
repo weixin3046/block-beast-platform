@@ -32,7 +32,7 @@ func TestCredentialEncryption(t *testing.T) {
 }
 
 func TestUpstreamURLValidation(t *testing.T) {
-	for _, v := range []string{"http://example.invalid", "https://user:secret@example.invalid", "https://example.invalid?token=secret", "https://example.invalid#secret", "not-url"} {
+	for _, v := range []string{"ftp://example.invalid", "https://user:secret@example.invalid", "https://example.invalid?token=secret", "https://example.invalid#secret", "not-url"} {
 		if validAPIURL(v) {
 			t.Errorf("accepted unsafe URL %q", v)
 		}

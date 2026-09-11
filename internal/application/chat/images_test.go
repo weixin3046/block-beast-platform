@@ -75,11 +75,11 @@ func TestImageMessagesAndReadPermissions(t *testing.T) {
 		t.Fatal(e)
 	}
 	stream.Close()
-	if _, e = p.Exec(ctx, `UPDATE chat_messages SET status='hidden' WHERE id=$1`, m.ID); e != nil {
+	if e = s.DeleteMessage(ctx, rooms.Deposit.ID, m.ID, owner); e != nil {
 		t.Fatal(e)
 	}
 	if _, _, e = u.OpenContent(ctx, a.Upload.ID, staff); !errors.Is(e, uploads.ErrUploadNotFound) {
-		t.Fatalf("hidden leak %v", e)
+		t.Fatalf("deleted leak %v", e)
 	}
 	var global string
 	if e = p.QueryRow(ctx, `SELECT id FROM chat_rooms WHERE room_type='global' LIMIT 1`).Scan(&global); e != nil {

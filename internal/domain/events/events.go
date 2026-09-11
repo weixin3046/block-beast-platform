@@ -24,6 +24,7 @@ const (
 	WithdrawalSent      = "chain.withdrawal.sent"
 	WithdrawalRequested = "wallet.withdrawal.requested"
 	WithdrawalApproved  = "chain.withdrawal.approved"
+	ChatMessageDeleted  = "chat.message.deleted"
 	ChatMessageCreated  = "chat.message.created"
 	RedPacketCreated    = "chat.red_packet.created"
 	RedPacketClaimed    = "chat.red_packet.claimed"

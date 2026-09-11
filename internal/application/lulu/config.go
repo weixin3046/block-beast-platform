@@ -2,7 +2,6 @@ package lulu
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"time"
@@ -128,8 +127,7 @@ func (s *Service) UpdateConfig(ctx context.Context, actor string, in ConfigUpdat
 		}
 	}
 	if in.ProtocolKey != "" {
-		raw, e := base64.StdEncoding.DecodeString(in.ProtocolKey)
-		if e != nil || len(raw) != 32 {
+		if !ValidProtocolKey(in.ProtocolKey) {
 			return out, ErrConfigInvalid
 		}
 		keyCipher, err = s.seal(in.ProtocolKey, "protocol")

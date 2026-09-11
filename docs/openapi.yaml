@@ -1655,7 +1655,7 @@ paths:
       tags:
       - Operations
       summary: 创建可登录但不能下分的虚拟账户
-      description: admin/operator 可创建。账号和用户ID由后端保存/生成，昵称省略或空白时生成为用户加公开ID。头像只能使用当前操作人已确认的图片上传 storage_key；不接受外链。创建不启动挂机，无需初始余额，随后通过 robot-plans 创建计划。
+      description: admin/operator 可创建。count 为 1–100 时以 login_name 为前缀生成可排序的编号账号（如 sadewf1 到 sadewf99），密码相同，空昵称各自生成随机 2–5 字昵称。头像只能使用当前操作人已确认的图片上传 storage_key；不接受外链。创建不启动挂机，无需初始余额，随后通过 robot-plans 创建计划。
       security:
       - bearerAuth: []
       requestBody:
@@ -1670,6 +1670,11 @@ paths:
               properties:
                 login_name:
                   type: string
+                count:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  description: 省略时创建单个账号；填写时创建编号批次
                 display_name:
                   type: string
                   description: 可选，省略或空白时自动生成昵称；去除首尾空白后最多100字节
@@ -1688,7 +1693,7 @@ paths:
                     - string
       responses:
         '201':
-          description: 虚拟账户基本信息，不包含旧挂机配置或密码
+          description: 单个创建返回账户对象；批量创建返回 items 数组，不包含密码
           content:
             application/json:
               schema:
@@ -3560,6 +3565,30 @@ paths:
           "$ref": "#/components/responses/Forbidden"
         '404':
           "$ref": "#/components/responses/NotFound"
+  "/v1/chat/rooms/{roomID}/messages/{messageID}":
+    delete:
+      tags: [Chat]
+      summary: 幂等软删除聊天消息
+      description: 用户可删除本人消息；admin/operator可删除有权访问房间内的消息。客服允许后台访问，私聊要求房间成员身份。复核当前账号状态及角色。状态、审计和chat.message.deleted事件同事务提交，重复删除不重复审计或通知。无请求体，不要求二级密码。
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: roomID
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: messageID
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204': {description: 删除成功或已删除}
+        '400': {description: 路径UUID无效}
+        '401': {description: 未登录或会话失效}
+        '403': {description: 无房间权限、非本人消息或账号不可用}
+        '404': {description: 房间不存在或消息不属于指定房间}
+        '500': {description: 删除失败，事务回滚}
+        '503': {description: 聊天服务不可用}
   "/v1/uploads/authorize":
     post:
       tags:
@@ -4933,11 +4962,11 @@ paths:
                   minimum: 1
                 api_url:
                   type: string
-                  description: HTTPS 上游地址，无账号密码、查询参数或片段；更改前暂停通道
+                  description: HTTP 或 HTTPS 上游地址，无账号密码、查询参数或片段；更改前暂停通道
                 protocol_key:
                   type: string
                   writeOnly: true
-                  description: 32 字节协议密钥的 Base64；留空或省略保留
+                  description: 24 或 32 字节协议密钥的 Base64；留空或省略保留
                 scan_start_at:
                   type: string
                   format: date-time
@@ -5551,6 +5580,7 @@ components:
       - currency
       - decimals
       - bet_count
+      - bet_loss
       properties:
         currency:
           type: string
@@ -5565,6 +5595,9 @@ components:
         payout:
           type: string
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
+        bet_loss:
+          type: string
+          description: 投注总输款；按订单创建时间筛选，汇总当前lost且非模拟订单本金，排除虚拟用户。合单只计一次，非负实际金额，不是净亏损或人工扣分。
         deposit:
           type: string
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
@@ -7559,11 +7592,11 @@ components:
         - frozen_balance
         properties:
           balance:
-            type: string
-            description: 玩家该投注币种的当前可用余额，实际金额，不是下注时快照
+            type: [string, 'null']
+            description: 订单最后一次下注扣款后的可用余额快照，实际金额；无扣款流水时为null
           frozen_balance:
-            type: string
-            description: 玩家该投注币种的当前冻结余额，实际金额
+            type: [string, 'null']
+            description: 订单最后一次下注扣款后的冻结余额快照，实际金额；无流水或历史快照缺失时为null
           placement_count:
             type: integer
             format: int64

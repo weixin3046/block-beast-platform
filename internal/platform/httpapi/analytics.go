@@ -23,6 +23,7 @@ type AnalyticsService interface {
 	UserLoginIPs(ctx context.Context, publicID int64) ([]operations.LoginIP, error)
 	UsersByLoginIP(ctx context.Context, ip string) ([]operations.LoginIPUser, error)
 	CreateVirtualAccount(ctx context.Context, input operations.VirtualAccountInput) (operations.VirtualAccount, error)
+	CreateVirtualAccounts(ctx context.Context, input operations.VirtualAccountInput) ([]operations.VirtualAccount, error)
 	SetVirtualAutomation(ctx context.Context, publicID int64, input operations.VirtualAutomationInput) (operations.VirtualAccount, error)
 	ListAdminBets(ctx context.Context, query operations.BetQuery) ([]operations.AdminBet, error)
 	ListAdminLedger(ctx context.Context, query operations.LedgerQuery) ([]operations.LedgerRecord, error)
@@ -156,7 +157,21 @@ func (server *Server) createVirtualAccount(w http.ResponseWriter, r *http.Reques
 	}
 	claims, _ := ClaimsFromContext(r.Context())
 	in.ActorUserID = claims.Subject
-	v, err := server.analytics.CreateVirtualAccount(r.Context(), in)
+	if in.Count <= 1 {
+		v, err := server.analytics.CreateVirtualAccount(r.Context(), in)
+		if errors.Is(err, operations.ErrInvalidVirtualAccount) || errors.Is(err, operations.ErrInvalidAvatar) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "unable to create virtual account"})
+			return
+		}
+		server.recordAudit(r.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "virtual_account.create", TargetType: "user", TargetID: strconv.FormatInt(v.UserID, 10)})
+		writeJSON(w, http.StatusCreated, map[string]any{"user_id": v.UserID, "login_name": v.LoginName, "display_name": v.DisplayName, "avatar_url": v.AvatarURL, "status": v.UserStatus, "is_virtual": true})
+		return
+	}
+	accounts, err := server.analytics.CreateVirtualAccounts(r.Context(), in)
 	if errors.Is(err, operations.ErrInvalidVirtualAccount) || errors.Is(err, operations.ErrInvalidAvatar) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -165,8 +180,12 @@ func (server *Server) createVirtualAccount(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "unable to create virtual account"})
 		return
 	}
-	server.recordAudit(r.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "virtual_account.create", TargetType: "user", TargetID: strconv.FormatInt(v.UserID, 10)})
-	writeJSON(w, http.StatusCreated, map[string]any{"user_id": v.UserID, "login_name": v.LoginName, "display_name": v.DisplayName, "avatar_url": v.AvatarURL, "status": v.UserStatus, "is_virtual": true})
+	items := make([]map[string]any, 0, len(accounts))
+	for _, v := range accounts {
+		server.recordAudit(r.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "virtual_account.create", TargetType: "user", TargetID: strconv.FormatInt(v.UserID, 10)})
+		items = append(items, map[string]any{"user_id": v.UserID, "login_name": v.LoginName, "display_name": v.DisplayName, "avatar_url": v.AvatarURL, "status": v.UserStatus, "is_virtual": true})
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"items": items})
 }
 func (server *Server) setVirtualAutomation(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("userID"), 10, 64)

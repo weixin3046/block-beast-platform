@@ -214,6 +214,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/users/me/secondary-password/verify", server.protect(server.verifySecondaryPassword))
 	mux.HandleFunc("POST /v1/chat/customer-service", server.protect(server.openCustomerServiceRoom))
 	mux.HandleFunc("GET /v1/chat/rooms", server.protect(server.chatRooms))
+	mux.HandleFunc("DELETE /v1/chat/rooms/{roomID}/messages/{messageID}", server.protect(server.deleteChatMessage))
 	mux.HandleFunc("GET /v1/chat/rooms/{roomID}/messages", server.protect(server.chatMessages))
 	mux.HandleFunc("POST /v1/uploads/authorize", server.protect(server.authorizeUpload))
 	mux.HandleFunc("POST /v1/uploads/{uploadID}/confirm", server.protect(server.confirmUpload))

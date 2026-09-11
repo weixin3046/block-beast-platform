@@ -176,7 +176,7 @@ func (s *Service) refreshPeriod(ctx context.Context, kind string, start time.Tim
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `WITH ranked AS (SELECT period_id,currency,user_id,row_number() OVER(PARTITION BY period_id,currency ORDER BY effective_stake_minor DESC,first_effective_at,public_user_id) r FROM leaderboard_entries WHERE period_id=$1) UPDATE leaderboard_entries e SET rank=r.r FROM ranked r WHERE e.period_id=r.period_id AND e.currency=r.currency AND e.user_id=r.user_id`, id); err != nil {
+	if _, err = tx.Exec(ctx, `WITH ranked AS (SELECT period_id,currency,user_id,row_number() OVER(PARTITION BY period_id,currency ORDER BY total_payout_minor DESC NULLS LAST,first_effective_at,public_user_id) r FROM leaderboard_entries WHERE period_id=$1) UPDATE leaderboard_entries e SET rank=r.r FROM ranked r WHERE e.period_id=r.period_id AND e.currency=r.currency AND e.user_id=r.user_id`, id); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE leaderboard_periods SET refreshed_at=now() WHERE id=$1`, id); err != nil {

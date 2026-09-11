@@ -2,9 +2,11 @@ package operations
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,7 +75,7 @@ func (s *Service) CurrentBets(ctx context.Context, userQuery, gameType string, l
 		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
 		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
 		LEFT JOIN game_rooms gr ON gr.id=b.game_room_id
-		WHERE b.status='accepted' AND ($1='' OR gt.code=$1)
+		WHERE b.status='accepted' AND NOT u.is_virtual AND ($1='' OR gt.code=$1)
 			AND ($2='' OR u.public_id::text=$2 OR u.login_name ILIKE '%'||$2||'%')
 		ORDER BY b.created_at DESC,b.id DESC LIMIT $3`, gameType, userQuery, limit)
 	if err != nil {
@@ -123,6 +125,8 @@ type PlayerStatistic struct {
 	BalanceMinor int64           `json:"-"`
 }
 type CurrencyStatistic struct {
+	BetLoss        string `json:"bet_loss"`
+	BetLossMinor   int64  `json:"-"`
 	Decimals       int    `json:"decimals"`
 	Stake          string `json:"stake"`
 	Payout         string `json:"payout"`
@@ -277,6 +281,7 @@ type VirtualAccountInput struct {
 	LoginName       string           `json:"login_name"`
 	DisplayName     string           `json:"display_name"`
 	Password        string           `json:"password"`
+	Count           int              `json:"count"`
 	InitialBalances map[string]int64 `json:"initial_balances"`
 }
 type VirtualAutomationInput struct {
@@ -341,6 +346,52 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 		return VirtualAccount{}, err
 	}
 	return created, nil
+}
+
+var virtualNameParts = []string{"阿", "乐", "星", "小", "云", "森", "安", "米", "诺", "言", "夏", "青", "可", "元", "飞", "果"}
+
+func randomVirtualDisplayName() string {
+	length := 2
+	var b [1]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		length += int(b[0] % 4)
+	}
+	name := make([]string, length)
+	for i := range name {
+		if _, err := rand.Read(b[:]); err == nil {
+			name[i] = virtualNameParts[int(b[0])%len(virtualNameParts)]
+		} else {
+			name[i] = virtualNameParts[i%len(virtualNameParts)]
+		}
+	}
+	return strings.Join(name, "")
+}
+
+func (s *Service) CreateVirtualAccounts(ctx context.Context, in VirtualAccountInput) ([]VirtualAccount, error) {
+	if in.Count == 0 {
+		in.Count = 1
+	}
+	if in.Count < 1 || in.Count > 100 || strings.TrimSpace(in.LoginName) == "" {
+		return nil, ErrInvalidVirtualAccount
+	}
+	accounts := make([]VirtualAccount, 0, in.Count)
+	base := strings.TrimSpace(in.LoginName)
+	for i := 1; i <= in.Count; i++ {
+		item := in
+		item.Count = 0
+		if in.Count > 1 {
+			item.LoginName = base + strconv.Itoa(i)
+		}
+		if strings.TrimSpace(item.DisplayName) == "" {
+			item.DisplayName = randomVirtualDisplayName()
+		}
+		account, err := s.CreateVirtualAccount(ctx, item)
+		if err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, nil
 }
 func (s *Service) virtualByID(ctx context.Context, id string) (VirtualAccount, error) {
 	var v VirtualAccount

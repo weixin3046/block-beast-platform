@@ -10,6 +10,7 @@ import (
 )
 
 type ChatService interface {
+	DeleteMessage(ctx context.Context, roomID, messageID, actorID string) error
 	OpenCustomerServiceRooms(ctx context.Context, userID string) (chat.CustomerServiceRooms, error)
 	ListRooms(ctx context.Context, userID string, staff bool, limit int) ([]chat.Room, error)
 	ListMessages(ctx context.Context, roomID, userID string, staff bool, limit int) ([]chat.Message, error)
@@ -59,11 +60,11 @@ func (server *Server) chatMessages(writer http.ResponseWriter, request *http.Req
 
 func (server *Server) writeChatResult(writer http.ResponseWriter, request *http.Request, result any, err error) {
 	switch {
-	case errors.Is(err, chat.ErrInvalidMessage), errors.Is(err, chat.ErrInvalidRequestID):
+	case errors.Is(err, chat.ErrInvalidChatID), errors.Is(err, chat.ErrInvalidMessage), errors.Is(err, chat.ErrInvalidRequestID):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
-	case errors.Is(err, chat.ErrRoomAccessDenied):
+	case errors.Is(err, chat.ErrMessageDeleteDenied), errors.Is(err, chat.ErrRoomAccessDenied):
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
-	case errors.Is(err, chat.ErrRoomNotFound):
+	case errors.Is(err, chat.ErrMessageNotFound), errors.Is(err, chat.ErrRoomNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
 	case err != nil:
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to process chat request"})
@@ -74,4 +75,18 @@ func (server *Server) writeChatResult(writer http.ResponseWriter, request *http.
 
 func isStaff(claims identity.AccessTokenClaims) bool {
 	return claims.HasRole(identity.RoleAdmin, identity.RoleOperator)
+}
+
+func (server *Server) deleteChatMessage(writer http.ResponseWriter, request *http.Request) {
+	if server.chat == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "chat is unavailable"})
+		return
+	}
+	claims, _ := ClaimsFromContext(request.Context())
+	err := server.chat.DeleteMessage(request.Context(), request.PathValue("roomID"), request.PathValue("messageID"), claims.Subject)
+	if err != nil {
+		server.writeChatResult(writer, request, nil, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }

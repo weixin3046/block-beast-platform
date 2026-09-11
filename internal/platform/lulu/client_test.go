@@ -183,3 +183,36 @@ func TestTransferRecordsDirections(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPWith24ByteProtocolKey(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 24))
+	c, err := NewCredentialClient("http://example.invalid:5022/", "1234567", "test-token", key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := c.encrypt([]byte(`{"code":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := c.decrypt(encrypted)
+	if err != nil || string(plain) != `{"code":0}` {
+		t.Fatal(string(plain), err)
+	}
+	if len(c.enc) != 32 || len(c.mac) != 32 {
+		t.Fatal("derived keys must remain 32 bytes")
+	}
+	c.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "http://example.invalid:5022/player/item?item_id=102201" {
+			t.Fatal(r.URL)
+		}
+		return response(map[string]any{"code": 0}), nil
+	})
+	if _, err = c.call(context.Background(), "GET", "/player/item?item_id=102201", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int{16, 25, 33} {
+		if _, err := NewCredentialClient("http://example.invalid", "1234567", "test-token", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, n))); err == nil {
+			t.Fatal(n)
+		}
+	}
+}
