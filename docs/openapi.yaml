@@ -6476,6 +6476,7 @@ components:
                 description: 周期内首笔有效投注下单时间
               reward:
                 type: object
+                description: 当前名次命中的奖励。running榜单为预计奖励，frozen且已发奖时为实际奖励快照；未命中档位时为null。
                 properties:
                   currency:
                     type: string

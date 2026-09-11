@@ -85,7 +85,7 @@ GET /v1/tasks/bet-progress 返回 title、period_type、sort_order、max_complet
 
 ### 排行榜本人排名
 
-`GET /v1/leaderboards?period=today&currency=POINTS&limit=50`新增 `self`，字段结构与items单条一致。即使本人不在前50名，也返回本人完整排名；未上榜返回null。today/yesterday/this_week/last_week均使用中国时区和对应币种；items和self使用同一数据库快照。身份取登录令牌，不支持传入self_user_id冒充他人。普通玩家看不到其他玩家余额，self可展示本人的余额；金额仅返回实际数量字符串。
+`GET /v1/leaderboards?period=today&currency=POINTS&limit=50` 返回各上榜项和 `self` 的 `reward`：按当前名次命中的奖励档位，字段为 `currency` 与实际金额字符串 `amount`；未命中档位时为 null。进行中的榜单为预计可得奖励，最终名次变化会随之变化；已冻结且已发奖的榜单返回实际已发的奖励快照。即使本人不在前50名，也返回本人完整排名；未上榜返回null。today/yesterday/this_week/last_week均使用中国时区和对应币种；items和self使用同一数据库快照。身份取登录令牌，不支持传入self_user_id冒充他人。普通玩家看不到其他玩家余额，self可展示本人的余额；金额仅返回实际数量字符串。
 
 ### 个人投注结算推送
 

@@ -293,7 +293,12 @@ func (s *Service) ListForUser(ctx context.Context, period, currency string, limi
 	if err != nil {
 		return Board{}, err
 	}
-	rows, err := tx.Query(ctx, `SELECT e.rank,e.public_user_id,e.display_name,e.avatar_url,e.is_virtual,e.effective_stake_minor,e.total_payout_minor,e.available_minor,e.first_effective_at,d.reward_currency,d.reward_minor,e.user_id::text=$4 FROM leaderboard_entries e LEFT JOIN leaderboard_reward_distributions d ON d.period_id=e.period_id AND d.leaderboard_currency=e.currency AND d.user_id=e.user_id WHERE e.period_id=$1 AND e.currency=$2 AND (e.rank<=$3 OR e.user_id::text=$4) ORDER BY e.rank`, id, currency, limit, userID)
+	rows, err := tx.Query(ctx, `SELECT e.rank,e.public_user_id,e.display_name,e.avatar_url,e.is_virtual,e.effective_stake_minor,e.total_payout_minor,e.available_minor,e.first_effective_at,
+		COALESCE(d.reward_currency,r.reward_currency),COALESCE(d.reward_minor,r.reward_minor),e.user_id::text=$4
+		FROM leaderboard_entries e
+		LEFT JOIN leaderboard_reward_distributions d ON d.period_id=e.period_id AND d.leaderboard_currency=e.currency AND d.user_id=e.user_id
+		LEFT JOIN leaderboard_reward_rules r ON r.period_type=$5 AND r.currency=e.currency AND e.rank BETWEEN r.rank_from AND r.rank_to AND r.enabled
+		WHERE e.period_id=$1 AND e.currency=$2 AND (e.rank<=$3 OR e.user_id::text=$4) ORDER BY e.rank`, id, currency, limit, userID, kind)
 	if err != nil {
 		return Board{}, err
 	}

@@ -45,6 +45,7 @@ func TestSelfOutsideLimitAndCurrencyScope(t *testing.T) {
 		end = end.AddDate(0, 0, shift)
 		id := uuid.NewString()
 		exec(`INSERT INTO leaderboard_periods(id,period_type,starts_at,ends_at) VALUES($1,$2,$3,$4)`, id, kind, start, end)
+		exec(`INSERT INTO leaderboard_reward_rules(period_type,currency,rank_from,rank_to,reward_currency,reward_minor,enabled) VALUES($1,'POINTS',3,3,'USDT',1500000,true)`, kind)
 		var viewer string
 		for rank := 1; rank <= 3; rank++ {
 			user := uuid.NewString()
@@ -56,7 +57,7 @@ func TestSelfOutsideLimitAndCurrencyScope(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if len(board.Items) != 1 || board.Self == nil || board.Self.Rank != 3 || board.Self.Available == nil || *board.Self.Available != "1.234" {
+		if len(board.Items) != 1 || board.Self == nil || board.Self.Rank != 3 || board.Self.Available == nil || *board.Self.Available != "1.234" || board.Self.Reward == nil || board.Self.Reward.Currency != "USDT" || board.Self.Reward.AmountMinor != 1500000 {
 			t.Fatalf("board=%+v self=%+v", board, board.Self)
 		}
 		other, e := s.ListForUser(ctx, period, "USDT", 1, viewer)
@@ -69,5 +70,6 @@ func TestSelfOutsideLimitAndCurrencyScope(t *testing.T) {
 		}
 		exec(`DELETE FROM leaderboard_entries WHERE period_id=$1`, id)
 		exec(`DELETE FROM leaderboard_periods WHERE id=$1`, id)
+		exec(`DELETE FROM leaderboard_reward_rules WHERE period_type=$1 AND currency='POINTS' AND rank_from=3 AND rank_to=3`, kind)
 	}
 }
