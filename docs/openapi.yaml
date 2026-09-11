@@ -3851,7 +3851,7 @@ paths:
     get:
       tags:
       - Leaderboards
-      summary: 查询中国时区的日榜或周榜（仅净收益大于0的用户）
+      summary: 查询中国时区的日榜或周榜（只累计单笔盈利投注）
       security:
       - bearerAuth: []
       parameters:
@@ -6460,7 +6460,7 @@ components:
                 type: boolean
               total_bet:
                 type: string
-                description: 已格式化的有效投注总额
+                description: 已格式化的盈利投注本金总额；亏损和持平投注不计入
               total_payout:
                 type: string
                 description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。

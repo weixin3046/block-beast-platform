@@ -27,6 +27,7 @@ func TestLeaderboardMetricsSnapshot(t *testing.T) {
 		}
 	}
 	user, wallet, round, bet, period := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	laterLoss := uuid.NewString()
 	loser, loserWallet, loserBet := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	at := time.Date(2033, 1, 2, 12, 0, 0, 0, shanghai)
 	start, end := periodBounds("daily", at)
@@ -36,6 +37,7 @@ func TestLeaderboardMetricsSnapshot(t *testing.T) {
 		pool.Exec(ctx, `DELETE FROM leaderboard_entries WHERE period_id=$1`, period)
 		pool.Exec(ctx, `DELETE FROM leaderboard_periods WHERE id=$1`, period)
 		pool.Exec(ctx, `DELETE FROM bets WHERE id=$1`, bet)
+		pool.Exec(ctx, `DELETE FROM bets WHERE id=$1`, laterLoss)
 		pool.Exec(ctx, `DELETE FROM bets WHERE id=$1`, loserBet)
 		pool.Exec(ctx, `DELETE FROM rounds WHERE id=$1`, round)
 		pool.Exec(ctx, `DELETE FROM wallets WHERE id=$1`, wallet)
@@ -47,6 +49,8 @@ func TestLeaderboardMetricsSnapshot(t *testing.T) {
 	exec(`INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,'USDT',0)`, loserWallet, loser)
 	exec(`INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at) VALUES($1,'09000000-0000-4000-8000-000000000001',9988776655,'open',$2,$2)`, round, at)
 	exec(`INSERT INTO bets(id,client_request_id,round_id,user_id,wallet_id,selection,stake_minor,status,payout_minor,created_at) VALUES($1::uuid,$1::text,$2,$3,$4,'{}',1000000000,'won',1985000000,$5)`, bet, round, user, wallet, at)
+	// A later loss must not erase the earlier profitable result from the board.
+	exec(`INSERT INTO bets(id,client_request_id,round_id,user_id,wallet_id,selection,stake_minor,status,payout_minor,created_at) VALUES($1::uuid,$1::text,$2,$3,$4,'{"pick":"later-loss"}',1000000000,'lost',0,$5)`, laterLoss, round, user, wallet, at)
 	exec(`INSERT INTO bets(id,client_request_id,round_id,user_id,wallet_id,selection,stake_minor,status,payout_minor,created_at) VALUES($1::uuid,$1::text,$2,$3,$4,'{}',1000000000,'lost',0,$5)`, loserBet, round, loser, loserWallet, at)
 	exec(`INSERT INTO leaderboard_periods(id,period_type,starts_at,ends_at) VALUES($1,'daily',$2,$3)`, period, start, end)
 	s := NewService(pool)
