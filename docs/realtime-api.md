@@ -880,3 +880,6 @@ Socket删除事件示例：
 {"v":1,"type":"event","subject":"chat.message.deleted","payload":{"room_id":"房间UUID","message_id":"消息UUID","status":"deleted","broadcast":false},"occurred_at":"2026-09-10T00:00:00Z"}
 ```
 公共房间通过chat订阅广播；客服定向发送给成员及admin/operator，私聊仅发给成员。前端收到204或事件后按message_id移除消息并保留本地删除标记，重复事件安全忽略。删除事件可能早于延迟的创建事件或发送确认到达；已删除ID不得被后到的创建事件重新插入。重试发送旧request_id可能返回status=deleted，不能显示为新消息。断线重连重新查询历史并替换列表，不能只追加，以清除离线期间已删除的消息。
+# 钱包事件即时发布（0079）
+
+钱包账本事务提交后，通过 PostgreSQL NOTIFY 唤醒独立的 Worker 发布循环，立即读取 outbox 并发送 `wallet.ledger.committed`。回滚不会发送通知；多笔变动即使合并为一次唤醒，也逐条发布持久化事件。原 `WORKER_POLL_INTERVAL` 保留为漏通知和断线补偿间隔。消息格式不变，网络或积压仍可能造成延迟；前端断线重连应查询余额，不能假设 WebSocket 会重放离线消息。部署须执行 0079 迁移并更新 Worker。

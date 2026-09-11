@@ -72,6 +72,13 @@ func main() {
 		}
 	}
 	processor := outbox.NewProcessor(events.NewPostgresOutbox(pool), publisher)
+	publishCtx, cancelPublishing := context.WithCancel(ctx)
+	publishingDone := make(chan struct{})
+	go func() {
+		defer close(publishingDone)
+		processor.RunLive(publishCtx, cfg.PostgresDSN, cfg.WorkerPollInterval, logger)
+	}()
+	defer func() { cancelPublishing(); <-publishingDone }()
 	roundRepository := game.NewPostgresRepository(pool)
 	creditService := credit.NewService(pool)
 	taskService := task.NewService(pool, creditService)
@@ -92,7 +99,6 @@ func main() {
 	processDueRounds(ctx, logger, roundRepository)
 	ensureScheduledRounds(ctx, logger, roundRepository, resultSource)
 	settleDueRounds(ctx, logger, settlementService, resultSource)
-	processPending(logger, processor)
 	reconcileWithdrawals(ctx, logger, withdrawalSender)
 	expirePendingUploads(ctx, logger, uploadMaintenance)
 	refreshLeaderboards(ctx, logger, leaderboardService)
@@ -116,7 +122,6 @@ func main() {
 			return
 		case <-ticker.C:
 			ensureScheduledRounds(ctx, logger, roundRepository, resultSource)
-			processPending(logger, processor)
 			reconcileWithdrawals(ctx, logger, withdrawalSender)
 			expirePendingUploads(ctx, logger, uploadMaintenance)
 			refundExpiredRedPackets(ctx, logger, redPacketService)
