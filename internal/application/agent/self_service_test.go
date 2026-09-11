@@ -46,20 +46,20 @@ func TestDirectLevelPermissions(t *testing.T) {
 	p.QueryRow(ctx, `SELECT public_id FROM users WHERE id=$1`, child).Scan(&id)
 	p.QueryRow(ctx, `SELECT public_id FROM users WHERE id=$1`, other).Scan(&otherID)
 	s := NewService(p)
-	for _, l := range []int{1, 2, 2, 0} {
+	for _, l := range []int{1, 2} {
 		if err = s.SetDirectPlayerLevel(ctx, parent, id, l); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var n int
-	if err = p.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE actor_user_id=$1 AND action='agent.direct_player.level.update'`, parent).Scan(&n); err != nil || n != 3 {
+	if err = p.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE actor_user_id=$1 AND action='agent.direct_player.level.update'`, parent).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("audit count=%d err=%v", n, err)
 	}
 	for _, tc := range []struct {
 		owner string
 		id    int64
 		level int
-	}{{parent, id, 3}, {parent, id, 4}, {parent, otherID, 1}, {child, id, 1}, {other, id, 0}} {
+	}{{parent, id, 2}, {parent, id, 1}, {parent, id, 0}, {parent, id, 3}, {parent, id, 4}, {parent, otherID, 1}, {child, id, 1}, {other, id, 0}} {
 		if err = s.SetDirectPlayerLevel(ctx, tc.owner, tc.id, tc.level); !errors.Is(err, ErrChildLevelForbidden) {
 			t.Fatalf("unauthorized %+v: %v", tc, err)
 		}

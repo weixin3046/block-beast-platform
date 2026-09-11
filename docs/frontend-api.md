@@ -1092,7 +1092,7 @@ Socket删除事件示例：
 
 新增 `GET /v1/agents/me/income-summary`，携带本人 Token，无参数。返回 `timezone`、`as_of`、`items`；四项 period 为 `today`、`yesterday`、`this_week`、`last_week`，各自包含 `from`、`to`、`income:[{currency,amount}]`。北京时间自然日，周一作为周起点，开始包含结束不包含。金额为字符串，分币种统计本人收到的全部当前 paid 返佣（包含各级来源）；无收益为空数组，pending/reversed及时间未知记录不计入。本周包含今日，两个时段不可相加。依赖已有0082迁移。
 
-新增 `PUT /v1/agents/me/direct-players/{userID}/agent-level`，请求 `{"agent_level":2}`，成功返回 `{"user_id":10052,"agent_level":2}`（ID以实际值为准）。仅真实有效代理可设置自己的真实直属下级；下级当前等级及新等级都必须低于自己。三级代理可设0、1、2级，0恢复普通用户；不能操作自己、同级或更高级下级、已禁用用户。重复同值设置幂等，成功变更与审计同事务。等级变更影响后续下注的返水快照，已下注订单不追溯变更。未登录401、参数无效400、无权限403。不需要后台操作密码。
+新增 `PUT /v1/agents/me/direct-players/{userID}/agent-level`，请求 `{"agent_level":2}`，成功返回 `{"user_id":10052,"agent_level":2}`（ID以实际值为准）。仅真实有效代理可升级自己的真实直属下级；新等级必须严格高于下级当前等级、且严格低于自己。三级代理可将0级直属下级升为1或2级；不能给下级降级、重复设置同一等级、设为同级或更高，也不能操作自己、同级或更高级下级、已禁用用户。后台管理员等级接口不受此限制。成功变更与审计同事务。等级变更影响后续下注的返水快照，已下注订单不追溯变更。未登录401、参数无效400、无权限403。不需要后台操作密码。
 
 `GET /v1/agents/me/direct-players?player_type=all&limit=50&offset=0` 使用当前登录身份，返回 `{total,items}`；按公开 ID 升序分页。每项包含 `user_id`、`login_name`、`display_name`、`avatar_url`、`is_virtual`、`created_at`（用户注册时间）和 `income`。`player_type=all|real|virtual` 默认全部，只查询直属下级。
 

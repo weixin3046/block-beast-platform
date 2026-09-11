@@ -103,7 +103,7 @@ func (s *Service) SetDirectPlayerLevel(ctx context.Context, owner string, target
 	if err != nil {
 		return err
 	}
-	if !ownerOK || !childOK || child == owner || ownerLevel < 1 || level >= ownerLevel || childLevel >= ownerLevel {
+	if !ownerOK || !childOK || child == owner || ownerLevel < 1 || level >= ownerLevel || childLevel >= ownerLevel || level <= childLevel {
 		return ErrChildLevelForbidden
 	}
 	var parent string
@@ -114,9 +114,6 @@ func (s *Service) SetDirectPlayerLevel(ctx context.Context, owner string, target
 	}
 	if parent != owner {
 		return ErrChildLevelForbidden
-	}
-	if childLevel == level {
-		return tx.Commit(ctx)
 	}
 	if _, err = tx.Exec(ctx, `UPDATE users SET agent_level=NULLIF($2,0),updated_at=now() WHERE id=$1`, child, level); err != nil {
 		return err
