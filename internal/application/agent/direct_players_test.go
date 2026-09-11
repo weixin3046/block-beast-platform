@@ -39,6 +39,25 @@ func TestListDirectPlayersReturnsMembersAndPeriodIncome(t *testing.T) {
 	exec(`INSERT INTO bets(id,client_request_id,round_id,user_id,wallet_id,selection,stake_minor,status) VALUES($1,$2,$3,$4,$5,'{}',1,'lost'),($6,$7,$3,$8,$5,'{}',1,'lost')`, realBetID, realBetID, roundID, realID, walletID, virtualBetID, virtualBetID, virtualID)
 	start := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
 	exec(`INSERT INTO commission_entries(id,source_bet_id,beneficiary_user_id,currency,amount_minor,status,created_at) VALUES($1,$2,$3,'POINTS',7,'paid',$4),($5,$6,$3,'USDT',9,'paid',$7)`, realCommissionID, realBetID, agentID, start.Add(time.Hour), virtualCommissionID, virtualBetID, start.Add(48*time.Hour))
+	t.Run("income summary scoped and paid", func(t *testing.T) {
+		exec(`UPDATE commission_entries SET created_at=now() WHERE id=ANY($1::uuid[])`, []string{realCommissionID, virtualCommissionID})
+		summary, e := NewService(p).IncomeSummary(ctx, agentID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if len(summary.Items) != 4 || len(summary.Items[0].Income) != 2 || summary.Items[0].Income[0].AmountMinor != 7 || summary.Items[0].Income[1].AmountMinor != 9 {
+			t.Fatalf("bad summary %+v", summary)
+		}
+		other, e := NewService(p).IncomeSummary(ctx, realID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if len(other.Items[0].Income) != 0 {
+			t.Fatal("income leaked")
+		}
+		exec(`UPDATE commission_entries SET created_at=$2 WHERE id=$1`, realCommissionID, start.Add(time.Hour))
+		exec(`UPDATE commission_entries SET created_at=$2 WHERE id=$1`, virtualCommissionID, start.Add(48*time.Hour))
+	})
 	defer func() {
 		p.Exec(ctx, `DELETE FROM commission_entries WHERE id=ANY($1::uuid[])`, []string{realCommissionID, virtualCommissionID})
 		p.Exec(ctx, `DELETE FROM bets WHERE id=ANY($1::uuid[])`, []string{realBetID, virtualBetID})

@@ -13,6 +13,8 @@ import (
 )
 
 type AgentService interface {
+	IncomeSummary(context.Context, string) (agentapp.IncomeSummary, error)
+	SetDirectPlayerLevel(context.Context, string, int64, int) error
 	ListDirectPlayers(ctx context.Context, agentID string, query agentapp.DirectPlayerQuery) (agentapp.DirectPlayers, error)
 	Bind(ctx context.Context, userID, parentID string) error
 	GetRelation(ctx context.Context, userID string) (agentapp.Relation, error)

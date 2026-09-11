@@ -230,6 +230,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/users/{userID}/agent-relation", server.protectRoles(server.adminAgentRelation, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/agents/me/commissions", server.protect(server.commissions))
 	mux.HandleFunc("GET /v1/agents/me/direct-players", server.protect(server.directPlayers))
+	mux.HandleFunc("GET /v1/agents/me/income-summary", server.protect(server.agentIncomeSummary))
+	mux.HandleFunc("PUT /v1/agents/me/direct-players/{userID}/agent-level", server.protect(server.setDirectPlayerLevel))
 	mux.HandleFunc("GET /v1/agents/me/team-summary", server.protect(server.teamSummary))
 	mux.HandleFunc("PUT /v1/admin/agents/{agentID}/commission-rate", server.protectRoles(server.setAgentCommissionRate, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/commissions", server.protectRoles(server.adminCommissions, identity.RoleAdmin, identity.RoleOperator))

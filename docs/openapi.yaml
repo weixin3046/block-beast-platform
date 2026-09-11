@@ -3441,6 +3441,40 @@ paths:
       responses:
         '200':
           description: 佣金明细列表
+  "/v1/agents/me/income-summary":
+    get:
+      tags: [Agent]
+      summary: 本人今日、昨日、本周、上周返佣汇总
+      description: 无参数。返回 timezone=Asia/Shanghai、as_of 和 items。items 固定含 period=today/yesterday/this_week/last_week、from、to 和 income 数组（currency、实际金额字符串 amount）。北京时间自然日，周一开始；范围开始包含、结束不包含。统计本人作为收款人的全部当前 paid 返佣，含各级来源，排除未知产生时间、pending 和 reversed；无收益为 income=[]。依赖0082迁移。
+      security:
+      - bearerAuth: []
+      responses:
+        '200': {description: 按币种汇总的四个时段收益}
+        '401': {description: 未登录}
+        '503': {description: 服务不可用}
+  "/v1/agents/me/direct-players/{userID}/agent-level":
+    put:
+      tags: [Agent]
+      summary: 设置本人直属下级代理等级
+      description: 调用人必须为有效真实代理；目标为本人真实直属下级，不能为已禁用用户。目标当前等级和拟设置等级均须严格低于调用人等级；不能修改自己、同级或上级。0为普通用户，1至6为代理等级。更新和审计同事务，同值重复请求不重复审计。只影响后续投注快照，已下注订单保持原返水快照。
+      parameters:
+      - {name: userID, in: path, required: true, schema: {type: integer, minimum: 10001}}
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_level]
+              properties:
+                agent_level: {type: integer, minimum: 0, maximum: 6}
+      responses:
+        '200': {description: 返回 user_id 和 agent_level}
+        '400': {description: 参数缺失或无效}
+        '401': {description: 未登录}
+        '403': {description: 非直属下级、等级或账号状态不允许}
   "/v1/agents/me/direct-players":
     get:
       tags: [Agent]
