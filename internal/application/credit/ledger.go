@@ -52,7 +52,24 @@ func decodeLedgerCursor(value string) (ledgerCursor, error) {
 	}
 	return out, nil
 }
-func (service *Service) ListUnifiedLedger(ctx context.Context, userID, currency, cursor string, limit int) (LedgerPage, error) {
+
+type LedgerFilter struct {
+	From, To                time.Time
+	BusinessType, EntryType string
+}
+
+func (service *Service) ListUnifiedLedger(ctx context.Context, userID, currency, cursor string, limit int, filters ...LedgerFilter) (LedgerPage, error) {
+	var filter LedgerFilter
+	if len(filters) > 0 {
+		filter = filters[0]
+	}
+	var from, to any
+	if !filter.From.IsZero() {
+		from = filter.From
+	}
+	if !filter.To.IsZero() {
+		to = filter.To
+	}
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -71,7 +88,10 @@ func (service *Service) ListUnifiedLedger(ctx context.Context, userID, currency,
       FROM ledger_entries l JOIN wallets w ON w.id=l.wallet_id JOIN currencies c ON c.code=w.currency
       WHERE w.user_id=$1 AND ($2='' OR w.currency=$2)
         AND ($3::timestamptz IS NULL OR (l.occurred_at,l.id)<($3::timestamptz,$4::uuid))
-      ORDER BY l.occurred_at DESC,l.id DESC LIMIT $5`, userID, currency, at, id, limit+1)
+        AND ($6::timestamptz IS NULL OR l.occurred_at >= $6)
+        AND ($7::timestamptz IS NULL OR l.occurred_at < $7)
+        AND ($8='' OR l.business_type=$8) AND ($9='' OR l.entry_type=$9)
+      ORDER BY l.occurred_at DESC,l.id DESC LIMIT $5`, userID, currency, at, id, limit+1, from, to, filter.BusinessType, filter.EntryType)
 	if err != nil {
 		return LedgerPage{}, err
 	}

@@ -1090,9 +1090,14 @@ paths:
       tags:
       - Wallets
       summary: 本人所有币种统一资金流水（游标分页）
+      description: 支持 from/to 按 occurred_at 筛选，开始包含、结束不包含；RFC3339带时区。business_type和entry_type按已有响应类型值精确筛选，可与币种和游标组合；无匹配类型返回空列表。翻页保持所有筛选条件不变。
       security:
       - bearerAuth: []
       parameters:
+      - {name: from, in: query, schema: {type: string, format: date-time}}
+      - {name: to, in: query, schema: {type: string, format: date-time}}
+      - {name: business_type, in: query, schema: {type: string}}
+      - {name: entry_type, in: query, schema: {type: string}}
       - name: currency
         in: query
         schema:
@@ -3436,6 +3441,12 @@ paths:
       tags:
       - Agent
       summary: 查询本人的返佣明细
+      description: 保留原返佣字段，新增 game_type（游戏代码）、game_name（如9区块，使用配置名称）、sequence（期数）、created_at（返佣产生时间，历史未知为null）、play_mode（玩法代码）、selection（投注选项）。按返佣产生时间倒序、ID倒序，未知时间排最后。币种精确筛选；from/to开始包含结束不包含，带时间条件排除未知时间。各返佣状态仍全部返回。
+      parameters:
+      - {name: currency, in: query, schema: {type: string}}
+      - {name: from, in: query, schema: {type: string, format: date-time}}
+      - {name: to, in: query, schema: {type: string, format: date-time}}
+      - {name: limit, in: query, schema: {type: integer, default: 50, minimum: 1, maximum: 100}}
       security:
       - bearerAuth: []
       responses:

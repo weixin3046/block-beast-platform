@@ -75,6 +75,18 @@ func TestUnifiedLedgerBalancesIdempotencyAndCursor(t *testing.T) {
 		t.Fatalf("page %+v %v", page, err)
 	}
 	unfreeze, freeze := page.Items[0], page.Items[1]
+	filtered, e := s.ListUnifiedLedger(ctx, user, "POINTS", "", 10, LedgerFilter{From: unfreeze.OccurredAt, BusinessType: unfreeze.BusinessType, EntryType: unfreeze.EntryType})
+	if e != nil || len(filtered.Items) != 1 || filtered.Items[0].ID != unfreeze.ID {
+		t.Fatalf("filtered ledger %+v %v", filtered, e)
+	}
+	excluded, e := s.ListUnifiedLedger(ctx, user, "POINTS", "", 10, LedgerFilter{To: unfreeze.OccurredAt, EntryType: unfreeze.EntryType})
+	if e != nil || len(excluded.Items) != 0 {
+		t.Fatalf("end boundary %+v %v", excluded, e)
+	}
+	excluded, e = s.ListUnifiedLedger(ctx, user, "POINTS", "", 10, LedgerFilter{BusinessType: "no_such_type"})
+	if e != nil || len(excluded.Items) != 0 {
+		t.Fatalf("business type filter %+v %v", excluded, e)
+	}
 	if unfreeze.AvailableDeltaMinor != 1500 || unfreeze.FrozenDeltaMinor != -1500 || unfreeze.FrozenAfterMinor == nil || *unfreeze.FrozenAfterMinor != 0 {
 		t.Fatalf("unfreeze %+v", unfreeze)
 	}

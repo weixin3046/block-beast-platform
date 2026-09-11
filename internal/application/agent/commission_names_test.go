@@ -107,6 +107,22 @@ func TestAdminCommissionBeneficiaryNames(t *testing.T) {
 	}
 	at := time.Date(2026, 9, 1, 1, 0, 0, 0, time.UTC)
 	exec(`UPDATE commission_entries SET created_at=$2 WHERE id=$1`, commission, at)
+	details, e := NewService(p).ListCommissionDetails(ctx, user, "POINTS", at, at.Add(time.Hour), 100)
+	if e != nil || len(details) != 1 {
+		t.Fatalf("details=%+v err=%v", details, e)
+	}
+	if details[0].GameName != "test" || details[0].GameType != gt || details[0].Sequence != 1 || details[0].CreatedAt == nil || !details[0].CreatedAt.Equal(at) || string(details[0].Selection) != "{}" {
+		t.Fatalf("wrong game metadata %+v", details[0])
+	}
+	for _, tc := range []struct {
+		owner, currency string
+		from, to        time.Time
+	}{{user, "USDT", at, at.Add(time.Hour)}, {player, "POINTS", at, at.Add(time.Hour)}, {user, "POINTS", at.Add(-time.Hour), at}} {
+		got, e := NewService(p).ListCommissionDetails(ctx, tc.owner, tc.currency, tc.from, tc.to, 100)
+		if e != nil || len(got) != 0 {
+			t.Fatalf("filter failed %+v %v", got, e)
+		}
+	}
 	for _, tc := range []struct {
 		name     string
 		from, to time.Time

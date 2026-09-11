@@ -63,7 +63,7 @@ type stubUnifiedLedger struct {
 	user string
 }
 
-func (s *stubUnifiedLedger) ListUnifiedLedger(_ context.Context, user, _, _ string, _ int) (credit.LedgerPage, error) {
+func (s *stubUnifiedLedger) ListUnifiedLedger(_ context.Context, user, _, _ string, _ int, _ ...credit.LedgerFilter) (credit.LedgerPage, error) {
 	s.user = user
 	return credit.LedgerPage{Items: []credit.UnifiedLedgerEntry{}}, nil
 }
@@ -77,6 +77,8 @@ func TestUnifiedLedgerUsesAuthenticatedUser(t *testing.T) {
 		{"/v1/users/me/ledger", "", 401},
 		{"/v1/users/me/ledger?account_id=other", issueTestToken(t, "my-user", []string{"player"}), 200},
 		{"/v1/users/me/ledger?limit=101", issueTestToken(t, "my-user", []string{"player"}), 400},
+		{"/v1/users/me/ledger?from=bad", issueTestToken(t, "my-user", []string{"player"}), 400},
+		{"/v1/users/me/ledger?from=2026-09-12T00:00:00Z&to=2026-09-11T00:00:00Z", issueTestToken(t, "my-user", []string{"player"}), 400},
 	} {
 		r := httptest.NewRequest("GET", tt.url, nil)
 		if tt.token != "" {

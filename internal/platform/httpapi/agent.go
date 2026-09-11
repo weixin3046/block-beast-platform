@@ -13,6 +13,7 @@ import (
 )
 
 type AgentService interface {
+	ListCommissionDetails(context.Context, string, string, time.Time, time.Time, int) ([]agentapp.CommissionDetail, error)
 	IncomeSummary(context.Context, string) (agentapp.IncomeSummary, error)
 	SetDirectPlayerLevel(context.Context, string, int64, int) error
 	ListDirectPlayers(ctx context.Context, agentID string, query agentapp.DirectPlayerQuery) (agentapp.DirectPlayers, error)
@@ -116,7 +117,15 @@ func (server *Server) commissions(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
-	items, err := server.agents.ListCommissions(request.Context(), claims.Subject, 50)
+	from, to, ok := reportTimes(writer, request)
+	if !ok {
+		return
+	}
+	if server.agents == nil {
+		writeJSON(writer, 503, map[string]string{"error": "agent service is unavailable"})
+		return
+	}
+	items, err := server.agents.ListCommissionDetails(request.Context(), claims.Subject, request.URL.Query().Get("currency"), from, to, queryLimit(request, 50))
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list commissions"})
 		return

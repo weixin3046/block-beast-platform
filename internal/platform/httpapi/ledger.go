@@ -9,7 +9,7 @@ import (
 )
 
 type UnifiedLedgerService interface {
-	ListUnifiedLedger(context.Context, string, string, string, int) (credit.LedgerPage, error)
+	ListUnifiedLedger(context.Context, string, string, string, int, ...credit.LedgerFilter) (credit.LedgerPage, error)
 }
 
 func (server *Server) currentUserLedger(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +28,11 @@ func (server *Server) currentUserLedger(w http.ResponseWriter, r *http.Request) 
 		limit = n
 	}
 	claims, _ := ClaimsFromContext(r.Context())
-	out, err := service.ListUnifiedLedger(r.Context(), claims.Subject, r.URL.Query().Get("currency"), r.URL.Query().Get("cursor"), limit)
+	from, to, ok := reportTimes(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.ListUnifiedLedger(r.Context(), claims.Subject, r.URL.Query().Get("currency"), r.URL.Query().Get("cursor"), limit, credit.LedgerFilter{From: from, To: to, BusinessType: r.URL.Query().Get("business_type"), EntryType: r.URL.Query().Get("entry_type")})
 	if errors.Is(err, credit.ErrInvalidCursor) {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
