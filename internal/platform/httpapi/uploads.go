@@ -28,7 +28,7 @@ func (server *Server) publicAvatar(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	userID, err := strconv.ParseInt(request.PathValue("userID"), 10, 64)
-	if err != nil || userID < 100000 {
+	if err != nil || userID < 10001 {
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "avatar not found"})
 		return
 	}

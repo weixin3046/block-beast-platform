@@ -48,7 +48,7 @@ func (service *Service) SetUserRoles(ctx context.Context, actorUserID, userID st
 		return RoleAssignment{}, err
 	}
 	publicID, parseErr := strconv.ParseInt(userID, 10, 64)
-	if parseErr != nil || publicID < 100000 {
+	if parseErr != nil || publicID < 10001 {
 		return RoleAssignment{}, ErrUserNotFound
 	}
 	tx, err := service.pool.Begin(ctx)

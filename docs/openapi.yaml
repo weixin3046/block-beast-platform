@@ -106,7 +106,7 @@ paths:
       security:
       - bearerAuth: []
       parameters:
-      - {name: userID, in: path, required: true, schema: {type: integer, format: int64, minimum: 100000}}
+      - {name: userID, in: path, required: true, schema: {type: integer, format: int64, minimum: 10001}}
       responses:
         '200':
           description: 未绑定时parent_user_id为null
@@ -125,7 +125,7 @@ paths:
       security:
       - bearerAuth: []
       parameters:
-      - {name: userID, in: path, required: true, schema: {type: integer, format: int64, minimum: 100000}}
+      - {name: userID, in: path, required: true, schema: {type: integer, format: int64, minimum: 10001}}
       requestBody:
         required: true
         content:
@@ -134,7 +134,7 @@ paths:
               type: object
               required: [parent_user_id, second_password]
               properties:
-                parent_user_id: {type: integer, format: int64, minimum: 100000}
+                parent_user_id: {type: integer, format: int64, minimum: 10001}
                 second_password: {type: string, writeOnly: true}
       responses:
         '200':
@@ -181,7 +181,7 @@ paths:
               type: object
               required: [second_password]
               properties:
-                user_id: {type: integer, format: int64, minimum: 100000, description: 与ip二选一}
+                user_id: {type: integer, format: int64, minimum: 10001, description: 与ip二选一}
                 ip: {type: string, description: 单个IPv4/IPv6地址，不接受CIDR；与user_id二选一}
                 remark: {type: string, maxLength: 200}
                 second_password: {type: string, writeOnly: true}
@@ -217,8 +217,8 @@ paths:
       security:
       - bearerAuth: []
       parameters:
-      - {name: source_user_id, in: query, schema: {type: integer, format: int64, minimum: 100000}}
-      - {name: beneficiary_user_id, in: query, schema: {type: integer, format: int64, minimum: 100000}}
+      - {name: source_user_id, in: query, schema: {type: integer, format: int64, minimum: 10001}}
+      - {name: beneficiary_user_id, in: query, schema: {type: integer, format: int64, minimum: 10001}}
       - {name: currency, in: query, schema: {type: string}}
       - {name: status, in: query, schema: {type: string, enum: [paid, reversed]}}
       - {name: game_type, in: query, schema: {type: string}}
@@ -609,7 +609,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
       requestBody:
         required: true
         content:
@@ -662,7 +662,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
       requestBody:
         required: true
         content:
@@ -716,7 +716,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
       requestBody:
         required: true
         content:
@@ -1697,7 +1697,7 @@ paths:
                   description: 可选，空字符串或当前管理员已确认的 JPEG/PNG/WebP 上传 storage_key，最多2048字节
                 password:
                   type: string
-                  minLength: 12
+                  description: 不能为空或全空白；不设密码长度上下限，受请求体大小限制
                 initial_balances:
                   type: object
                   description: 币种代码到实际初始金额的映射，后端换算精度
@@ -1982,7 +1982,7 @@ paths:
                   id:
                     type: integer
                     format: int64
-                    minimum: 100000
+                    minimum: 10001
                     description: 公开数字用户 ID。
                   login_name:
                     type: string
@@ -2052,7 +2052,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
       responses:
         '200':
           description: 头像图片内容
@@ -3456,6 +3456,7 @@ paths:
       tags:
       - Admin
       summary: 查询全部返佣订单
+      description: 返回收款用户的 login_name（账号）和 display_name（昵称），与 agent_id 对应；保留原订单字段。
       security:
       - bearerAuth: []
       responses:
@@ -3494,7 +3495,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
@@ -4171,7 +4172,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
@@ -4318,7 +4319,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
@@ -4529,7 +4530,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
@@ -4566,7 +4567,7 @@ paths:
         schema:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         description: 公开数字用户 ID，不是内部 UUID。
       requestBody:
         required: true
@@ -5239,7 +5240,7 @@ components:
       schema:
         type: integer
         format: int64
-        minimum: 100000
+        minimum: 10001
         description: 公开数字用户 ID。
     Limit:
       name: limit
@@ -5830,7 +5831,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         client_request_id:
           type: string
         status:
@@ -6148,7 +6149,7 @@ components:
         id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
           description: 面向前端和后台的数字用户 ID；UUID 仅用于内部关联。
         login_name:
           type: string
@@ -6213,7 +6214,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         roles:
           type: array
           items:
@@ -6248,7 +6249,7 @@ components:
         sender_user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         client_request_id:
           type: string
         currency:
@@ -6299,7 +6300,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         currency:
           type: string
           enum:
@@ -6375,7 +6376,7 @@ components:
               user_id:
                 type: integer
                 format: int64
-                minimum: 100000
+                minimum: 10001
               display_name:
                 type: string
               avatar_url:
@@ -6426,7 +6427,7 @@ components:
         owner_user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         storage_key:
           type: string
         content_type:
@@ -6577,7 +6578,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
           description: 对外公开的数字用户 ID，不是内部 UUID。
         display_name:
           type: string
@@ -6800,7 +6801,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         roles:
           type: array
           items:
@@ -7270,7 +7271,7 @@ components:
         account_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
           description: 玩家公开数字 ID；必须与当前访问令牌对应的账号一致。
         currency:
           type: string
@@ -7343,7 +7344,7 @@ components:
         account_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         game_type:
           type: string
           example: hash_9
@@ -7418,7 +7419,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         display_name:
           type: string
         avatar_url:
@@ -7543,7 +7544,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         login_name:
           type: string
         display_name:
@@ -7698,7 +7699,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         login_name:
           type: string
         currency:
@@ -7742,7 +7743,7 @@ components:
         account_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         currency:
           type: string
         available:
@@ -7935,7 +7936,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         currency:
           type: string
         credited:
@@ -7985,7 +7986,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         consumed:
           type: boolean
           description: false 表示重复请求，未重复扣减。
@@ -8297,7 +8298,7 @@ components:
         user_id:
           type: integer
           format: int64
-          minimum: 100000
+          minimum: 10001
         business_type:
           type: string
           description: 业务类型，如 admin_credit（上分）/ admin_debit（清退）/ admin_reward（赠分）/

@@ -47,7 +47,8 @@ func TestAdminAgentRelation(t *testing.T) {
 		{name: "admin", role: "admin", id: "100009", parent: "internal-parent", status: 200, body: `"parent_user_id":100006`},
 		{name: "operator no parent", role: "operator", id: "100009", status: 200, body: `"parent_user_id":null`},
 		{name: "invalid", role: "admin", id: "bad", status: 400},
-		{name: "invite code", role: "admin", id: "10001", status: 400},
+		{name: "below five digit ID range", role: "admin", id: "10000", status: 400},
+		{name: "five digit ID", role: "admin", id: "10001", status: 200, body: `"parent_user_id":null`},
 		{name: "missing", role: "admin", id: "100009", missing: true, status: 404},
 		{name: "service failure", role: "admin", id: "100009", fail: true, status: 500},
 	} {
@@ -66,7 +67,7 @@ func TestAdminAgentRelation(t *testing.T) {
 			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.body) {
 				t.Fatalf("%d %s", w.Code, w.Body.String())
 			}
-			if tc.status == 200 && (a.target != "internal-player" || !strings.Contains(w.Body.String(), `"user_id":100009`)) {
+			if tc.status == 200 && (a.target != "internal-player" || !strings.Contains(w.Body.String(), `"user_id":`+tc.id)) {
 				t.Fatal("must query requested player, not authenticated admin")
 			}
 			if tc.status < 500 && tc.status != 200 && a.target != "" {

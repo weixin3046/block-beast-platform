@@ -57,7 +57,7 @@ func validatePlan(in PlanInput) error {
 	if _, e := uuid.Parse(in.GameRoomID); e != nil {
 		return ErrInvalidPlan
 	}
-	if in.UserID < 100000 || in.Currency == "" || in.MinStakeMinor <= 0 || in.MaxStakeMinor < in.MinStakeMinor || in.MaxStakeMinor > math.MaxInt64/100000 {
+	if in.UserID < 10001 || in.Currency == "" || in.MinStakeMinor <= 0 || in.MaxStakeMinor < in.MinStakeMinor || in.MaxStakeMinor > math.MaxInt64/100000 {
 		return ErrInvalidPlan
 	}
 	if in.SkipMin < 1 || in.SkipMax < in.SkipMin || in.SkipMax > 10000 || len(in.Selections) == 0 || len(in.Selections) > 24 {

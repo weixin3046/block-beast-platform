@@ -307,7 +307,7 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	in.LoginName = strings.TrimSpace(in.LoginName)
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.AvatarURL = strings.TrimSpace(in.AvatarURL)
-	if in.LoginName == "" || len(in.DisplayName) > 100 || len(in.AvatarURL) > 2048 || len(in.Password) < 12 {
+	if in.LoginName == "" || len(in.DisplayName) > 100 || len(in.AvatarURL) > 2048 || strings.TrimSpace(in.Password) == "" {
 		return VirtualAccount{}, ErrInvalidVirtualAccount
 	}
 	passwordHash, err := identity.HashPassword(in.Password)

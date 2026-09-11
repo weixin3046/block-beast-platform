@@ -164,7 +164,7 @@ func (server *Server) agentRelation(writer http.ResponseWriter, request *http.Re
 // authenticated subject or allowing the player endpoint to inspect other users.
 func (server *Server) adminAgentRelation(writer http.ResponseWriter, request *http.Request) {
 	publicID, err := strconv.ParseInt(request.PathValue("userID"), 10, 64)
-	if err != nil || publicID < 100000 {
+	if err != nil || publicID < 10001 {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid user id"})
 		return
 	}

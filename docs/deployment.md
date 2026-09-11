@@ -156,6 +156,8 @@ docker compose --env-file .env.production -f compose.production.yaml start api
 共享对象存储。
 # 0080 单期投注升级
 
+0081 五位用户ID升级同样需要停写：先停止 api、worker、realtime，再执行部署脚本（自动运行0081）。同步新版API/Worker/Realtime，前端重新读取用户ID和邀请码。迁移保留内部UUID及余额，历史公开ID映射保存在 user_public_id_history；历史审计中的旧ID可据此查询。五位编号容量为89999个账号，超过容量迁移会回滚；后续序列耗尽也不会循环复用ID。
+
 同步新版代码后，在部署目录执行以下命令。旧 Worker 会创建多期 open，必须先停止旧 API/Worker，再执行迁移；这次升级会短暂停止下注和结算。部署脚本本身不会提前停止这些进程。
 
 ```sh

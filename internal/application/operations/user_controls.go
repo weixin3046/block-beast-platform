@@ -52,7 +52,7 @@ func (s *Service) SetUserMuted(ctx context.Context, actor string, publicID int64
 	}, strconv.FormatBool(muted))
 }
 func (s *Service) controlUser(ctx context.Context, actor string, publicID int64, adminOnly bool, action string, fn func(pgx.Tx, string) error, detail string) error {
-	if publicID < 100000 {
+	if publicID < 10001 {
 		return ErrUserNotFound
 	}
 	tx, err := s.pool.Begin(ctx)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/block-beast/platform/internal/application/uploads"
+	"github.com/block-beast/platform/internal/domain/identity"
 	"github.com/block-beast/platform/internal/platform/localstorage"
 
 	"github.com/google/uuid"
@@ -47,6 +48,39 @@ func TestVirtualCreationDefaults(t *testing.T) {
 	}
 	if _, err = NewService(p).CreateVirtualAccount(ctx, in); err == nil {
 		t.Fatal("duplicate login accepted")
+	}
+}
+
+func TestVirtualPasswordNonBlank(t *testing.T) {
+	for _, password := range []string{"", " ", "\t\n"} {
+		_, err := NewService(nil).CreateVirtualAccount(context.Background(), VirtualAccountInput{LoginName: "test", Password: password})
+		if !errors.Is(err, ErrInvalidVirtualAccount) {
+			t.Fatalf("blank password accepted: %v", err)
+		}
+	}
+	dsn := os.Getenv("POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("POSTGRES_TEST_DSN not set; nonblank DB cases skipped")
+	}
+	ctx := context.Background()
+	p, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	for _, password := range []string{"hellohello", "x", strings.Repeat("x", 129)} {
+		got, err := NewService(p).CreateVirtualAccount(ctx, VirtualAccountInput{LoginName: uuid.NewString(), DisplayName: "hellohello", Password: password, InitialBalances: map[string]int64{"POINTS": 1000, "JADE": 1000, "USDT": 1000000, "ORIGIN_STONE": 1000}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hash string
+		if err = p.QueryRow(ctx, `SELECT a.password_hash FROM auth_identities a JOIN users u ON u.id=a.user_id WHERE u.public_id=$1`, got.UserID).Scan(&hash); err != nil || !identity.VerifyPassword(hash, password) {
+			t.Fatalf("password failed: %v", err)
+		}
+		var count int
+		if err = p.QueryRow(ctx, `SELECT count(*) FROM wallets w JOIN users u ON u.id=w.user_id WHERE u.public_id=$1 AND ((w.currency='USDT' AND available_minor=1000000) OR (w.currency IN ('POINTS','JADE','ORIGIN_STONE') AND available_minor=1000))`, got.UserID).Scan(&count); err != nil || count != 4 {
+			t.Fatalf("wallets=%d err=%v", count, err)
+		}
 	}
 }
 

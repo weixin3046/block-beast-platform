@@ -127,7 +127,7 @@ func (service *Service) SetAgentLevel(ctx context.Context, userID string, level 
 		return ErrInvalidAgentLevel
 	}
 	publicID, err := strconv.ParseInt(userID, 10, 64)
-	if err != nil || publicID < 100000 {
+	if err != nil || publicID < 10001 {
 		return ErrUserNotFound
 	}
 	tx, err := service.pool.Begin(ctx)
@@ -168,7 +168,7 @@ func (service *Service) SetUserStatus(ctx context.Context, actorUserID, userID, 
 	}
 	defer tx.Rollback(ctx)
 	publicID, parseErr := strconv.ParseInt(userID, 10, 64)
-	if parseErr != nil || publicID < 100000 {
+	if parseErr != nil || publicID < 10001 {
 		return ErrUserNotFound
 	}
 	var targetUserID string

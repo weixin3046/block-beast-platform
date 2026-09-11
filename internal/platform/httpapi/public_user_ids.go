@@ -16,7 +16,7 @@ func (server *Server) resolvePublicUserID(ctx context.Context, value string) (st
 		return value, nil
 	}
 	publicID, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || publicID < 100000 {
+	if err != nil || publicID < 10001 {
 		return "", identity.ErrIdentityNotFound
 	}
 	return server.publicUsers.InternalUserIDByPublicID(ctx, publicID)

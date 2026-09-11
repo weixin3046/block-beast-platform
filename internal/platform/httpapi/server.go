@@ -928,7 +928,7 @@ func (server *Server) placeBet(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if input.ClientRequestID == "" || input.RoundID == "" || input.AccountID < 100000 || input.Currency == "" {
+	if input.ClientRequestID == "" || input.RoundID == "" || input.AccountID < 10001 || input.Currency == "" {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "missing required bet fields"})
 		return
 	}

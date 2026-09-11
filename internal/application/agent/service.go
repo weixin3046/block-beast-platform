@@ -34,6 +34,8 @@ type AdminRelation struct {
 }
 
 type Commission struct {
+	LoginName   string `json:"login_name,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
 	ID          string `json:"id"`
 	BetID       string `json:"bet_id"`
 	AgentID     string `json:"agent_id"`
@@ -78,13 +80,13 @@ func (service *Service) ListAllCommissions(ctx context.Context, status string, l
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	query := `SELECT id::text,source_bet_id::text,beneficiary_user_id::text,currency,amount_minor,status FROM commission_entries`
+	query := `SELECT ce.id::text,ce.source_bet_id::text,ce.beneficiary_user_id::text,ce.currency,ce.amount_minor,ce.status,COALESCE(u.login_name,''),u.display_name FROM commission_entries ce JOIN users u ON u.id=ce.beneficiary_user_id`
 	args := []any{limit}
 	if status != "" {
-		query += ` WHERE status=$2`
+		query += ` WHERE ce.status=$2`
 		args = append(args, status)
 	}
-	query += ` ORDER BY id DESC LIMIT $1`
+	query += ` ORDER BY ce.id DESC LIMIT $1`
 	rows, err := service.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -93,7 +95,7 @@ func (service *Service) ListAllCommissions(ctx context.Context, status string, l
 	items := make([]Commission, 0)
 	for rows.Next() {
 		var item Commission
-		if err := rows.Scan(&item.ID, &item.BetID, &item.AgentID, &item.Currency, &item.AmountMinor, &item.Status); err != nil {
+		if err := rows.Scan(&item.ID, &item.BetID, &item.AgentID, &item.Currency, &item.AmountMinor, &item.Status, &item.LoginName, &item.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -242,7 +244,7 @@ func (service *Service) Bind(ctx context.Context, userID, parentID string) error
 // AdminBind resolves public IDs inside the serialized relation transaction,
 // rechecks the actor role and appends an audit record atomically.
 func (service *Service) AdminBind(ctx context.Context, actorID string, userPublicID, parentPublicID int64) (AdminRelation, error) {
-	if actorID == "" || userPublicID < 100000 || parentPublicID < 100000 || userPublicID == parentPublicID {
+	if actorID == "" || userPublicID < 10001 || parentPublicID < 10001 || userPublicID == parentPublicID {
 		return AdminRelation{}, ErrInvalidRelation
 	}
 	tx, err := service.pool.Begin(ctx)
