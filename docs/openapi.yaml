@@ -1422,9 +1422,16 @@ paths:
       tags:
       - Operations
       summary: 跨玩家查询全部投注
+      description: player_type 按用户当前 is_virtual 筛选，可与其他条件组合；省略或 all 查询全部，非法值返回 400。
       security:
       - bearerAuth: []
       parameters:
+      - name: player_type
+        in: query
+        schema:
+          type: string
+          enum: [all, real, virtual]
+          default: all
       - name: user
         in: query
         schema:

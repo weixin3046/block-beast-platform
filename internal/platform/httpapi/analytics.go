@@ -71,11 +71,16 @@ func reportTimes(w http.ResponseWriter, r *http.Request) (time.Time, time.Time, 
 	return from, to, true
 }
 func (server *Server) adminBets(w http.ResponseWriter, r *http.Request) {
+	playerType := r.URL.Query().Get("player_type")
+	if playerType != "" && playerType != "all" && playerType != "real" && playerType != "virtual" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": operations.ErrInvalidPlayerType.Error()})
+		return
+	}
 	from, to, ok := reportTimes(w, r)
 	if !ok {
 		return
 	}
-	items, err := server.analytics.ListAdminBets(r.Context(), operations.BetQuery{User: r.URL.Query().Get("user"), GameType: r.URL.Query().Get("game_type"), Currency: r.URL.Query().Get("currency"), Status: r.URL.Query().Get("status"), From: from, To: to, Limit: queryLimit(r, 50), Offset: queryOffset(r)})
+	items, err := server.analytics.ListAdminBets(r.Context(), operations.BetQuery{PlayerType: playerType, User: r.URL.Query().Get("user"), GameType: r.URL.Query().Get("game_type"), Currency: r.URL.Query().Get("currency"), Status: r.URL.Query().Get("status"), From: from, To: to, Limit: queryLimit(r, 50), Offset: queryOffset(r)})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to list bets"})
 		return

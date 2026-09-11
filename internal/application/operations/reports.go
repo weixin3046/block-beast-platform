@@ -3,6 +3,7 @@ package operations
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"strings"
 	"time"
@@ -42,12 +43,18 @@ type AdminBet struct {
 	SettledAt        *time.Time      `json:"settled_at,omitempty"`
 }
 type BetQuery struct {
+	PlayerType                       string
 	User, GameType, Currency, Status string
 	From, To                         time.Time
 	Limit, Offset                    int
 }
 
+var ErrInvalidPlayerType = errors.New("player_type must be all, real, or virtual")
+
 func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, error) {
+	if q.PlayerType != "" && q.PlayerType != "all" && q.PlayerType != "real" && q.PlayerType != "virtual" {
+		return nil, ErrInvalidPlayerType
+	}
 	normalizePage(&q.Limit, &q.Offset)
 	rows, err := s.pool.Query(ctx, `
 		SELECT b.id::text,u.public_id,COALESCE(u.login_name,''),u.display_name,u.is_virtual,
@@ -69,7 +76,8 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 		WHERE ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%')
 			AND ($2='' OR gt.code=$2) AND ($3='' OR w.currency=$3) AND ($4='' OR b.status=$4)
 			AND ($5::timestamptz IS NULL OR b.created_at >= $5) AND ($6::timestamptz IS NULL OR b.created_at < $6)
-		ORDER BY b.created_at DESC,b.id DESC LIMIT $7 OFFSET $8`, q.User, q.GameType, q.Currency, q.Status, nullTime(q.From), nullTime(q.To), q.Limit, q.Offset)
+			AND ($9='' OR $9='all' OR ($9='real' AND NOT u.is_virtual) OR ($9='virtual' AND u.is_virtual))
+		ORDER BY b.created_at DESC,b.id DESC LIMIT $7 OFFSET $8`, q.User, q.GameType, q.Currency, q.Status, nullTime(q.From), nullTime(q.To), q.Limit, q.Offset, q.PlayerType)
 	if err != nil {
 		return nil, err
 	}
