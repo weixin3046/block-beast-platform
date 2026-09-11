@@ -1086,6 +1086,16 @@ Socket删除事件示例：
 
 ### 后台收益记录查询（0082）
 
+### 我的直属下级及收益
+
+`GET /v1/agents/me/direct-players?player_type=all&limit=50&offset=0` 使用当前登录身份，返回 `{total,items}`；按公开 ID 升序分页。每项包含 `user_id`、`login_name`、`display_name`、`avatar_url`、`is_virtual`、`created_at`（用户注册时间）和 `income`。`player_type=all|real|virtual` 默认全部，只查询直属下级。
+
+`income` 是该下级本人投注为当前用户产生、且当前状态为 paid 的返佣，按币种返回，例如 `[{"currency":"USDT","amount":"1.25"}]`。无收益的下级仍展示，income 为空数组。`from` / `to` 按收益产生时间筛选，开始包含、结束不包含，不过滤下级注册时间；不传则统计全部历史。未知历史收益时间在带时间条件时不计入，撤销和待发返佣不计入；不包含下级的下级产生的收益。
+
+今日收益示例：`/v1/agents/me/direct-players?from=2026-09-11T00:00:00%2B08:00&to=2026-09-12T00:00:00%2B08:00`。前端按所需时区计算当天和次日零点，带时区 RFC3339 的加号编码为 `%2B`。可仅传一端；格式错误或结束不晚于开始返回 400。limit 默认 50，超出 1–100 回退 50，offset 负值归零。依赖 0082 迁移，更新 API 后生效。
+
+### 后台收益查询参数
+
 `GET /v1/admin/commissions?from=2026-09-01T00:00:00Z&to=2026-10-01T00:00:00Z`
 新增可选 `from` / `to`，按收益产生时间筛选，包含开始、不包含结束；可只传一端，均不传则不限制时间。使用 RFC3339 带时区格式，`+08:00` 中的加号需 URL 编码为 `%2B`。格式错误或 `to <= from` 返回 400。新增 `currency` 可按返佣币种精确筛选；可与原 `status` 和时间条件组合。
 

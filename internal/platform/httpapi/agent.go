@@ -13,6 +13,7 @@ import (
 )
 
 type AgentService interface {
+	ListDirectPlayers(ctx context.Context, agentID string, query agentapp.DirectPlayerQuery) (agentapp.DirectPlayers, error)
 	Bind(ctx context.Context, userID, parentID string) error
 	GetRelation(ctx context.Context, userID string) (agentapp.Relation, error)
 	SetCommissionRate(ctx context.Context, agentID string, rateBasisPoints int, operatorID string) error
@@ -203,6 +204,33 @@ func (server *Server) adminAgentRelation(writer http.ResponseWriter, request *ht
 }
 
 func WithAgents(service AgentService) Option { return func(server *Server) { server.agents = service } }
+
+func (server *Server) directPlayers(w http.ResponseWriter, r *http.Request) {
+	claims, ok := ClaimsFromContext(r.Context())
+	if !ok || claims.Subject == "" {
+		writeJSON(w, 401, map[string]string{"error": "authentication required"})
+		return
+	}
+	kind := r.URL.Query().Get("player_type")
+	if kind != "" && kind != "all" && kind != "real" && kind != "virtual" {
+		writeJSON(w, 400, map[string]string{"error": "下级用户类型无效"})
+		return
+	}
+	from, to, ok := reportTimes(w, r)
+	if !ok {
+		return
+	}
+	if server.agents == nil {
+		writeJSON(w, 503, map[string]string{"error": "agent service is unavailable"})
+		return
+	}
+	out, err := server.agents.ListDirectPlayers(r.Context(), claims.Subject, agentapp.DirectPlayerQuery{PlayerType: kind, From: from, To: to, Limit: queryLimit(r, 50), Offset: queryOffset(r)})
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "查询直属下级失败"})
+		return
+	}
+	writeJSON(w, 200, out)
+}
 
 func (server *Server) bindAgent(writer http.ResponseWriter, request *http.Request) {
 	if server.agents == nil {

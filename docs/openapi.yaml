@@ -3441,6 +3441,28 @@ paths:
       responses:
         '200':
           description: 佣金明细列表
+  "/v1/agents/me/direct-players":
+    get:
+      tags: [Agent]
+      summary: 查询本人直属下级及按币种收益
+      description: 返回 total 和 items，按公开 ID 升序分页；只查询登录用户自己的直属下级。每项含 user_id、login_name、display_name、avatar_url、is_virtual、created_at（注册时间）、income（currency 和实际金额字符串 amount）。收益按返佣产生时间统计当前状态 paid 的返佣，仅包含该下级本人投注为当前用户产生的收益。没有收益仍返回下级及空 income 数组。不传时间统计全部历史；历史未知时间仅在不传时间条件时计入。
+      parameters:
+      - {name: player_type, in: query, schema: {type: string, enum: [all, real, virtual], default: all}}
+      - {name: from, in: query, schema: {type: string, format: date-time}, description: 收益开始时间，包含}
+      - {name: to, in: query, schema: {type: string, format: date-time}, description: 收益结束时间，不包含，必须晚于 from}
+      - {name: limit, in: query, schema: {type: integer, default: 50, minimum: 1, maximum: 100}}
+      - {name: offset, in: query, schema: {type: integer, default: 0, minimum: 0}}
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: 直属下级列表与收益
+        '400':
+          description: 类型或时间无效
+        '401':
+          description: 未登录
+        '503':
+          description: 服务不可用
   "/v1/agents/me/team-summary":
     get:
       tags:
