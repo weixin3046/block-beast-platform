@@ -3445,7 +3445,7 @@ paths:
         source_user_id: 来源投注用户公开数字ID
         source_login_name: 来源投注用户当前账号
         source_display_name: 来源投注用户当前昵称
-      description: 保留原返佣字段，新增 game_type（游戏代码）、game_name（如9区块，使用配置名称）、sequence（期数）、created_at（返佣产生时间，历史未知为null）、play_mode（玩法代码）、selection（投注选项）。按返佣产生时间倒序、ID倒序，未知时间排最后。币种精确筛选；from/to开始包含结束不包含，带时间条件排除未知时间。各返佣状态仍全部返回。
+      description: 保留原返佣字段，新增 game_type（游戏代码）、game_name（如9区块，使用配置名称）、sequence（期数）、created_at（返佣产生时间，历史未知为null）、play_mode（玩法代码）、selection（投注选项）、stake（原投注金额）、rebate_base（返水计算基数）和 rebate_rate_basis_points（返水比例，100=1%）。新版级差返水比例来自历史快照；旧订单按实际返水金额/投注基数反算，可能受最小单位取整影响。按返佣产生时间倒序、ID倒序，未知时间排最后。币种精确筛选；from/to开始包含结束不包含，带时间条件排除未知时间。各返佣状态仍全部返回。
       parameters:
       - {name: currency, in: query, schema: {type: string}}
       - {name: from, in: query, schema: {type: string, format: date-time}}

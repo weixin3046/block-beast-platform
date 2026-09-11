@@ -121,6 +121,9 @@ func TestAdminCommissionBeneficiaryNames(t *testing.T) {
 	if details[0].GameName != "test" || details[0].GameType != gt || details[0].Sequence != 1 || details[0].CreatedAt == nil || !details[0].CreatedAt.Equal(at) || string(details[0].Selection) != "{}" {
 		t.Fatalf("wrong game metadata %+v", details[0])
 	}
+	if details[0].StakeMinor != 1 || details[0].RebateBaseMinor != 1 || details[0].RebateRateBasisPoints != 10000 {
+		t.Fatalf("wrong stake/base/rate: %+v", details[0])
+	}
 	for _, tc := range []struct {
 		owner, currency string
 		from, to        time.Time
