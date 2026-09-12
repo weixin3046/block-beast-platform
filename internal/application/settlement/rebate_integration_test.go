@@ -53,10 +53,14 @@ func TestRebateSnapshotConcurrentSettlement(t *testing.T) {
 	var rounds, bets []string
 	for _, mode := range []string{"road", "dodge"} {
 		user, round := uuid.NewString(), uuid.NewString()
+		// Independent game types avoid unrelated open rounds and permit concurrent settlement.
+		gameID := uuid.NewString()
+		exec(`INSERT INTO game_types(id,code,name,rules) SELECT $1::uuid,$1::uuid::text,'rebate isolated',rules FROM game_types WHERE id='09000000-0000-4000-8000-000000000001'`, gameID)
+		exec(`INSERT INTO game_room_types(room_id,game_type_id) VALUES('94000000-0000-4000-8000-000000000001',$1)`, gameID)
 		exec(`INSERT INTO users(id,display_name) VALUES($1,'rebate player')`, user)
 		exec(`INSERT INTO agent_relations(user_id,parent_user_id) VALUES($1,$2)`, user, parents[0])
 		exec(`INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,'POINTS',100000)`, uuid.NewString(), user)
-		exec(`INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at) VALUES($1,'09000000-0000-4000-8000-000000000001',$2,'open',now()+interval '1 hour')`, round, time.Now().UnixNano())
+		exec(`INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at) VALUES($1,$2,1,'open',now()+interval '1 hour')`, round, gameID)
 		pick := "odd"
 		if mode == "dodge" {
 			pick = "2"
@@ -89,8 +93,8 @@ func TestRebateSnapshotConcurrentSettlement(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Both road and dodge use their 1,000-stake as the rebate base.
-	for i, want := range []int64{28, 4, 8} {
+	// Road uses 1,000 stake; dodge uses 80 net winnings, rounded per recipient.
+	for i, want := range []int64{15, 2, 4} {
 		var got int64
 		if err := p.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE user_id=$1 AND currency='POINTS'`, parents[i]).Scan(&got); err != nil {
 			t.Fatal(err)
@@ -103,14 +107,14 @@ func TestRebateSnapshotConcurrentSettlement(t *testing.T) {
 	if err := p.QueryRow(ctx, `SELECT count(*) FROM rebate_allocations WHERE bet_id=ANY($1::uuid[])`, bets).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 6 {
-		t.Fatalf("allocation count=%d want=6", count)
+	if count != 4 {
+		t.Fatalf("allocation count=%d want=4", count)
 	}
 	if err := p.QueryRow(ctx, `SELECT count(*) FROM ledger_entries l JOIN commission_entries c ON c.id::text=l.business_id WHERE c.source_bet_id=ANY($1::uuid[]) AND l.business_type='commission'`, bets).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 6 {
-		t.Fatalf("ledger count=%d want=6", count)
+	if count != 4 {
+		t.Fatalf("ledger count=%d want=4", count)
 	}
 	// Pagination does not truncate totals; viewer scoping cannot expose a
 	// different beneficiary, and public amounts never carry minor units.

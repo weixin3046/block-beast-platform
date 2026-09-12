@@ -19,8 +19,8 @@ type Allocation struct {
 	AmountMinor          int64 `json:"amount_minor"`
 }
 
-// Calculate uses the submitted stake as the rebate base for every supported
-// play mode. Each recipient's differential is rounded down independently.
+// Calculate uses stake for road/guess and positive net winnings for dodge.
+// Each recipient's differential is rounded down independently.
 func Calculate(stake, payout int64, mode string, chain []Ancestor) ([]Allocation, error) {
 	if stake < 0 || payout < 0 {
 		return nil, ErrInvalid
@@ -31,6 +31,12 @@ func Calculate(stake, payout int64, mode string, chain []Ancestor) ([]Allocation
 		return nil, ErrInvalid
 	}
 	base := stake
+	if mode == "dodge" {
+		base = 0
+		if payout > stake {
+			base = payout - stake
+		}
+	}
 	var result []Allocation
 	level, rate := 0, 0
 	for _, a := range chain {
