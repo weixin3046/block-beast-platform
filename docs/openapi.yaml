@@ -2495,6 +2495,62 @@ paths:
           "$ref": "#/components/responses/BadRequest"
         '404':
           "$ref": "#/components/responses/NotFound"
+  "/v1/external-draws/{game}/history":
+    get:
+      tags:
+      - Rounds
+      operationId: getExternalDrawHistory
+      summary: 查询已解密的外部开奖历史
+      description: 仅支持星海逃杀 `star_sea` 和怒翎破阵 `angry_feather`。平台后端负责调用、解密和校验上游数据；响应不包含上游地址或密文。
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: game
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [star_sea, angry_feather]
+      - name: count
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      responses:
+        '200':
+          description: 按上游期号从新到旧排列的开奖记录。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [game, items]
+                properties:
+                  game:
+                    type: string
+                    enum: [star_sea, angry_feather]
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [issue, room]
+                      properties:
+                        issue:
+                          type: string
+                        room:
+                          type: array
+                          minItems: 1
+                          items:
+                            type: integer
+        '400':
+          "$ref": "#/components/responses/BadRequest"
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '502':
+          description: 外部开奖服务不可用、响应异常或解密失败。
+        '503':
+          description: 外部开奖服务尚未配置。
   "/v1/admin/hash/config":
     get:
       tags:

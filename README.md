@@ -126,6 +126,7 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 | `GET /v1/game-rooms` | 查询启用的游戏房间及房内玩法。 |
 | `GET /v1/hash/menus` | 查询固定六个赔率房间、六个共享哈希区块及按币种配置的三类玩法参数。 |
 | `GET /v1/hash/trends?game_type=hash_9&limit=100` | 查询共享哈希玩法的尾数、大小、单双走势及当前遗漏/连开统计。 |
+| `GET /v1/external-draws/{game}/history?count=100` | 查询星海逃杀或怒翎破阵的已解密外部开奖历史。仅已登录用户；上游未配置或不可用时分别返回 503/502。 |
 | `GET/PUT /v1/admin/hash/config` | 通过版本号原子查询或更新哈希房间名称、顺序、状态、倍率和累计投注上限。仅 operator/admin。 |
 | `GET /v1/admin/game-rooms` | 查询固定六个哈希房间。仅 operator/admin。 |
 | `GET /v1/admin/game-types` | 查询固定六个共享哈希玩法。仅 operator/admin。 |

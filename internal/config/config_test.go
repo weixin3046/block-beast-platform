@@ -45,6 +45,17 @@ func TestTronGridAPIKeyLoads(t *testing.T) {
 	}
 }
 
+func TestLotteryDrawUpstreamURLLoadsWithoutDefault(t *testing.T) {
+	t.Setenv("LOTTERY_DRAW_UPSTREAM_URL", "")
+	if got := Load().LotteryDrawUpstreamURL; got != "" {
+		t.Fatalf("lottery draw upstream URL default = %q", got)
+	}
+	t.Setenv("LOTTERY_DRAW_UPSTREAM_URL", "https://draw-provider.example")
+	if got := Load().LotteryDrawUpstreamURL; got != "https://draw-provider.example" {
+		t.Fatalf("lottery draw upstream URL = %q", got)
+	}
+}
+
 func TestTronGridGRPCEndpointLoads(t *testing.T) {
 	t.Setenv("TRON_GRID_GRPC_ENDPOINT", "grpc.example.test:50051")
 	if got := Load().TronGridGRPCEndpoint; got != "grpc.example.test:50051" {

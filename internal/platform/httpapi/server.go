@@ -65,6 +65,7 @@ type Server struct {
 	uploads             UploadService
 	leaderboards        LeaderboardService
 	redPackets          RedPacketService
+	externalDrawHistory ExternalDrawHistoryReader
 	publicUsers         PublicUserResolver
 }
 
@@ -198,6 +199,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/game-rooms", server.protect(server.gameRooms))
 	mux.HandleFunc("GET /v1/hash/menus", server.protect(server.hashMenus))
 	mux.HandleFunc("GET /v1/hash/trends", server.protect(server.hashTrends))
+	mux.HandleFunc("GET /v1/external-draws/{game}/history", server.protect(server.externalDrawHistoryEndpoint))
 	mux.HandleFunc("GET /v1/announcements", server.announcements)
 	mux.HandleFunc("GET /v1/configs/{key}", server.publicConfig)
 	mux.HandleFunc("POST /v1/auth/login", server.login)
