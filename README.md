@@ -234,7 +234,7 @@ ssh root@58.87.64.208 '
 Supervisor 服务并执行健康检查：
 
 ```bash
-DEPLOY_HOST=root@your-server ./scripts/deploy-baota.sh
+DEPLOY_HOST=root@121.43.230.83 ./scripts/deploy-baota.sh
 ```
 
 默认会运行 `go test ./...`；只在已经完成同等验证的紧急发布中才使用

@@ -220,7 +220,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 
 ### 看板 /v1/admin/dashboard 每个字段的含义
 
-`server_time`为生成响应时服务端时间。`players`为筛选后的真实用户，含`user_id`公开ID、`login_name`账号、`display_name`昵称、`bet_count`统计期间全部投注单数、`funds`按币种统计数组。`global`为全部真实用户按币种汇总，不受user筛选或玩家limit影响。
+`server_time`为生成响应时服务端时间。`players`为筛选后的真实用户，含`user_id`公开ID、`login_name`账号、`display_name`昵称、`bet_count`统计期间全部投注单数、`funds`按币种统计数组。统计时间内既无投注也无资金流水的用户不返回。`global`为全部真实用户按币种汇总，不受user筛选或玩家limit影响。
 
 `global[]`和`players[].funds[]`结构一致：
 
@@ -233,6 +233,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 | bet_loss | 投注总输款：时间范围内创建、当前状态为 lost 的非模拟订单本金总额，返回非负金额字符串；合单本金只算一次，不是净亏损，不含人工扣分 |
 | deposit | 时间范围内链上充值入账，不含后台上分 |
 | credit | 时间范围内后台人工上分 |
+| rebate | 时间范围内已入账返水净额；包含返水冲正后的结果，不包含人工佣金补发 |
 | clearance | 人工下分、积分提现审核扣款、链上提现最终成功扣款；不含冻结、拒绝和投注退款 |
 | gift | 后台人工赠分，不代表全部任务/转盘/排行榜奖励 |
 | penalty | 后台人工扣分，返回正数；不是投注输款 |

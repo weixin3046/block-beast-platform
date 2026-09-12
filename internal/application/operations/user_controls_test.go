@@ -30,9 +30,9 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	admin, op, user := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	ids := []string{admin, op, user}
-	exec(`INSERT INTO users(id,login_name,display_name) VALUES($1::uuid,$1::text,'admin'),($2::uuid,$2::text,'operator'),($3::uuid,$3::text,'player')`, admin, op, user)
+	admin, op, user, empty := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	ids := []string{admin, op, user, empty}
+	exec(`INSERT INTO users(id,login_name,display_name) VALUES($1::uuid,$1::text,'admin'),($2::uuid,$2::text,'operator'),($3::uuid,$3::text,'player'),($4::uuid,$4::text,'empty player')`, admin, op, user, empty)
 	defer func() {
 		p.Exec(ctx, `DELETE FROM agent_relations WHERE user_id=ANY($1::uuid[])`, ids)
 		p.Exec(ctx, `DELETE FROM ledger_entries WHERE wallet_id IN (SELECT id FROM wallets WHERE user_id=ANY($1::uuid[]))`, ids)
@@ -46,6 +46,7 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 	}()
 	exec(`INSERT INTO user_roles SELECT $1,id FROM roles WHERE code='admin'`, admin)
 	exec(`INSERT INTO user_roles SELECT $1,id FROM roles WHERE code='operator'`, op)
+	exec(`INSERT INTO user_roles SELECT $1,id FROM roles WHERE code='player'`, empty)
 	var uid int64
 	if err = p.QueryRow(ctx, `SELECT public_id FROM users WHERE id=$1`, user).Scan(&uid); err != nil {
 		t.Fatal(err)
@@ -153,6 +154,7 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 	if err != nil || len(list) != 0 {
 		t.Fatal(list, err)
 	}
+	exec(`INSERT INTO ledger_entries(id,wallet_id,business_type,business_id,entry_type,amount_minor,balance_after_minor) SELECT $1,id,'commission',$2,'commission_credit',250000,1750000 FROM wallets WHERE user_id=$3 AND currency='USDT'`, uuid.NewString(), uuid.NewString(), user)
 	exec(`INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,'USDT',777000)`, uuid.NewString(), admin)
 	board, err := s.Dashboard(ctx, fmtID(uid), time.Now().Add(-time.Hour), time.Now(), 10)
 	if err != nil || len(board.Players) != 1 || len(board.Players[0].Funds) != 2 {
@@ -163,10 +165,22 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 		if funds.Currency == "USDT" && funds.Balance != "1.500000" {
 			t.Fatalf("admin balance must not enter the dashboard: %+v", funds)
 		}
+		if funds.Currency == "USDT" && funds.Rebate != "0.250000" {
+			t.Fatalf("global rebate = %q, want 0.250000", funds.Rebate)
+		}
 		gotUSDT = gotUSDT || funds.Currency == "USDT"
 	}
 	if !gotUSDT {
 		t.Fatal("missing USDT global dashboard statistic")
+	}
+	board, err = s.Dashboard(ctx, "", time.Now().Add(-time.Hour), time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, player := range board.Players {
+		if player.DisplayName == "empty player" {
+			t.Fatal("player without activity must not appear on dashboard")
+		}
 	}
 	raw, _ := json.Marshal(board.Players[0])
 	var obj map[string]any
@@ -177,6 +191,9 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 	for _, f := range board.Players[0].Funds {
 		if f.Balance != "1.500000" && f.Balance != "1.500" {
 			t.Fatal(f)
+		}
+		if f.Currency == "USDT" && f.Rebate != "0.250000" {
+			t.Fatalf("player rebate = %q, want 0.250000", f.Rebate)
 		}
 	}
 	var audit string

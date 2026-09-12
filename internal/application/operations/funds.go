@@ -14,7 +14,7 @@ func formatCurrencyStatistic(v *CurrencyStatistic) error {
 		minor int64
 		out   *string
 	}{
-		{v.BetLossMinor, &v.BetLoss}, {v.StakeMinor, &v.Stake}, {v.PayoutMinor, &v.Payout}, {v.DepositMinor, &v.Deposit}, {v.CreditMinor, &v.Credit}, {v.ClearanceMinor, &v.Clearance}, {v.GiftMinor, &v.Gift}, {v.PenaltyMinor, &v.Penalty}, {v.BalanceMinor, &v.Balance},
+		{v.BetLossMinor, &v.BetLoss}, {v.StakeMinor, &v.Stake}, {v.PayoutMinor, &v.Payout}, {v.DepositMinor, &v.Deposit}, {v.CreditMinor, &v.Credit}, {v.RebateMinor, &v.Rebate}, {v.ClearanceMinor, &v.Clearance}, {v.GiftMinor, &v.Gift}, {v.PenaltyMinor, &v.Penalty}, {v.BalanceMinor, &v.Balance},
 	} {
 		*pair.out, err = wallet.FormatDisplayAmount(pair.minor, v.Decimals)
 		if err != nil {
@@ -37,13 +37,14 @@ func (s *Service) dashboardFunds(ctx context.Context, result *Dashboard, from, t
  l AS(SELECT wallet_id,
  sum(amount_minor) FILTER(WHERE business_type IN ('deposit','lulu_deposit')) AS deposit,
  sum(amount_minor) FILTER(WHERE business_type='admin_credit') AS credit,
+	 sum(amount_minor) FILTER(WHERE business_type='commission') AS rebate,
  -sum(amount_minor) FILTER(WHERE business_type IN ('admin_debit','point_withdrawal_debit','lulu_withdrawal_debit') OR entry_type='withdrawal_debit') AS clearance,
  sum(amount_minor) FILTER(WHERE business_type='admin_reward') AS gift,
  -sum(amount_minor) FILTER(WHERE business_type='admin_penalty') AS penalty
  FROM ledger_entries WHERE occurred_at >= $1 AND occurred_at < $2 GROUP BY wallet_id)
  SELECT COALESCE(u.public_id,0),w.currency,c.decimals,
  COALESCE(sum(b.n),0),COALESCE(sum(b.stake),0),COALESCE(sum(b.payout),0),COALESCE(sum(b.bet_loss),0),
- COALESCE(sum(l.deposit),0),COALESCE(sum(l.credit),0),COALESCE(sum(l.clearance),0),COALESCE(sum(l.gift),0),COALESCE(sum(l.penalty),0),
+ COALESCE(sum(l.deposit),0),COALESCE(sum(l.credit),0),COALESCE(sum(l.rebate),0),COALESCE(sum(l.clearance),0),COALESCE(sum(l.gift),0),COALESCE(sum(l.penalty),0),
  sum(w.available_minor::numeric+w.frozen_minor)
  FROM wallets w JOIN users u ON u.id=w.user_id JOIN currencies c ON c.code=w.currency LEFT JOIN b ON b.wallet_id=w.id LEFT JOIN l ON l.wallet_id=w.id
  WHERE NOT u.is_virtual
@@ -58,7 +59,7 @@ func (s *Service) dashboardFunds(ctx context.Context, result *Dashboard, from, t
 	for rows.Next() {
 		var id int64
 		var v CurrencyStatistic
-		if err = rows.Scan(&id, &v.Currency, &v.Decimals, &v.BetCount, &v.StakeMinor, &v.PayoutMinor, &v.BetLossMinor, &v.DepositMinor, &v.CreditMinor, &v.ClearanceMinor, &v.GiftMinor, &v.PenaltyMinor, &v.BalanceMinor); err != nil {
+		if err = rows.Scan(&id, &v.Currency, &v.Decimals, &v.BetCount, &v.StakeMinor, &v.PayoutMinor, &v.BetLossMinor, &v.DepositMinor, &v.CreditMinor, &v.RebateMinor, &v.ClearanceMinor, &v.GiftMinor, &v.PenaltyMinor, &v.BalanceMinor); err != nil {
 			return err
 		}
 		if err = formatCurrencyStatistic(&v); err != nil {

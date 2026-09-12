@@ -139,6 +139,7 @@ type CurrencyStatistic struct {
 	Payout         string `json:"payout"`
 	Deposit        string `json:"deposit"`
 	Credit         string `json:"credit"`
+	Rebate         string `json:"rebate"`
 	Clearance      string `json:"clearance"`
 	Gift           string `json:"gift"`
 	Penalty        string `json:"penalty"`
@@ -152,6 +153,7 @@ type CurrencyStatistic struct {
 	PayoutMinor    int64  `json:"payout_minor"`
 	DepositMinor   int64  `json:"deposit_minor"`
 	CreditMinor    int64  `json:"credit_minor"`
+	RebateMinor    int64  `json:"-"`
 	BalanceMinor   int64  `json:"balance_minor"`
 }
 type Dashboard struct {
@@ -171,7 +173,7 @@ func (s *Service) Dashboard(ctx context.Context, userQuery string, from, to time
 		limit = 50
 	}
 	result := Dashboard{ServerTime: time.Now().UTC(), Players: []PlayerStatistic{}, Global: []CurrencyStatistic{}}
-	rows, err := s.pool.Query(ctx, `SELECT u.public_id,COALESCE(u.login_name,''),u.display_name,count(b.id),0,0,0,0,0 FROM users u LEFT JOIN bets b ON b.user_id=u.id AND b.created_at >= $2 AND b.created_at < $3 WHERE NOT u.is_virtual AND NOT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code IN ('admin','operator')) AND ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%') GROUP BY u.id ORDER BY count(b.id) DESC,u.public_id LIMIT $4`, userQuery, from, to, limit)
+	rows, err := s.pool.Query(ctx, `SELECT u.public_id,COALESCE(u.login_name,''),u.display_name,count(b.id),0,0,0,0,0 FROM users u LEFT JOIN bets b ON b.user_id=u.id AND b.created_at >= $2 AND b.created_at < $3 WHERE NOT u.is_virtual AND NOT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code IN ('admin','operator')) AND (EXISTS(SELECT 1 FROM bets activity_bet WHERE activity_bet.user_id=u.id AND activity_bet.created_at >= $2 AND activity_bet.created_at < $3) OR EXISTS(SELECT 1 FROM ledger_entries activity_ledger JOIN wallets activity_wallet ON activity_wallet.id=activity_ledger.wallet_id WHERE activity_wallet.user_id=u.id AND activity_ledger.occurred_at >= $2 AND activity_ledger.occurred_at < $3)) AND ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%') GROUP BY u.id ORDER BY count(b.id) DESC,u.public_id LIMIT $4`, userQuery, from, to, limit)
 	if err != nil {
 		return result, err
 	}

@@ -1603,7 +1603,7 @@ paths:
       tags:
       - Operations
       summary: 玩家统计与排除虚拟账户的全局环境统计
-      description: 'global和players[].funds均按币种统计并返回decimals及展示金额字符串。删除players顶层错误的跨币种金额汇总字段；余额为当前可用加冻结，不是期末余额。统计排除虚拟账户及带admin/operator角色的后台账号，其返水、余额和其他资金变动均不计入。user只筛选players，不筛选global。from包含、to不包含；默认最近24小时。投注按下单时间，资金流水按发生时间统计。
+      description: 'global和players[].funds均按币种统计并返回decimals及展示金额字符串。删除players顶层错误的跨币种金额汇总字段；余额为当前可用加冻结，不是期末余额。统计排除虚拟账户及带admin/operator角色的后台账号，其返水、余额和其他资金变动均不计入。统计时间内既无投注也无资金流水的用户不返回players。user只筛选players，不筛选global。from包含、to不包含；默认最近24小时。投注按下单时间，资金流水按发生时间统计。
 
 '
       security:
@@ -5740,6 +5740,9 @@ components:
         credit:
           type: string
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
+        rebate:
+          type: string
+          description: 时间范围内已入账返水净额；包含返水冲正后的结果，不包含人工佣金补发。
         clearance:
           type: string
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
