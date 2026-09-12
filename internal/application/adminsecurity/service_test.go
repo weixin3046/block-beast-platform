@@ -15,12 +15,12 @@ import (
 )
 
 func TestPasswordValidation(t *testing.T) {
-	for _, p := range []string{"", "  ", strings.Repeat("中", 43)} {
+	for _, p := range []string{"", "  ", "\t\n", "　"} {
 		if validPassword(p) {
 			t.Fatalf("accepted invalid password length=%d", len(p))
 		}
 	}
-	if !validPassword("a") || !validPassword(strings.Repeat("a", 128)) || validLevel("third") {
+	if !validPassword("a") || !validPassword(strings.Repeat("中", 400)) || validLevel("third") {
 		t.Fatal("validation boundaries")
 	}
 }

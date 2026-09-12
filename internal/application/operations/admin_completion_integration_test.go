@@ -194,7 +194,22 @@ func TestAdminBetVoidAndPlayerCreation(t *testing.T) {
 	if err != nil || createdByOperator.DisplayName != "运营创建" || createdByOperator.IsVirtual {
 		t.Fatalf("operator creation: %+v %v", createdByOperator, err)
 	}
-	if err = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE action='admin.player.create' AND actor_user_id IN($1,$2)`, admin, operator).Scan(&count); err != nil || count != 2 {
+	shortPasswordAccount, err := service.CreatePlayerAccount(ctx, PlayerAccountInput{ActorUserID: admin, LoginName: loginPrefix + "-short", Password: "a"})
+	if err != nil || shortPasswordAccount.LoginName != loginPrefix+"-short" {
+		t.Fatalf("short password account: %+v %v", shortPasswordAccount, err)
+	}
+	if _, err = service.CreatePlayerAccount(ctx, PlayerAccountInput{ActorUserID: admin, LoginName: loginPrefix + "-blank", Password: " \t "}); !errors.Is(err, ErrInvalidPlayerAccount) {
+		t.Fatalf("blank password accepted: %v", err)
+	}
+	longPassword := strings.Repeat("中", 400)
+	longAccount, err := service.CreatePlayerAccount(ctx, PlayerAccountInput{ActorUserID: admin, LoginName: loginPrefix + "-long", Password: longPassword})
+	if err != nil {
+		t.Fatalf("long password account: %v", err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT a.password_hash FROM auth_identities a JOIN users u ON u.id=a.user_id WHERE u.public_id=$1 AND a.provider='password'`, longAccount.UserID).Scan(&hash); err != nil || !identity.VerifyPassword(hash, longPassword) {
+		t.Fatalf("long password not stored intact: %v", err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE action='admin.player.create' AND actor_user_id IN($1,$2)`, admin, operator).Scan(&count); err != nil || count != 4 {
 		t.Fatalf("player creation audits=%d err=%v", count, err)
 	}
 }

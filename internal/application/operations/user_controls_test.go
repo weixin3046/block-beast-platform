@@ -153,9 +153,20 @@ func TestUserControlsAndMultiCurrencyDashboard(t *testing.T) {
 	if err != nil || len(list) != 0 {
 		t.Fatal(list, err)
 	}
+	exec(`INSERT INTO wallets(id,user_id,currency,available_minor) VALUES($1,$2,'USDT',777000)`, uuid.NewString(), admin)
 	board, err := s.Dashboard(ctx, fmtID(uid), time.Now().Add(-time.Hour), time.Now(), 10)
 	if err != nil || len(board.Players) != 1 || len(board.Players[0].Funds) != 2 {
 		t.Fatal(board, err)
+	}
+	gotUSDT := false
+	for _, funds := range board.Global {
+		if funds.Currency == "USDT" && funds.Balance != "1.500000" {
+			t.Fatalf("admin balance must not enter the dashboard: %+v", funds)
+		}
+		gotUSDT = gotUSDT || funds.Currency == "USDT"
+	}
+	if !gotUSDT {
+		t.Fatal("missing USDT global dashboard statistic")
 	}
 	raw, _ := json.Marshal(board.Players[0])
 	var obj map[string]any

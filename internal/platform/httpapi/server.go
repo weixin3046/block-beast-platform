@@ -297,6 +297,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/admin/dashboard", server.protectRoles(server.adminDashboard, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/users/{userID}/login-ips", server.protectRoles(server.adminUserLoginIPs, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/login-ips/{ip}/users", server.protectRoles(server.adminLoginIPUsers, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/users/{userID}/virtual", server.protectRoles(server.secondPassword(server.convertUserToVirtual), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/virtual-accounts", server.protectRoles(server.createVirtualAccount, identity.RoleAdmin, identity.RoleOperator))
 	for _, route := range []string{"GET /v1/admin/robot-plans", "POST /v1/admin/robot-plans", "GET /v1/admin/robot-plans/{planID}", "PUT /v1/admin/robot-plans/{planID}", "DELETE /v1/admin/robot-plans/{planID}", "PUT /v1/admin/robot-plans/{planID}/enabled"} {
 		mux.HandleFunc(route, server.protectRoles(server.handleRobotPlans, identity.RoleAdmin, identity.RoleOperator))

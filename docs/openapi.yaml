@@ -3,6 +3,7 @@ info:
   title: Block Beast Platform API
   version: 0.2.0
   description: |
+    所有环境密码只要求非空且不能全为空白，不设长度上下限，仍受HTTP请求体大小限制。适用于注册、自助改密、后台创建/重置账号密码及全局操作密码；旧AUTH_STRICT_PASSWORD_POLICY开关不再生效。
     Socket个人投注结算事件game.bet.settled每位玩家每个round_id一条，bets包含中奖和未中奖主单，totals按币种汇总实际金额stake/payout/net_win；具体契约见docs/realtime-api.md。
     0066起真实玩家注册和后台创建账号时原子创建上分/下分客服房间，虚拟账号不自动创建；POST /v1/chat/customer-service仍提供幂等获取或创建，注册响应结构不变。
     0067起所有账号仅保留最新成功登录会话，旧访问令牌返回401、旧刷新令牌失效；请求字段不变，无需设备ID。刷新沿用会话。迁移撤销旧会话，升级后需重新登录；Socket定期检测撤销并以1008关闭。
@@ -989,7 +990,7 @@ paths:
       tags:
       - Admin
       summary: 管理员设置或重置全局操作密码
-      description: 仅 admin；验证当前管理员登录密码，不要求旧操作密码。新密码非空且 UTF-8 最多 128 字节。连续错误达到 5 次锁定
+      description: 仅 admin；验证当前管理员登录密码，不要求旧操作密码。新密码非空且不能全空白，不限制长度。连续错误达到 5 次锁定
         15 分钟。
       security:
       - bearerAuth: []
@@ -1018,13 +1019,13 @@ paths:
                   format: password
                   writeOnly: true
                   minLength: 1
-                  description: 新全局操作密码，UTF-8 最多 128 字节
+                  description: 新全局操作密码，非空且不能全空白，不限制长度
                 login_password:
                   type: string
                   format: password
                   writeOnly: true
                   minLength: 1
-                  description: 当前管理员登录密码，UTF-8 最多 1024 字节
+                  description: 当前管理员登录密码，非空且不能全空白，不限制长度
       responses:
         '204':
           description: 已设置并记录不含密码的审计
@@ -1602,7 +1603,7 @@ paths:
       tags:
       - Operations
       summary: 玩家统计与排除虚拟账户的全局环境统计
-      description: 'global和players[].funds均按币种统计并返回decimals及展示金额字符串。删除players顶层错误的跨币种金额汇总字段；余额为当前可用加冻结，不是期末余额。统计排除虚拟账户。user只筛选players，不筛选global。from包含、to不包含；默认最近24小时。投注按下单时间，资金流水按发生时间统计。
+      description: 'global和players[].funds均按币种统计并返回decimals及展示金额字符串。删除players顶层错误的跨币种金额汇总字段；余额为当前可用加冻结，不是期末余额。统计排除虚拟账户及带admin/operator角色的后台账号，其返水、余额和其他资金变动均不计入。user只筛选players，不筛选global。from包含、to不包含；默认最近24小时。投注按下单时间，资金流水按发生时间统计。
 
 '
       security:
@@ -1667,6 +1668,47 @@ paths:
       responses:
         '200':
           description: 关联用户列表
+  "/v1/admin/users/{userID}/virtual":
+    put:
+      tags: [Admin]
+      summary: 将真实玩家转换为虚拟账户
+      description: 仅 admin/operator，需后台全局二级密码。禁止转换后台账号及非玩家；已为虚拟玩家时幂等返回成功。保留余额、关系和历史订单资金模式；转换后历史及新增订单均排除看板统计，历史真实投注仍正常结算，新投注使用模拟资金模式。禁止提现，不自动启用挂机。
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: userID
+        in: path
+        required: true
+        schema: {type: integer, minimum: 10001, maximum: 99999}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [second_password]
+              properties:
+                second_password: {type: string, minLength: 1, writeOnly: true}
+      responses:
+        '200':
+          description: 已转换或已经是虚拟玩家
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, is_virtual]
+                properties:
+                  user_id: {type: integer}
+                  is_virtual: {type: boolean, const: true}
+        '400': {description: 请求体或二级密码参数无效}
+        '401': {description: 未登录或二级密码错误}
+        '403': {description: 无权限或目标为后台账号或非玩家}
+        '404': {description: 用户不存在或公开 ID 无效}
+        '409': {description: 后台二级密码尚未设置}
+        '429': {description: 二级密码验证已锁定}
+        '500': {description: 用户管理操作失败}
+        '503': {description: 用户管理或操作密码服务不可用}
   "/v1/admin/virtual-accounts":
     post:
       tags:
@@ -4513,7 +4555,7 @@ paths:
               required: [login_name, password, second_password]
               properties:
                 login_name: {type: string, pattern: '^[A-Za-z0-9_-]{3,32}$'}
-                password: {type: string, minLength: 12, maxLength: 128, writeOnly: true}
+                password: {type: string, minLength: 1, writeOnly: true, description: 不能为空且不能全为空白，不限制长度}
                 display_name: {type: string, description: 省略或空值时后端使用用户加公开ID}
                 avatar_url: {type: string, description: 可选，当前操作人已确认上传的图片storage_key}
                 second_password: {type: string, writeOnly: true}

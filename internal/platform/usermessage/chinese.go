@@ -304,7 +304,7 @@ var messages = map[string]string{
 	"invalid bet limit":                                                        "投注限额无效",
 	"parent user not found":                                                    "上级用户不存在",
 	"password changes are unavailable":                                         "密码修改服务暂不可用",
-	"password must contain at least 12 characters":                             "密码至少需要 12 个字符",
+	"password must not be empty or whitespace":                                 "密码不能为空或全为空白",
 	"password verification failed":                                             "密码验证失败",
 	"payout would overflow the wallet balance":                                 "派奖金额超出钱包余额上限",
 	"period must be today, yesterday, this_week, or last_week":                 "排行周期请选择今天、昨天、本周或上周（today、yesterday、this_week、last_week）",

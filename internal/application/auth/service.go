@@ -20,7 +20,7 @@ var ErrInvalidCredentials = errors.New("invalid login name or password")
 var ErrAccountDisabled = errors.New("account is not active")
 var ErrAuthNotConfigured = errors.New("authentication is not configured")
 var ErrInvalidLoginName = errors.New("login name must be 3-32 chars of letters, digits, '-' or '_'")
-var ErrInvalidPassword = errors.New("password must contain at least 12 characters")
+var ErrInvalidPassword = errors.New("password must not be empty or whitespace")
 var ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 var ErrInvalidInvitationCode = errors.New("invitation code is required and must be valid")
 var ErrSecondaryPasswordNotSet = errors.New("secondary password is not set")
@@ -50,16 +50,15 @@ type SessionStore interface {
 }
 
 type Service struct {
-	credentials    CredentialsReader
-	registrar      UserRegistrar
-	secret         []byte
-	ttl            time.Duration
-	now            func() time.Time
-	sessions       SessionStore
-	refreshTTL     time.Duration
-	strictPassword bool
-	loginAttempts  LoginAttemptStore
-	loginPolicy    LoginProtectionPolicy
+	credentials   CredentialsReader
+	registrar     UserRegistrar
+	secret        []byte
+	ttl           time.Duration
+	now           func() time.Time
+	sessions      SessionStore
+	refreshTTL    time.Duration
+	loginAttempts LoginAttemptStore
+	loginPolicy   LoginProtectionPolicy
 }
 
 func (service *Service) WithSessions(sessions SessionStore, ttl time.Duration) *Service {
@@ -69,11 +68,12 @@ func (service *Service) WithSessions(sessions SessionStore, ttl time.Duration) *
 }
 
 func NewService(credentials CredentialsReader, secret string, ttl time.Duration) *Service {
-	return &Service{credentials: credentials, secret: []byte(secret), ttl: ttl, now: time.Now, strictPassword: true}
+	return &Service{credentials: credentials, secret: []byte(secret), ttl: ttl, now: time.Now}
 }
 
-func (service *Service) WithStrictPasswordPolicy(enabled bool) *Service {
-	service.strictPassword = enabled
+// Deprecated: passwords only need to be nonblank in every environment.
+// Kept as a no-op for callers using the legacy configuration flag.
+func (service *Service) WithStrictPasswordPolicy(_ bool) *Service {
 	return service
 }
 
@@ -234,7 +234,7 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 	if !loginNamePattern.MatchString(loginName) {
 		return LoginResult{}, ErrInvalidLoginName
 	}
-	if service.strictPassword && len(password) < 12 {
+	if strings.TrimSpace(password) == "" {
 		return LoginResult{}, ErrInvalidPassword
 	}
 	invite, err := strconv.ParseInt(strings.TrimSpace(invitationCode), 10, 64)
@@ -336,7 +336,7 @@ func (service *Service) Logout(ctx context.Context, refreshToken string) error {
 }
 
 func (service *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
-	if strings.TrimSpace(newPassword) == "" || (service.strictPassword && len(newPassword) < 12) {
+	if strings.TrimSpace(newPassword) == "" {
 		return ErrInvalidPassword
 	}
 	currentHash, err := service.credentials.PasswordHashByUserID(ctx, userID)

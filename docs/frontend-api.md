@@ -105,7 +105,7 @@ GET /v1/tasks/bet-progress 返回 title、period_type、sort_order、max_complet
 
 1. 登录后台取得令牌，准备后台全局二级密码。
 2. 需要头像时按上传授权→上传文件→确认上传取得storage_key；不要直接传任意外部图片地址。
-3. `POST /v1/admin/users`：`{"login_name":"player008","password":"至少12字符的登录密码","display_name":"昵称","avatar_url":"已确认的storage_key","second_password":"后台二级密码"}`。头像、昵称可省略；只创建真实player和默认零钱包，不接受roles、is_virtual、初始余额。重复登录名409，不会覆盖旧账号。返回后端数字user_id，玩家之后用普通登录接口登录。
+3. `POST /v1/admin/users`：`{"login_name":"player008","password":"非空登录密码","display_name":"昵称","avatar_url":"已确认的storage_key","second_password":"后台二级密码"}`。头像、昵称可省略；只创建真实player和默认零钱包，不接受roles、is_virtual、初始余额。重复登录名409，不会覆盖旧账号。返回后端数字user_id，玩家之后用普通登录接口登录。
 4. `PUT /v1/admin/users/{userID}/agent-relation`：`{"parent_user_id":100006,"second_password":"后台二级密码"}`。ID为数字，不是UUID；仅无上级真实用户可绑定真实上级，已有上级409，自身/成环/虚拟关系400。绑定同时更新已有后代路径、记录审计。查询沿用 `GET /v1/admin/users/{userID}/agent-relation`；等级和推荐关系是两项设置，绑定不会自动升级代理。
 5. 上分仍独立调用wallet-adjustments并使用一级密码，不在创建接口内赠送真钱。
 
@@ -133,7 +133,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
   "login_name":"sadewf",
   "count":99,
   "avatar_url":"",
-  "password":"请替换为至少12字符的密码",
+  "password":"请替换为非空密码",
   "initial_balances":{"POINTS":1000,"USDT":100}
 }
 ```
@@ -212,7 +212,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 ## 用户管理、统计及金额口径补充（0052）
 
 - 重置他人登录密码：`PUT /v1/admin/users/{userID}/password`，`{"new_password":"新密码","second_password":"后台全局二级操作密码"}`。仅admin；取消12字符最低长度和128字节最高长度限制，密码不能为空或全空白，仍受HTTP请求体大小保护。前端不要额外设置长度限制。
-- 重置个人交易密码：`PUT /v1/admin/users/{userID}/secondary-password`，同上字段，不限制密码长度但不可为空或全空白；交易密码即用户个人二级密码，不是后台全局操作密码。仅admin。本次仅放开后台重置两个接口，不改变注册、自助改密和后台全局操作密码的规则；短密码安全性较低，建议仍使用长且不重复的密码。
+- 重置个人交易密码：`PUT /v1/admin/users/{userID}/secondary-password`，同上字段，不限制密码长度但不可为空或全空白；交易密码即用户个人二级密码，不是后台全局操作密码。仅admin。注册、自助改密、后台创建账号及全局操作密码也统一只要求非空且不能全为空白，不设长度上下限；生产与开发环境一致，旧 `AUTH_STRICT_PASSWORD_POLICY` 开关不再生效。前端不要额外设置长度限制，HTTP 请求体大小保护继续生效。
 - 两种重置均撤销目标会话，不保存明文、不返回密码；0067 起已绑定会话的访问令牌也失效，Socket 会检测并关闭。后台自己改登录密码仍可走原个人改密接口。
 - 禁言：`PUT /v1/admin/users/{userID}/mute`，`{"muted":true}`；解除传false。admin/operator可操作，operator不能禁言后台账号。全局聊天禁言独立于账号status，Socket发消息时检查，返回“账号已被禁言”；仍可登录、投注、读历史消息。
 - 用户搜索：`GET /v1/admin/users?q=100006&currency=USDT,JADE&user_type=real&available_min=1.5&available_max=10000&limit=50&offset=0`。`user_type`可选real/virtual，省略全部；q支持公开用户ID、登录名、昵称。币种可逗号分隔或重复传currency，任一所选钱包满足余额范围即匹配用户，余额筛选为展示单位、不得跨币种相加。返回数组，每个用户新增`is_virtual/chat_muted/balances`，balances含currency、decimals、available、frozen、available、frozen。未传币种返回全部钱包。
@@ -238,7 +238,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 | penalty | 后台人工扣分，返回正数；不是投注输款 |
 | balance | 当前可用余额加冻结余额，不受from/to影响，不是历史期末余额 |
 
-from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下单时间归属，资金按流水发生时间归属。所有统计排除虚拟账户。各币种金额独立；不要把不同币种金额直接相加，也不要把payout当net_win。此次删除`players`顶层的stake/payout/deposit/credit/balance（此前错误混合币种）；改读funds同名字段。没有资金操作但存在钱包时也返回该币种零统计。
+from/to使用RFC3339，范围左闭右开，默认最近24小时。投注按下单时间归属，资金按流水发生时间归属。所有统计排除虚拟账户及带admin/operator角色的后台账号；后台账号的返水、余额和其他资金变动不进入players或global。各币种金额独立；不要把不同币种金额直接相加，也不要把payout当net_win。此次删除`players`顶层的stake/payout/deposit/credit/balance（此前错误混合币种）；改读funds同名字段。没有资金操作但存在钱包时也返回该币种零统计。
 
 ### 排行榜新增字段及时间
 
@@ -885,7 +885,7 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 
 任务配置示例：`{"second_password":"后台全局二级密码","items":[原有任务配置对象]}`。其他参数类型和业务限制不变；查询配置不返回密码。
 
-操作密码必须为非空字符串，不能全空白，UTF-8 最多 128 字节；不限制必须数字。存储使用 Argon2id 哈希，审计仅记录修改人、级别和版本。密码不进入普通配置、响应、资金幂等记录或日志，前端不要持久化保存。
+操作密码必须为非空字符串，不能全空白，不设长度上下限；不限制必须数字，仍受 HTTP 请求体大小保护。存储使用 Argon2id 哈希，审计仅记录修改人、级别和版本。密码不进入普通配置、响应、资金幂等记录或日志，前端不要持久化保存。
 
 状态码：参数错误 400、密码错误 401、权限不足 403、未设置 409、验证锁定 429（Retry-After: 900）、服务不可用 503。按账号和用途 first/second/manage 分开计算，15 分钟内失败 5 次锁定 15 分钟，成功验证清零；一个账号不会锁死其他账号。重置密码不会提前解除已触发的验证锁定。
 
@@ -1138,3 +1138,18 @@ Socket删除事件示例：
 用户列表 `GET /v1/admin/users?currency=USDT` 按 USDT 可用余额降序；多币种时按第一个币种，缺少该钱包的用户排最后，不跨币种相加。同额按创建时间、公开 ID 降序；排序先于分页。未传币种保留创建时间、公开 ID 降序。
 
 `GET /v1/admin/bets?player_type=real` 查询真实用户；`player_type=virtual` 查询虚拟用户。省略、空值或 `all` 查询全部，其他值返回 400。按用户当前 `is_virtual` 属性过滤，可与 user、game_type、currency、status、from/to、limit/offset 组合，返回结构不变。
+
+
+## 将真实玩家转换为虚拟账户
+
+`PUT /v1/admin/users/{userID}/virtual`，使用五位公开用户 ID、admin/operator 令牌，请求体：
+
+```json
+{"second_password":"后台全局二级操作密码"}
+```
+
+成功返回 `200`：`{"user_id":10001,"is_virtual":true}`。仅支持真实玩家转虚拟玩家；禁止转换 admin/operator 或非玩家账号。已是虚拟玩家时重复调用仍成功，不重复写转换审计；不支持传入 is_virtual=false 转回真实账户。
+
+转换与审计同事务提交，保留账号、钱包余额、代理关系和历史订单。看板按当前用户类型过滤，因此转换后该用户的历史和新增订单、资金数据均不计入看板，历史统计也会变化。历史真实投注按原资金模式正常结算；后续新投注为模拟订单，不扣钱包余额。虚拟账户禁止提现、下分及红包操作，不自动启用挂机计划。后台订单列表可用 player_type=virtual 查询。
+
+无权限/目标类型不允许返回403；用户不存在或ID无效404；参数错误400；未登录或二级密码错误401；二级密码未设置409；验证锁定429；服务不可用503。

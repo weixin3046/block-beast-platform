@@ -10,6 +10,7 @@ import (
 )
 
 type UserControlService interface {
+	ConvertUserToVirtual(context.Context, string, int64) error
 	ResetUserPassword(context.Context, string, int64, string, string) error
 	SetUserMuted(context.Context, string, int64, bool) error
 	SearchUsers(context.Context, operations.UserSearch) ([]operations.User, error)
@@ -87,4 +88,26 @@ func (s *Server) setUserMuted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+func (s *Server) convertUserToVirtual(w http.ResponseWriter, r *http.Request) {
+	var in struct{}
+	if !decodeSecurity(w, r, &in) {
+		return
+	}
+	if s.userControls == nil {
+		writeJSON(w, 503, map[string]string{"error": "用户管理服务不可用"})
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("userID"), 10, 64)
+	if err != nil || id < 10001 || id > 99999 {
+		userControlError(w, operations.ErrUserNotFound)
+		return
+	}
+	claims, _ := ClaimsFromContext(r.Context())
+	if err = s.userControls.ConvertUserToVirtual(r.Context(), claims.Subject, id); err != nil {
+		userControlError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user_id": id, "is_virtual": true})
 }

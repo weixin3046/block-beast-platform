@@ -47,6 +47,7 @@ func (s *Service) dashboardFunds(ctx context.Context, result *Dashboard, from, t
  sum(w.available_minor::numeric+w.frozen_minor)
  FROM wallets w JOIN users u ON u.id=w.user_id JOIN currencies c ON c.code=w.currency LEFT JOIN b ON b.wallet_id=w.id LEFT JOIN l ON l.wallet_id=w.id
  WHERE NOT u.is_virtual
+   AND NOT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code IN ('admin','operator'))
  GROUP BY GROUPING SETS((u.public_id,w.currency,c.decimals),(w.currency,c.decimals))
  HAVING GROUPING(u.public_id)=1 OR u.public_id=ANY($3::bigint[])
  ORDER BY w.currency,COALESCE(u.public_id,0)`, from, to, ids)

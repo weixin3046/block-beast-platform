@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -305,8 +306,8 @@ func TestRegisterValidatesInput(t *testing.T) {
 	if _, err := newService().Register(context.Background(), "bad name!", "", "valid-password-12", "10001"); !errors.Is(err, ErrInvalidLoginName) {
 		t.Fatalf("invalid chars error = %v, want ErrInvalidLoginName", err)
 	}
-	if _, err := newService().Register(context.Background(), "valid-name", "", "short", "10001"); !errors.Is(err, ErrInvalidPassword) {
-		t.Fatalf("short password error = %v, want ErrInvalidPassword", err)
+	if _, err := newService().Register(context.Background(), "valid-name", "", "", "10001"); !errors.Is(err, ErrInvalidPassword) {
+		t.Fatalf("empty password error = %v, want ErrInvalidPassword", err)
 	}
 	service := NewService(nil, testSecret, time.Minute)
 	if _, err := service.Register(context.Background(), "valid-name", "", "valid-password-12", "10001"); !errors.Is(err, ErrAuthNotConfigured) {
@@ -317,12 +318,70 @@ func TestRegisterValidatesInput(t *testing.T) {
 	}
 }
 
-func TestDevelopmentCanDisablePasswordLengthPolicy(t *testing.T) {
-	service := NewService(stubCredentials{}, testSecret, time.Minute).
-		WithStrictPasswordPolicy(false).
-		WithRegistrar(stubRegistrar{})
-	if _, err := service.Register(context.Background(), "dev-user", "", "123", "10001"); err != nil {
-		t.Fatalf("development registration error = %v", err)
+func TestRegisterRequiresOnlyNonblankPassword(t *testing.T) {
+	for _, environment := range []string{"development", "production"} {
+		t.Run(environment, func(t *testing.T) {
+			t.Setenv("APP_ENV", environment)
+			for _, legacyStrict := range []bool{false, true} {
+				service := NewService(stubCredentials{}, testSecret, time.Minute).
+					WithStrictPasswordPolicy(legacyStrict).WithRegistrar(stubRegistrar{})
+				for _, password := range []string{"a", strings.Repeat("中", 400), " a "} {
+					if _, err := service.Register(context.Background(), "new-user", "", password, "10001"); err != nil {
+						t.Fatalf("nonblank password rejected: %v", err)
+					}
+				}
+				for _, password := range []string{"", " \t\n", "　"} {
+					if _, err := service.Register(context.Background(), "new-user", "", password, "10001"); !errors.Is(err, ErrInvalidPassword) {
+						t.Fatalf("blank password error = %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
+type passwordChangeCredentials struct {
+	stubCredentials
+	hash string
+}
+
+func (c *passwordChangeCredentials) PasswordHashByUserID(context.Context, string) (string, error) {
+	return c.hash, nil
+}
+
+func (c *passwordChangeCredentials) UpdatePasswordHash(_ context.Context, _ string, hash string) error {
+	c.hash = hash
+	return nil
+}
+
+func TestChangePasswordRequiresOnlyNonblankPassword(t *testing.T) {
+	hash, err := identity.HashPassword("old-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials := &passwordChangeCredentials{hash: hash}
+	service := NewService(credentials, testSecret, time.Minute).WithStrictPasswordPolicy(true)
+	current := "old-password"
+	for _, next := range []string{"a", strings.Repeat("中", 400), " a "} {
+		if err := service.ChangePassword(context.Background(), "user-1", current, next); err != nil {
+			t.Fatal(err)
+		}
+		if !identity.VerifyPassword(credentials.hash, next) {
+			t.Fatal("new password was not stored intact")
+		}
+		current = next
+	}
+	before := credentials.hash
+	for _, next := range []string{"", " \t\n", "　"} {
+		if err := service.ChangePassword(context.Background(), "user-1", current, next); !errors.Is(err, ErrInvalidPassword) {
+			t.Fatalf("blank password error = %v", err)
+		}
+	}
+	if err := service.ChangePassword(context.Background(), "user-1", "wrong", "b"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong current password error = %v", err)
+	}
+	if credentials.hash != before {
+		t.Fatal("failed changes modified the password")
 	}
 }
 

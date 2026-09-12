@@ -31,7 +31,7 @@ type Service struct{ pool *pgxpool.Pool }
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 func validLevel(level string) bool           { return level == "first" || level == "second" }
 func validPassword(password string) bool {
-	return strings.TrimSpace(password) != "" && len(password) <= 128
+	return strings.TrimSpace(password) != ""
 }
 
 func authorized(ctx context.Context, tx pgx.Tx, actor string, adminOnly bool) error {
@@ -142,7 +142,7 @@ func (s *Service) Verify(ctx context.Context, actor, level, password string) err
 // Set 仅 admin 可设置/重置全局密码；验证当前登录密码，不需要旧操作密码。
 // 密码哈希、修改审计原子提交，不在通用配置表、响应或审计中保存密码。
 func (s *Service) Set(ctx context.Context, actor, level, loginPassword, password string) error {
-	if !validLevel(level) || !validPassword(password) || loginPassword == "" || len(loginPassword) > 1024 {
+	if !validLevel(level) || !validPassword(password) || !validPassword(loginPassword) {
 		return ErrInvalid
 	}
 	tx, err := s.pool.Begin(ctx)

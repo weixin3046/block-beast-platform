@@ -60,7 +60,7 @@ func (s *Service) CreatePlayerAccount(ctx context.Context, in PlayerAccountInput
 	in.LoginName = strings.TrimSpace(in.LoginName)
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.AvatarURL = strings.TrimSpace(in.AvatarURL)
-	if in.ActorUserID == "" || !playerLoginNamePattern.MatchString(in.LoginName) || len(in.Password) < 12 || len(in.Password) > 128 || len(in.DisplayName) > 100 || len(in.AvatarURL) > 2048 {
+	if in.ActorUserID == "" || !playerLoginNamePattern.MatchString(in.LoginName) || strings.TrimSpace(in.Password) == "" || len(in.DisplayName) > 100 || len(in.AvatarURL) > 2048 {
 		return PlayerAccount{}, ErrInvalidPlayerAccount
 	}
 	passwordHash, err := identity.HashPassword(in.Password)

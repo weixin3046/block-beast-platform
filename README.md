@@ -226,3 +226,21 @@ ssh root@58.87.64.208 '
 ## LULU 彩石通道
 
 生产配置和 `scripts/deploy-production.sh` 默认启动 `lulu-worker`，无需额外 profile。`cmd/lulu-worker` 独立执行噜噜到账采集和审核后的转赠。平台 ORIGIN_STONE 与彩石 1:1，转赠为整数数量；玩家按单填写噜噜 UID，无长期绑定。通道默认关闭，原 Lulu 项目保持原样。玩家端及管理端接口见 [前端接入文档](docs/frontend-api.md#lulu-彩石充提)；协议实现与部署见 [LULU 后端说明](docs/lulu-integration.md)。
+
+### 宝塔服务器发布
+
+宝塔安装模式不使用 Docker Compose。开发机通过以下命令构建 Linux 二进制、上传新
+发布目录、停止应用、补跑迁移、原子切换 `/opt/block-beast/current`、重启宝塔
+Supervisor 服务并执行健康检查：
+
+```bash
+DEPLOY_HOST=root@your-server ./scripts/deploy-baota.sh
+```
+
+默认会运行 `go test ./...`；只在已经完成同等验证的紧急发布中才使用
+`SKIP_TEST=1`。脚本不上传或覆盖服务器上的 `/etc/block-beast/block-beast.env`。
+迁移失败时不会切换当前版本，并会尝试恢复原有应用进程。
+
+发布包的五个可执行程序统一位于 `bin/`，与服务启动路径
+`/opt/block-beast/current/bin/<进程名>` 保持一致。远程脚本在停止服务前检查
+这些文件及迁移脚本是否存在、可执行；目录不匹配时直接拒绝发布。
