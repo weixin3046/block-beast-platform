@@ -15,7 +15,9 @@ import (
 	"github.com/block-beast/platform/internal/application/betting"
 	chainapp "github.com/block-beast/platform/internal/application/chain"
 	"github.com/block-beast/platform/internal/application/credit"
+	"github.com/block-beast/platform/internal/application/externaldraw"
 	"github.com/block-beast/platform/internal/application/leaderboard"
+	luluapp "github.com/block-beast/platform/internal/application/lulu"
 	"github.com/block-beast/platform/internal/application/outbox"
 	"github.com/block-beast/platform/internal/application/pqpaassets"
 	"github.com/block-beast/platform/internal/application/redpacket"
@@ -26,6 +28,7 @@ import (
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
+	"github.com/block-beast/platform/internal/platform/luludraw"
 	"github.com/block-beast/platform/internal/platform/natsjs"
 	"github.com/block-beast/platform/internal/platform/pqpa"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -90,7 +93,10 @@ func main() {
 	leaderboardTicker := time.NewTicker(cfg.LeaderboardRefresh)
 	defer leaderboardTicker.Stop()
 	resultSource := settlement.NewCompositeResultSourceWithWebSocket(cfg.TronGridAPIKey, cfg.TronGridGRPCEndpoint, cfg.OkxRESTURL, cfg.OkxWebSocketURL)
+	resultSource.WithLulu(pool)
 	defer resultSource.Close()
+	drawCancel, drawDone := startLuluDraw(ctx, logger, pool, cfg)
+	defer func() { drawCancel(); <-drawDone }()
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
 	defer ticker.Stop()
 	settlementTicker := time.NewTicker(cfg.SettlementPollInterval)
@@ -139,6 +145,38 @@ func main() {
 			refreshLeaderboards(ctx, logger, leaderboardService)
 		}
 	}
+}
+
+func startLuluDraw(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (context.CancelFunc, <-chan struct{}) {
+	drawCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	close(done)
+	if !cfg.LuluDrawEnabled {
+		return cancel, done
+	}
+	settings := luluapp.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey)
+	runtime, err := settings.RuntimeConfig(ctx)
+	if err != nil || !runtime.Enabled {
+		logger.Warn("Lulu draw subscription is not configured")
+		return cancel, done
+	}
+	client, err := luludraw.NewClient(runtime.Token, runtime.ReceiverUID, runtime.ProtocolKey, cfg.LuluDrawGames)
+	if err != nil {
+		logger.Warn("Lulu draw subscription configuration is invalid")
+		return cancel, done
+	}
+	syncService := externaldraw.NewService(pool, cfg.LuluDrawCloseBeforeSec)
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = client.Run(drawCtx, func(event luludraw.Event) {
+			if handleErr := syncService.Handle(drawCtx, event); handleErr != nil && drawCtx.Err() == nil {
+				logger.Error("Lulu draw event sync failed", "game", event.Game, "event", event.Kind, "round", event.Round, "error", handleErr)
+			}
+		})
+	}()
+	logger.Info("Lulu draw subscription started", "games", cfg.LuluDrawGames)
+	return cancel, done
 }
 
 func runVirtualAccounts(ctx context.Context, logger *slog.Logger, service *virtualbot.Service) {

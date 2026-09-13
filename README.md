@@ -127,6 +127,12 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 | `GET /v1/hash/menus` | 查询固定六个赔率房间、六个共享哈希区块及按币种配置的三类玩法参数。 |
 | `GET /v1/hash/trends?game_type=hash_9&limit=100` | 查询共享哈希玩法的尾数、大小、单双走势及当前遗漏/连开统计。 |
 | `GET /v1/external-draws/{game}/history?count=100` | 查询星海逃杀或怒翎破阵的已解密外部开奖历史。仅已登录用户；上游未配置或不可用时分别返回 503/502。 |
+
+### Lulu 三游戏直连开奖
+
+Worker 可选地订阅怒翎破阵（`lh`）、星海逃杀（`xdy`）和绿茵疾冲（`race`）的 Lulu 实时轮次与开奖结果。启用 `LULU_DRAW_ENABLED=true` 后，它复用后台 Lulu 上下分配置中加密保存的登录令牌、UID 与协议密钥；凭据不会写入日志或数据库。`LULU_DRAW_GAMES` 控制订阅游戏，`LULU_DRAW_CLOSE_BEFORE_SECONDS` 控制平台提前封盘秒数。
+
+平台自身仍是投注、赔率、资金、账本与派奖的唯一权威。后台通过既有游戏类型接口维护 `source:"lulu_ws"` 的 `extras.external_game` 和 `extras.result_map`；配置修改仅影响后续投注，已下注订单沿用赔率快照。
 | `GET/PUT /v1/admin/hash/config` | 通过版本号原子查询或更新哈希房间名称、顺序、状态、倍率和累计投注上限。仅 operator/admin。 |
 | `GET /v1/admin/game-rooms` | 查询固定六个哈希房间。仅 operator/admin。 |
 | `GET /v1/admin/game-types` | 查询固定六个共享哈希玩法。仅 operator/admin。 |

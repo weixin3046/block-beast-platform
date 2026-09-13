@@ -9,6 +9,9 @@ import (
 
 type Config struct {
 	LuluEncryptionKey      string
+	LuluDrawEnabled        bool
+	LuluDrawGames          []string
+	LuluDrawCloseBeforeSec int
 	Environment            string
 	APIAddress             string
 	APIAllowedOrigins      []string
@@ -55,6 +58,9 @@ func Load() Config {
 	environment := valueOrDefault("APP_ENV", "development")
 	return Config{
 		LuluEncryptionKey:      os.Getenv("LULU_CONFIG_ENCRYPTION_KEY"),
+		LuluDrawEnabled:        boolOrDefault("LULU_DRAW_ENABLED", false),
+		LuluDrawGames:          splitOrDefault("LULU_DRAW_GAMES", []string{"lh", "xdy", "race"}),
+		LuluDrawCloseBeforeSec: intOrDefault("LULU_DRAW_CLOSE_BEFORE_SECONDS", 3),
 		Environment:            environment,
 		APIAddress:             valueOrDefault("API_ADDRESS", ":8080"),
 		APIAllowedOrigins:      splitOrDefault("API_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
