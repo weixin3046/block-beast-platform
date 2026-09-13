@@ -73,19 +73,30 @@ func (service *Service) createRounds(ctx context.Context, tx pgx.Tx, game string
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	gameTypeIDs := make([]string, 0)
 	for rows.Next() {
 		var gameTypeID string
 		if err = rows.Scan(&gameTypeID); err != nil {
+			rows.Close()
 			return err
 		}
+		gameTypeIDs = append(gameTypeIDs, gameTypeID)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	// PostgreSQL does not permit another statement on the transaction while the
+	// result set is open. Close the query before inserting each game round.
+	rows.Close()
+	for _, gameTypeID := range gameTypeIDs {
 		if _, err = tx.Exec(ctx, `INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at)
 			VALUES($1,$2,$3,'open',$4,$5) ON CONFLICT(game_type_id,sequence) DO NOTHING`,
 			uuid.NewString(), gameTypeID, sequence, betClosesAt, closeAt.UTC()); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, game string, sequence int64, result []string) error {
