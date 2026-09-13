@@ -59,8 +59,58 @@ func (service *Service) Handle(ctx context.Context, event luludraw.Event) error 
 		if err = service.confirmResult(ctx, tx, event.Game, round, event.Result); err != nil {
 			return err
 		}
+		// Some upstream game messages contain only the official result and no
+		// advance countdown. Preserve those issues as closed, non-bettable
+		// rounds so an unavailable countdown frame cannot make history jump.
+		if err = service.createResultRounds(ctx, tx, event.Game, round, event.CloseAt); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
+}
+
+func (service *Service) createResultRounds(ctx context.Context, tx pgx.Tx, game string, sequence int64, closeAt *time.Time) error {
+	closedAt, needed := resultRoundClosedAt(time.Now().UTC(), closeAt)
+	if !needed {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM game_types
+		WHERE enabled=true AND rules->>'source'='lulu_ws' AND rules->'extras'->>'external_game'=$1`, game)
+	if err != nil {
+		return err
+	}
+	gameTypeIDs := make([]string, 0)
+	for rows.Next() {
+		var gameTypeID string
+		if err = rows.Scan(&gameTypeID); err != nil {
+			rows.Close()
+			return err
+		}
+		gameTypeIDs = append(gameTypeIDs, gameTypeID)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, gameTypeID := range gameTypeIDs {
+		if _, err = tx.Exec(ctx, `INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at)
+			VALUES($1,$2,$3,'closed',$4,$4) ON CONFLICT(game_type_id,sequence) DO NOTHING`,
+			uuid.NewString(), gameTypeID, sequence, closedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resultRoundClosedAt(now time.Time, closeAt *time.Time) (time.Time, bool) {
+	if closeAt == nil {
+		return now, true
+	}
+	if closeAt.After(now) {
+		return time.Time{}, false
+	}
+	return closeAt.UTC(), true
 }
 
 func (service *Service) createRounds(ctx context.Context, tx pgx.Tx, game string, sequence int64, closeAt time.Time) error {
@@ -112,14 +162,14 @@ func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, game strin
 		return err
 	}
 	if status == "confirmed" {
-		if string(saved) != string(encoded) {
+		if !sameDrawResult(saved, result) {
 			_, err = tx.Exec(ctx, `UPDATE external_draw_rounds SET status='conflict',conflict_outcome=$4,updated_at=now()
 				WHERE source=$1 AND game=$2 AND external_round=$3`, source, game, sequence, encoded)
 			if err != nil {
 				return err
 			}
 			_, err = tx.Exec(ctx, `INSERT INTO audit_logs(id,action,target_type,target_id,payload)
-				VALUES($1,'lulu_draw.result_conflict','external_draw_round',$2,jsonb_build_object('game',$3,'external_round',$4))`,
+				VALUES($1,'lulu_draw.result_conflict','external_draw_round',$2,jsonb_build_object('game',$3::text,'external_round',$4::bigint))`,
 				uuid.NewString(), source+":"+game+":"+strconv.FormatInt(sequence, 10), game, sequence)
 		}
 		return err
@@ -133,3 +183,21 @@ func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, game strin
 }
 
 func validGame(game string) bool { return game == "lh" || game == "xdy" || game == "race" }
+
+func sameDrawResult(saved json.RawMessage, result []string) bool {
+	var values []string
+	if json.Unmarshal(saved, &values) != nil || len(values) == 0 || len(values) != len(result) {
+		return false
+	}
+	counts := make(map[string]int, len(values))
+	for _, value := range values {
+		counts[value]++
+	}
+	for _, value := range result {
+		counts[value]--
+		if counts[value] < 0 {
+			return false
+		}
+	}
+	return true
+}

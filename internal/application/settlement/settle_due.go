@@ -27,7 +27,22 @@ func (service *Service) SettleDueRounds(ctx context.Context, source ResultSource
 		FROM rounds
 		JOIN game_types ON game_types.id = rounds.game_type_id
 		WHERE rounds.status IN ('closed', 'settling') AND rounds.result_at <= now()
-		ORDER BY rounds.result_at, rounds.id
+		-- Lulu issues without a confirmed upstream result remain retryable, but
+		-- must not occupy the batch ahead of newer confirmed issues. Otherwise a
+		-- historical gap can indefinitely hide every subsequent result from the
+		-- game page and block its settlement.
+		ORDER BY CASE
+			WHEN game_types.rules->>'source'='lulu_ws' AND EXISTS (
+				SELECT 1 FROM external_draw_rounds draw
+				WHERE draw.source='lulu_ws'
+					AND draw.game=game_types.rules->'extras'->>'external_game'
+					AND draw.external_round=rounds.sequence
+					AND draw.status='confirmed'
+			) THEN 0
+			WHEN game_types.rules->>'source'='tron_hash' THEN 1
+			ELSE 2
+		END,
+			rounds.result_at, rounds.id
 		LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

@@ -150,7 +150,7 @@ func main() {
 	options = append(options, httpapi.WithLoginWhitelist(operationsService))
 	options = append(options, httpapi.WithAdminCompletion(operationsService, operationsService, agent.NewService(pool)))
 	options = append(options, httpapi.WithPhrases(operationsService), httpapi.WithUserControls(operationsService))
-	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithAnalytics(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService), httpapi.WithHashConfig(operationsService), httpapi.WithPublicUserResolver(identityRepository))
+	options = append(options, httpapi.WithUserAdmin(operationsService), httpapi.WithOperations(operationsService), httpapi.WithAnalytics(operationsService), httpapi.WithGameAdmin(operationsService), httpapi.WithGameRooms(operationsService), httpapi.WithHashConfig(operationsService), httpapi.WithLuluMenus(operationsService), httpapi.WithPublicUserResolver(identityRepository))
 	options = append(options, httpapi.WithRobotPlans(virtualbot.NewService(pool, bettingService)))
 	if cfg.PQPAAPISecret == "" {
 		logger.Warn("PQPA_API_SECRET is not set; chain deposit webhook is disabled")

@@ -181,3 +181,13 @@ func TestParseRulesAcceptsLuluResultMap(t *testing.T) {
 		t.Fatalf("source = %q, want lulu_ws", rules.Source)
 	}
 }
+
+func TestParseRulesAcceptsSharedLuluGameWithoutPlayResultMap(t *testing.T) {
+	rules, err := ParseRules(json.RawMessage(`{"outcomes":["1","2"],"payout_multiplier":1,"source":"lulu_ws","extras":{"external_game":"lh","lulu_shared":true}}`))
+	if err != nil {
+		t.Fatalf("parse shared lulu rules: %v", err)
+	}
+	if rules.Source != "lulu_ws" {
+		t.Fatalf("source = %q, want lulu_ws", rules.Source)
+	}
+}

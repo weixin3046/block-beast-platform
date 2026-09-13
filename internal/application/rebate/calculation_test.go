@@ -23,6 +23,8 @@ func TestCalculate(t *testing.T) {
 		{"skip equal and lower levels", "guess", 1000000, 0, []Ancestor{{Level: 2, RatePerMille: 16}, {Level: 2, RatePerMille: 16}, {Level: 1, RatePerMille: 14}, {Level: 3, RatePerMille: 20}}, []int64{16000, 4000}},
 		{"virtual intermediary", "road", 1000000, 0, []Ancestor{{Level: 1, RatePerMille: 14, IsVirtual: true}, {Level: 2, RatePerMille: 16}}, []int64{16000}},
 		{"round down", "road", 1, 0, []Ancestor{{Level: 1, RatePerMille: 1}}, nil},
+		{"lulu odd even uses stake", "odd_even", 1000000, 1970000, []Ancestor{{Level: 1, RatePerMille: 14}}, []int64{14000}},
+		{"lulu direct uses stake", "direct", 1000000, 7500000, []Ancestor{{Level: 1, RatePerMille: 14}}, []int64{14000}},
 		{"maximum without overflow", "road", math.MaxInt64, 0, []Ancestor{{Level: 1, RatePerMille: 1000}}, []int64{math.MaxInt64}},
 	}
 	for _, tt := range tests {

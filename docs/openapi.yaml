@@ -1423,6 +1423,7 @@ paths:
       tags:
       - Operations
       summary: 查询各玩法当前轮次与区块倒计时
+      description: 每个启用游戏返回一项。Lulu 取最新期；其他游戏取最早未完成期，无未完成期时取最新历史期。尚无轮次时 sequence 为 0、status 为 waiting、bet_closes_at 和 result_at 为 null。前端不得对 waiting 或已结束轮次启动投注倒计时。
       security:
       - bearerAuth: []
       responses:
@@ -2454,6 +2455,64 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/HashConfig"
+  "/v1/lulu/menus":
+    get:
+      tags:
+      - Rounds
+      operationId: listLuluMenus
+      summary: 查询三游戏共享轮次的房间、玩法和独立下注配置
+      description: 返回星海逃杀、怒翎破阵、绿茵疾冲共享的六个赔率房间，以及每个游戏、房间、玩法和币种的倍率与下注上下限。金额均为实际显示金额。
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Lulu 菜单聚合配置。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/LuluMenus"
+  "/v1/admin/lulu/room-play-config":
+    put:
+      tags:
+      - Admin
+      operationId: updateLuluRoomPlayConfig
+      summary: 更新三游戏指定房间玩法的倍率与下注限额
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/LuluRoomPlayConfigUpdate"
+      responses:
+        '200':
+          description: 更新后的完整 Lulu 菜单。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/LuluMenus"
+  "/v1/admin/lulu/room-play-configs":
+    put:
+      tags:
+      - Admin
+      operationId: updateLuluRoomPlayConfigs
+      summary: 批量更新三游戏房间玩法的倍率与下注限额
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/LuluRoomPlayConfigsUpdate"
+      responses:
+        '200':
+          description: 更新后的完整 Lulu 菜单。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/LuluMenus"
   "/v1/hash/trends":
     get:
       tags:
@@ -7324,6 +7383,124 @@ components:
           type: array
           items:
             "$ref": "#/components/schemas/HashRoomConfig"
+    LuluPlayCurrencyConfig:
+      type: object
+      additionalProperties: false
+      required: [currency, payout_multiplier, payout_divisor, min_stake, max_stake]
+      properties:
+        currency:
+          type: string
+        payout_multiplier:
+          type: integer
+          format: int64
+        payout_divisor:
+          type: integer
+          format: int64
+        min_stake:
+          type: string
+          description: 按 currency 精度格式化的实际金额
+        max_stake:
+          type: string
+          description: 按 currency 精度格式化的实际金额
+    LuluMenuPlay:
+      type: object
+      additionalProperties: false
+      required: [code, name, outcomes, dodge_mode, currency_configs]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        outcomes:
+          type: array
+          items:
+            type: string
+        dodge_mode:
+          type: boolean
+        currency_configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/LuluPlayCurrencyConfig'
+    LuluMenuRoom:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, sort_order, plays]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        sort_order:
+          type: integer
+        plays:
+          type: array
+          items:
+            $ref: '#/components/schemas/LuluMenuPlay'
+    LuluMenuGame:
+      type: object
+      additionalProperties: false
+      required: [code, name, rooms]
+      properties:
+        code:
+          type: string
+          enum: [lulu-xdy, lulu-lh, lulu-race]
+        name:
+          type: string
+        rooms:
+          type: array
+          items:
+            $ref: '#/components/schemas/LuluMenuRoom'
+    LuluMenus:
+      type: object
+      additionalProperties: false
+      required: [server_time, games]
+      properties:
+        server_time:
+          type: string
+          format: date-time
+        games:
+          type: array
+          items:
+            $ref: '#/components/schemas/LuluMenuGame'
+    LuluRoomPlayConfigUpdate:
+      type: object
+      additionalProperties: false
+      required: [second_password, game_type, room_id, play_code, currency_configs]
+      properties:
+        second_password:
+          type: string
+          format: password
+          writeOnly: true
+        game_type:
+          type: string
+          enum: [lulu-xdy, lulu-lh, lulu-race]
+        room_id:
+          type: string
+          format: uuid
+        play_code:
+          type: string
+        currency_configs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/LuluPlayCurrencyConfig'
+    LuluRoomPlayConfigsUpdate:
+      type: object
+      additionalProperties: false
+      required: [second_password, configs]
+      properties:
+        second_password:
+          type: string
+          format: password
+          writeOnly: true
+        configs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/LuluRoomPlayConfigUpdate'
     HashConfigUpdate:
       type: object
       additionalProperties: false

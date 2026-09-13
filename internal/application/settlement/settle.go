@@ -114,6 +114,13 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		return SettlementResult{}, err
 	}
 	rows.Close()
+	luluPlays := map[string]game.LuluPlay(nil)
+	if sharedLuluRules(rules) {
+		luluPlays, err = loadLuluPlaysTx(ctx, tx, roundID)
+		if err != nil {
+			return SettlementResult{}, err
+		}
+	}
 
 	// Gather every source and recipient before taking any wallet lock. Task and
 	// spin transactions lock all of a user's currencies in the same UUID order.
@@ -144,7 +151,11 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			return SettlementResult{}, e
 		}
 		var payout int64
-		if hashSelectionWins(b.playMode, b.selection, outcome) {
+		won, winErr := selectionWins(rules, luluPlays, b.playMode, b.selection, outcome)
+		if winErr != nil {
+			return SettlementResult{}, winErr
+		}
+		if won {
 			m, d := rules.PayoutMultiplier, rules.PayoutScale()
 			if b.payoutMultiplier != nil && b.payoutDivisor != nil {
 				m, d = *b.payoutMultiplier, *b.payoutDivisor
@@ -212,9 +223,9 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		if err := tx.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1 FOR UPDATE`, bet.walletID).Scan(&availableMinor); err != nil {
 			return SettlementResult{}, err
 		}
-		won := rules.SelectionWins(bet.selection, outcome)
-		if bet.playMode != "" {
-			won = hashSelectionWins(bet.playMode, bet.selection, outcome)
+		won, winErr := selectionWins(rules, luluPlays, bet.playMode, bet.selection, outcome)
+		if winErr != nil {
+			return SettlementResult{}, winErr
 		}
 		// 只有实际结算为输或赢的投注才属于活动任务有效流水。取消和退款投注
 		// 不会进入 SettleRound，因此从源头上不会累计，也不存在领取后再回退的问题。
@@ -334,6 +345,50 @@ func hashSelectionWins(mode string, raw json.RawMessage, outcome []string) bool 
 	default:
 		return false
 	}
+}
+
+func sharedLuluRules(rules game.Rules) bool {
+	var extras struct {
+		LuluShared bool `json:"lulu_shared"`
+	}
+	return rules.Source == "lulu_ws" && json.Unmarshal(rules.Extras, &extras) == nil && extras.LuluShared
+}
+
+func loadLuluPlaysTx(ctx context.Context, tx pgx.Tx, roundID string) (map[string]game.LuluPlay, error) {
+	rows, err := tx.Query(ctx, `SELECT p.code,p.outcomes,p.result_map,p.dodge_mode
+		FROM lulu_play_configs p JOIN rounds r ON r.game_type_id=p.game_type_id
+		WHERE r.id=$1 AND p.enabled=true`, roundID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	plays := make(map[string]game.LuluPlay)
+	for rows.Next() {
+		var play game.LuluPlay
+		var outcomes, resultMap json.RawMessage
+		if err := rows.Scan(&play.Code, &outcomes, &resultMap, &play.DodgeMode); err != nil {
+			return nil, err
+		}
+		if json.Unmarshal(outcomes, &play.Outcomes) != nil || json.Unmarshal(resultMap, &play.ResultMap) != nil {
+			return nil, game.ErrInvalidRules
+		}
+		plays[play.Code] = play
+	}
+	return plays, rows.Err()
+}
+
+func selectionWins(rules game.Rules, luluPlays map[string]game.LuluPlay, mode string, selection json.RawMessage, outcome []string) (bool, error) {
+	if sharedLuluRules(rules) {
+		play, ok := luluPlays[mode]
+		if !ok {
+			return false, game.ErrInvalidRules
+		}
+		return play.SelectionWins(selection, outcome), nil
+	}
+	if mode != "" {
+		return hashSelectionWins(mode, selection, outcome), nil
+	}
+	return rules.SelectionWins(selection, outcome), nil
 }
 
 func settledResult(ctx context.Context, tx pgx.Tx, roundID string, rawOutcome json.RawMessage, settledAt *time.Time) (SettlementResult, error) {

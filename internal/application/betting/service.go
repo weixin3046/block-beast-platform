@@ -488,13 +488,14 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 
 	var status game.RoundStatus
 	var betClosesAt time.Time
+	var gameTypeCode string
 	var rawRules json.RawMessage
 	err = tx.QueryRow(ctx, `
-		SELECT rounds.status, rounds.bet_closes_at, game_types.rules
+		SELECT rounds.status, rounds.bet_closes_at, game_types.code, game_types.rules
 		FROM rounds
 		JOIN game_types ON game_types.id=rounds.game_type_id
 		WHERE rounds.id = $1
-		FOR UPDATE OF rounds`, request.RoundID).Scan(&status, &betClosesAt, &rawRules)
+		FOR UPDATE OF rounds`, request.RoundID).Scan(&status, &betClosesAt, &gameTypeCode, &rawRules)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PlacedBet{}, ErrRoundNotFound
 	}
@@ -504,20 +505,40 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 	if status != game.RoundOpen || !time.Now().UTC().Before(betClosesAt) {
 		return PlacedBet{}, game.ErrBettingClosed
 	}
-	var earlierUnfinished bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rounds prior JOIN rounds target
-	 ON prior.game_type_id=target.game_type_id AND prior.sequence<target.sequence
-	 WHERE target.id=$1 AND prior.status IN ('scheduled','open','closed','settling'))`, request.RoundID).Scan(&earlierUnfinished); err != nil {
-		return PlacedBet{}, err
-	}
-	if earlierUnfinished {
-		return PlacedBet{}, game.ErrBettingClosed
-	}
 	rules, err := game.ParseRules(rawRules)
 	if err != nil {
 		return PlacedBet{}, err
 	}
+	if gameTypeCode == "lulu-xdy" && luluXDYBettingClosedAt(time.Now()) {
+		return PlacedBet{}, game.ErrBettingClosed
+	}
+	if rules.Source == "lulu_ws" {
+		// Upstream issues may remain closed while their official result is being
+		// reconciled. They must not block betting on the newest upstream issue.
+		// Conversely, never accept a stale open Lulu round once a later issue
+		// has been received.
+		var laterRound bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rounds later JOIN rounds target
+			ON later.game_type_id=target.game_type_id AND later.sequence>target.sequence
+			WHERE target.id=$1 AND later.status IN ('scheduled','open','closed','settling'))`, request.RoundID).Scan(&laterRound); err != nil {
+			return PlacedBet{}, err
+		}
+		if laterRound {
+			return PlacedBet{}, game.ErrBettingClosed
+		}
+	} else {
+		var earlierUnfinished bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rounds prior JOIN rounds target
+			ON prior.game_type_id=target.game_type_id AND prior.sequence<target.sequence
+			WHERE target.id=$1 AND prior.status IN ('scheduled','open','closed','settling'))`, request.RoundID).Scan(&earlierUnfinished); err != nil {
+			return PlacedBet{}, err
+		}
+		if earlierUnfinished {
+			return PlacedBet{}, game.ErrBettingClosed
+		}
+	}
 	payoutMultiplier, payoutDivisor := rules.PayoutMultiplier, rules.PayoutScale()
+	sharedLulu := sharedLuluRules(rules)
 	if sharedHashRules(rules) {
 		if request.GameRoomID == "" || !validHashSelection(request.PlayMode, request.Selection) {
 			return PlacedBet{}, ErrHashRoomRequired
@@ -556,6 +577,41 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 		}
 		if existingStake > math.MaxInt64-request.StakeMinor || existingStake+request.StakeMinor > maxStake {
 			return PlacedBet{}, ErrStakeOutsideLimits
+		}
+	} else if sharedLulu {
+		if request.GameRoomID == "" || request.PlayMode == "" {
+			return PlacedBet{}, ErrHashRoomRequired
+		}
+		var play game.LuluPlay
+		var outcomes, resultMap json.RawMessage
+		var minStake, maxStake int64
+		err := tx.QueryRow(ctx, `
+			SELECT p.outcomes,p.result_map,p.dodge_mode,c.payout_multiplier,c.payout_divisor,c.min_stake_minor,c.max_stake_minor
+			FROM rounds r
+			JOIN game_room_types grt ON grt.game_type_id=r.game_type_id
+			JOIN game_rooms gr ON gr.id=grt.room_id AND gr.enabled=true
+			JOIN lulu_play_configs p ON p.game_type_id=r.game_type_id AND p.code=$4 AND p.enabled=true
+			JOIN lulu_room_play_currency_configs c ON c.game_type_id=r.game_type_id AND c.room_id=gr.id AND c.play_code=p.code AND c.currency=$3
+			WHERE r.id=$1 AND gr.id=$2`, request.RoundID, request.GameRoomID, request.Currency, request.PlayMode).
+			Scan(&outcomes, &resultMap, &play.DodgeMode, &payoutMultiplier, &payoutDivisor, &minStake, &maxStake)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PlacedBet{}, ErrHashRoomRequired
+		}
+		if err != nil {
+			return PlacedBet{}, err
+		}
+		if json.Unmarshal(outcomes, &play.Outcomes) != nil || json.Unmarshal(resultMap, &play.ResultMap) != nil || !play.SelectionAllowed(request.Selection) {
+			return PlacedBet{}, ErrSelectionOutsidePlay
+		}
+		if request.StakeMinor < minStake || request.StakeMinor > maxStake {
+			return PlacedBet{}, ErrStakeOutsideLimits
+		}
+		var differentRoom bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM bets WHERE round_id=$1 AND user_id=$2 AND status='accepted' AND game_room_id IS DISTINCT FROM $3::uuid)`, request.RoundID, request.AccountID, request.GameRoomID).Scan(&differentRoom); err != nil {
+			return PlacedBet{}, err
+		}
+		if differentRoom {
+			return PlacedBet{}, ErrHashRoomConflict
 		}
 	} else {
 		if !rules.SelectionAllowed(request.Selection) {
@@ -640,7 +696,7 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 	if err != nil {
 		return PlacedBet{}, err
 	}
-	if sharedHashRules(rules) && !merging {
+	if (sharedHashRules(rules) || sharedLulu) && !merging {
 		if err = rebate.SnapshotTx(ctx, tx, bet.BetID); err != nil {
 			return PlacedBet{}, err
 		}
@@ -725,6 +781,13 @@ func sharedHashRules(rules game.Rules) bool {
 		HashShared bool `json:"hash_shared"`
 	}
 	return json.Unmarshal(rules.Extras, &extras) == nil && extras.HashShared
+}
+
+func sharedLuluRules(rules game.Rules) bool {
+	var extras struct {
+		LuluShared bool `json:"lulu_shared"`
+	}
+	return rules.Source == "lulu_ws" && json.Unmarshal(rules.Extras, &extras) == nil && extras.LuluShared
 }
 
 func validHashSelection(mode string, raw json.RawMessage) bool {

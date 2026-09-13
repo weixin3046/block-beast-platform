@@ -1,5 +1,11 @@
 # 前端接口接入
 
+## 轮次监控选期规则
+
+`GET /v1/admin/monitor/rounds` 为每个启用游戏返回一项。Lulu 三游戏展示最新一期，不被更早未结算期遮挡；哈希保留最早未完成期（包括 scheduled、open、closed、settling），没有未完成期时展示最新历史期。尚无数据时返回 `sequence: 0`、`status: "waiting"`，`bet_closes_at` 和 `result_at` 为 `null`，页面显示“等待上游数据”，不得启动投注倒计时。waiting 是监控展示状态，不写入 rounds 表。该接口只负责监控展示，下注仍须使用玩家轮次接口并由后端校验。
+
+升级执行 `0088_lulu_false_conflicts.sql`，只恢复 JSONB 结果完全相同的误冲突记录，真正冲突保持隔离。历史期由正常结算流程处理，不伪造缺失开奖结果。
+
 ## 外部开奖历史
 
 `GET /v1/external-draws/{game}/history?count=100` 查询 Worker 从 Lulu 官方实时接口接收、确认并落库的开奖记录；必须携带玩家访问令牌。`game` 支持 `star_sea`（星海逃杀，房间号 1–8）、`angry_feather`（怒翎破阵，胜方 1–2）和 `green_sprint`（绿茵疾冲，冠军 1–6）。`count` 可选，范围 1–100，默认 100。
@@ -8,84 +14,91 @@
 
 ## Lulu 实时游戏玩法配置
 
-三款 Lulu 游戏由 Worker 订阅外部期号、封盘和开奖结果；玩家下注仍只调用本平台既有轮次与投注接口。后台在既有游戏类型创建、编辑接口中使用 `rules.source="lulu_ws"`，并在 `rules.extras` 指定 `external_game`（`lh`、`xdy` 或 `race`）及 `result_map`。`result_map` 的键是外部结果编号，值为该玩法结算使用的选项数组。每种币种的 `bet_limits` 由后台单独维护；管理接口请求和响应使用实际币种金额（例如 `5000`），服务端按币种精度换算最小单位。修改规则只影响之后的新投注，订单保存自己的赔率快照。
+三款 Lulu 游戏由 Worker 订阅外部期号、封盘和开奖结果；每个游戏一个共享轮次，而非“每个玩法一条轮次”。玩家下注仍只调用本平台既有轮次与投注接口。
+
+三游戏与哈希游戏共用已有六个赔率房间：`1.94`、`1.95`、`1.96`、`1.97`、`1.98`、`1.985`。玩家页面通过 `GET /v1/lulu/menus` 一次取得三游戏的房间、玩法、选项及各币种独立倍率和下注上下限；响应金额是按币种精度格式化的实际金额。房间返水继续使用既有的按 `game_room_id`、代理等级配置；同一个房间无论下注哈希还是三游戏，均适用同一套返水比例。三游戏的倍率、单注上下限按“游戏 + 房间 + 玩法 + 币种”独立保存，不能假定其数值与哈希相同。
 
 ### 后台三游戏管理
 
-后台先调用 `GET /v1/admin/game-types`，在返回数组中按固定 `code` 找到预置玩法。创建或编辑接口分别为 `POST /v1/admin/game-types`、`PUT /v1/admin/game-types/{id}`，均限 `admin/operator`，请求体最外层必须带后台全局二级操作密码 `second_password`。读取接口不需要二级密码；写入成功会生成审计记录，但密码不会保存、返回或进入审计内容。
+后台先调用 `GET /v1/admin/game-types`，按共享游戏代码找到预置类型：`lulu-xdy`（星海逃杀）、`lulu-lh`（怒翎破阵）、`lulu-race`（绿茵疾冲）。再以 `GET /v1/admin/game-rooms` 取得六个房间。旧代码（如 `lulu-xdy-direct`、`lulu-lh-winner`）仅用于历史订单展示，不能作为新页面的下注游戏代码。
 
 | 管理项 | 操作方式 |
 | --- | --- |
-| 启用、停用玩法 | 编辑完整配置，将 `enabled` 改为 `true` 或 `false`。停用后不再生成可投注期，不修改历史订单。 |
-| 倍率、选项和映射 | 编辑 `rules.outcomes`、`payout_multiplier`、`extras.result_map`。映射必须覆盖每一个外部结果编号，且映射出的选项必须存在于 `outcomes`。 |
-| 各币种限额 | `rules.bet_limits` 必须列出 `GET /v1/currencies` 中所有当前启用币种；每项提供 `min_stake`、`max_stake`，金额为实际显示金额。 |
-| 封盘时间 | `close_before_seconds` 为开奖前封盘秒数。Worker 仍以收到的上游轮次与开奖结果为准。 |
-| 轮次监控 | `GET /v1/admin/rounds?game_type=lulu-xdy-direct&status=open` 可按玩法和状态查看已创建轮次；不要为 `lulu_ws` 玩法人工创建轮次。 |
+| 共享轮次 | 只能使用三个共享代码；一个上游期号在每个游戏只生成一个轮次。不要为 `lulu_ws` 游戏人工创建轮次。 |
+| 房间返水 | 使用现有 `GET/PUT /v1/admin/rebate-configs` 按 `game_room_id` 管理；六个房间各自独立，三游戏与哈希共用。 |
+| 倍率和限额 | 三游戏按“游戏 + 房间 + 玩法 + 币种”独立配置；修改只影响后续成交订单，订单保存成交时快照。 |
+| 轮次监控 | `GET /v1/admin/rounds?game_type=lulu-xdy&status=open` 可查询星海逃杀；怒翎、绿茵分别用 `lulu-lh`、`lulu-race`。 |
 
-`code` 是系统固定标识，不在编辑请求中传递。三游戏日常只应编辑预置的 `lulu-*` 类型；不要把它们关联 `room_id`，也不要改为 `tron_hash` 或 `okx_kline`。示例为更新星海逃杀直选（示例仅展示两种币种；实际请求须补齐全部已启用币种）：
+若要暂停整个外部通道，使用 `PUT /v1/admin/lulu/config` 的 `enabled`；该接口同样要求二级密码。通道暂停不会篡改已确认开奖或已结算订单。
+
+调整三游戏倍率与限额使用 `PUT /v1/admin/lulu/room-play-configs`，仅 `admin/operator` 可调用，且请求最外层携带 `second_password`。该接口替代旧的 `PUT /v1/admin/game-types/{id}`；后者不能将 `lulu_ws` 玩法绑定到哈希房间。可一次提交同一房间的多个玩法，所有玩法在同一事务中保存，任一项无效则全部不修改。单玩法兼容入口为 `PUT /v1/admin/lulu/room-play-config`。例如同时更新星海逃杀 `1.97` 房间的直选和躲避：
 
 ```json
 {
   "second_password": "后台二级密码",
-  "name": "星海逃杀直选",
-  "close_before_seconds": 3,
-  "enabled": true,
-  "rules": {
-    "source": "lulu_ws",
-    "outcomes": ["1", "2", "3", "4", "5", "6", "7", "8"],
-    "payout_multiplier": 7.5,
-    "bet_limits": {
-      "USDT": {"min_stake": "1", "max_stake": "2000"},
-      "POINTS": {"min_stake": "1", "max_stake": "2000"}
-    },
-    "extras": {
-      "external_game": "xdy",
-      "result_map": {
-        "1": ["1"], "2": ["2"], "3": ["3"], "4": ["4"],
-        "5": ["5"], "6": ["6"], "7": ["7"], "8": ["8"]
-      }
-    }
-  }
+  "configs": [{
+    "game_type": "lulu-xdy",
+    "room_id": "97000000-0000-4000-8000-000000000001",
+    "play_code": "direct",
+    "currency_configs": [
+    {"currency": "POINTS", "payout_multiplier": 7500, "payout_divisor": 1000, "min_stake": "1", "max_stake": "2000"},
+    {"currency": "USDT", "payout_multiplier": 7500, "payout_divisor": 1000, "min_stake": "1", "max_stake": "2000"},
+    {"currency": "JADE", "payout_multiplier": 7500, "payout_divisor": 1000, "min_stake": "1", "max_stake": "2000"},
+      {"currency": "ORIGIN_STONE", "payout_multiplier": 7500, "payout_divisor": 1000, "min_stake": "1", "max_stake": "2000"}
+    ]
+  }, {
+    "game_type": "lulu-xdy",
+    "room_id": "97000000-0000-4000-8000-000000000001",
+    "play_code": "dodge",
+    "currency_configs": [
+      {"currency": "POINTS", "payout_multiplier": 112, "payout_divisor": 100, "min_stake": "1", "max_stake": "10000"},
+      {"currency": "USDT", "payout_multiplier": 112, "payout_divisor": 100, "min_stake": "1", "max_stake": "10000"},
+      {"currency": "JADE", "payout_multiplier": 112, "payout_divisor": 100, "min_stake": "1", "max_stake": "10000"},
+      {"currency": "ORIGIN_STONE", "payout_multiplier": 112, "payout_divisor": 100, "min_stake": "1", "max_stake": "10000"}
+    ]
+  }]
 }
 ```
 
-接口对规则进行校验：`lulu_ws` 仅允许 `lh`、`xdy`、`race`，`result_map` 不能为空且目标选项必须有效。若要暂停整个外部通道，使用 `PUT /v1/admin/lulu/config` 的 `enabled`；该接口同样要求二级密码。通道暂停不会篡改已确认开奖或已结算订单。
-
 ### 三游戏玩家端对接
 
-玩家端不直接连接 Lulu，也不使用上游期号、Token、UID 或协议密钥。进入具体玩法页后，调用 `GET /v1/rounds?game_type={code}&limit=1`；响应为空数组表示 Worker 尚未接收到可投注期。用返回的 `round_id` 下单，`sequence` 是页面展示期号，`bet_closes_at` 是服务端权威封盘时间。倒计时调用 `GET /v1/rounds/state?game_type={code}`，使用响应 `server_time` 校准本地时钟，按 `current.bet_closes_at` 计算；不能以客户端本地时钟决定是否允许下单。
+当 Lulu WebSocket 出现断期时，Worker 可选地从受控的趋势历史源补回最近 60 期
+`lh`、`xdy`、`race` 结果。该任务仅创建本地缺失的历史轮次并触发正常结算；不会
+覆盖已确认结果，结果不一致仍按冲突处理。玩家端继续只读取本平台的
+`/v1/rounds/state` 与 `/v1/external-draws/{game}/history`，不得直接调用上游趋势接口。
 
-这些玩法均为独立游戏类型，下注请求只传 `selection:{"pick":"选项"}`，**不要**传 `game_room_id` 或 `play_mode`。`stake` 是实际金额（数字或十进制字符串），不是最小单位；每次确认下注生成新的 `client_request_id`，网络重试复用同一 ID。币种可用性和实际精度以 `GET /v1/currencies` 为准；默认规则已为所有启用币种配置限额，后台可以逐币种调整。
+玩家端不直接连接 Lulu，也不使用上游期号、Token、UID 或协议密钥。进入具体游戏页后，调用 `GET /v1/rounds?game_type={code}&limit=1`；代码分别为 `lulu-xdy`、`lulu-lh`、`lulu-race`。响应为空数组表示 Worker 尚未接收到可投注期。用返回的 `round_id` 下单，`sequence` 是页面展示期号，`bet_closes_at` 是服务端权威封盘时间。倒计时调用 `GET /v1/rounds/state?game_type={code}`，使用响应 `server_time` 校准本地时钟，按 `current.bet_closes_at` 计算；不能以客户端本地时钟决定是否允许下单。
+
+下注必须同时提交 `game_room_id` 与 `play_mode`，并传 `selection:{"pick":"选项"}`。`stake` 是实际金额（数字或十进制字符串），不是最小单位；每次确认下注生成新的 `client_request_id`，网络重试复用同一 ID。币种可用性和实际精度以 `GET /v1/currencies` 为准；服务端依据所选游戏、房间、玩法和币种的配置校验限额与倍率。
 
 ```json
 {
-  "client_request_id": "lulu-xdy-直选-0001",
+  "client_request_id": "lulu-xdy-direct-0001",
   "round_id": "从GET /v1/rounds返回的UUID",
   "account_id": 100001,
   "currency": "POINTS",
+  "game_room_id": "从GET /v1/game-rooms取得的1.94至1.985房间UUID",
+  "play_mode": "direct",
   "selection": {"pick": "1"},
   "stake": "10"
 }
 ```
 
-| 游戏 | 玩法 `game_type` | `pick` 取值 | 默认倍率 | 单注上限 |
-| --- | --- | --- | ---: | ---: |
-| 星海逃杀 | `lulu-xdy-direct` | `1`货舱、`2`医务室、`3`休息室、`4`维生舱、`5`指挥室、`6`食堂、`7`通讯室、`8`操作台 | 7.5 | 2000 |
-| 星海逃杀 | `lulu-xdy-up-down` | `up`、`down` | 1.972 | 5000 |
-| 星海逃杀 | `lulu-xdy-left-right` | `left`、`right` | 1.972 | 5000 |
-| 星海逃杀 | `lulu-xdy-odd-even` | `odd`、`even` | 1.972 | 5000 |
-| 星海逃杀 | `lulu-xdy-dodge` | `1` 至 `8`（躲该房间） | 1.12 | 10000 |
-| 怒翎破阵 | `lulu-lh-winner` | `1`啄不服、`2`咯无敌 | 1.972 | 5000 |
-| 绿茵疾冲 | `lulu-race-direct` | `1` 至 `6`（选手编号） | 7.5 | 2000 |
-| 绿茵疾冲 | `lulu-race-up-down` | `up`、`down` | 1.972 | 5000 |
-| 绿茵疾冲 | `lulu-race-odd-even` | `odd`、`even` | 1.972 | 5000 |
-| 绿茵疾冲 | `lulu-race-dodge` | `1` 至 `6`（躲该选手） | 1.18 | 10000 |
+| 游戏 | `game_type` | `play_mode` | `pick` 取值 |
+| --- | --- | --- | --- |
+| 星海逃杀 | `lulu-xdy` | `direct` | `1`货舱、`2`医务室、`3`休息室、`4`维生舱、`5`指挥室、`6`食堂、`7`通讯室、`8`操作台 |
+| 星海逃杀 | `lulu-xdy` | `up_down`、`left_right`、`odd_even` | 对应的 `up/down`、`left/right`、`odd/even` |
+| 星海逃杀 | `lulu-xdy` | `dodge` | `1` 至 `8`（躲该房间） |
+| 怒翎破阵 | `lulu-lh` | `winner` | `1`啄不服、`2`咯无敌 |
+| 绿茵疾冲 | `lulu-race` | `direct` | `1` 至 `6`（选手编号） |
+| 绿茵疾冲 | `lulu-race` | `up_down`、`left_right`、`odd_even` | 对应的 `up/down`、`left/right`、`odd/even` |
+| 绿茵疾冲 | `lulu-race` | `dodge` | `1` 至 `6`（躲该选手） |
 
-星海分组：`up={1,2,3,4}`，`down={5,6,7,8}`；`left={1,4,6,8}`，`right={2,3,5,7}`；`odd={1,3,5,7}`，`even={2,4,6,8}`。绿茵分组：`up={1,2,3}`，`down={4,5,6}`；`odd={1,3,5}`，`even={2,4,6}`。直选与分组选项在开奖结果命中时中奖；躲避玩法在最终结果**不等于**所选编号时中奖。
+星海分组：`up={1,2,3,4}`，`down={5,6,7,8}`；`left={1,4,6,8}`，`right={2,3,5,7}`；`odd={1,3,5,7}`，`even={2,4,6,8}`。绿茵选手编号为 `1=绿晶晶、2=紫莹莹、3=蓝溜溜、4=胖噜噜、5=黄沙沙、6=红墩墩`；分组为 `up={1,2,3}`，`down={4,5,6}`；`left={1,5,6}`（绿晶晶、黄沙沙、红墩墩），`right={2,3,4}`（紫莹莹、蓝溜溜、胖噜噜）；`odd={1,3,5}`，`even={2,4,6}`。直选与分组选项在开奖结果命中时中奖；躲避玩法在最终结果**不等于**所选编号时中奖。
 
 结算后通过 `GET /v1/bets/{betID}` 或 `GET /v1/bets?status=won` 查询状态和金额快照；`accepted`、`won`、`lost`、`refunded` 是唯一可展示的订单状态。历史开奖调用：`GET /v1/external-draws/star_sea/history`、`GET /v1/external-draws/angry_feather/history`、`GET /v1/external-draws/green_sprint/history`。`items[].issue` 与对应玩法轮次的 `sequence` 一致，`items[].room` 为原始结果编号数组。
 
-当前玩家端没有读取后台玩法配置的公开接口；因此后台修改选项、赔率、限额或分组后，必须与前端发布同步。服务端始终以成交时规则校验和赔率快照为准，前端展示不一致不会绕过限额或改变已下注订单。
+`GET /v1/lulu/menus` 必须在进入三游戏页面时读取，并在后台调整配置后重新获取；不得将倍率、限额或玩法写死在前端。服务端始终以成交时规则校验和赔率快照为准，前端展示不一致不会绕过限额或改变已下注订单。
 
 ## 活动任务与转盘对齐（0056–0059）
 

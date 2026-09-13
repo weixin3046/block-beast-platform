@@ -130,7 +130,11 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 
 ### Lulu 三游戏直连开奖
 
-Worker 可选地订阅怒翎破阵（`lh`）、星海逃杀（`xdy`）和绿茵疾冲（`race`）的 Lulu 实时轮次与开奖结果。启用 `LULU_DRAW_ENABLED=true` 后，它复用后台 Lulu 上下分配置中加密保存的登录令牌、UID 与协议密钥；凭据不会写入日志或数据库。`LULU_DRAW_GAMES` 控制订阅游戏，`LULU_DRAW_CLOSE_BEFORE_SECONDS` 控制平台提前封盘秒数。
+Worker 可选地订阅怒翎破阵（`lh`）、星海逃杀（`xdy`）和绿茵疾冲（`race`）的 Lulu 实时轮次与开奖结果。启用 `LULU_DRAW_ENABLED=true` 后，它复用后台 Lulu 上下分配置中加密保存的登录令牌、UID 与协议密钥；凭据不会写入日志或数据库。`LULU_DRAW_GAMES` 控制订阅游戏，`LULU_DRAW_CLOSE_BEFORE_SECONDS` 控制平台提前封盘秒数，默认 10 秒。
+
+当实时订阅漏期时，可显式开启 `LULU_TREND_ENABLED=true`，并设置经授权的
+`LULU_TREND_URL` 与 `LULU_TREND_INTERVAL`。Worker 每轮最多只读取三游戏各 60 条
+历史记录；记录会走现有幂等写入与冲突保护，不能覆盖已确认或已结算结果。
 
 平台自身仍是投注、赔率、资金、账本与派奖的唯一权威。后台通过 `GET`、`POST /v1/admin/game-types` 与 `PUT /v1/admin/game-types/{gameTypeID}` 维护 `source:"lulu_ws"` 的 `extras.external_game` 和 `extras.result_map`；写入要求 admin/operator 与二级操作密码。配置修改仅影响后续投注，已下注订单沿用赔率快照。
 | `GET/PUT /v1/admin/hash/config` | 通过版本号原子查询或更新哈希房间名称、顺序、状态、倍率和累计投注上限。仅 operator/admin。 |

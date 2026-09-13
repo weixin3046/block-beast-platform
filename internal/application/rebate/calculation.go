@@ -26,7 +26,7 @@ func Calculate(stake, payout int64, mode string, chain []Ancestor) ([]Allocation
 		return nil, ErrInvalid
 	}
 	switch mode {
-	case "road", "guess", "dodge":
+	case "road", "guess", "dodge", "direct", "up_down", "left_right", "odd_even", "winner":
 	default:
 		return nil, ErrInvalid
 	}

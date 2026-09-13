@@ -38,12 +38,12 @@ type MonitorBet struct {
 	CreatedAt        time.Time       `json:"created_at"`
 }
 type MonitorRound struct {
-	GameType    string    `json:"game_type"`
-	Name        string    `json:"name"`
-	Sequence    int64     `json:"sequence"`
-	Status      string    `json:"status"`
-	BetClosesAt time.Time `json:"bet_closes_at"`
-	ResultAt    time.Time `json:"result_at"`
+	GameType    string     `json:"game_type"`
+	Name        string     `json:"name"`
+	Sequence    int64      `json:"sequence"`
+	Status      string     `json:"status"`
+	BetClosesAt *time.Time `json:"bet_closes_at"`
+	ResultAt    *time.Time `json:"result_at"`
 }
 type Monitor struct {
 	ServerTime time.Time      `json:"server_time"`
@@ -104,7 +104,7 @@ func (s *Service) CurrentBetsFiltered(ctx context.Context, userQuery, gameType s
 }
 func (s *Service) RoundCountdowns(ctx context.Context) ([]MonitorRound, error) {
 	result := []MonitorRound{}
-	rounds, err := s.pool.Query(ctx, `SELECT DISTINCT ON (gt.id) gt.code,gt.name,r.sequence,r.status,r.bet_closes_at,COALESCE(r.result_at,r.bet_closes_at) FROM rounds r JOIN game_types gt ON gt.id=r.game_type_id WHERE gt.enabled=true AND r.status IN ('open','closed') ORDER BY gt.id,r.sequence`)
+	rounds, err := s.pool.Query(ctx, monitorRoundsSQL)
 	if err != nil {
 		return result, err
 	}
@@ -118,6 +118,22 @@ func (s *Service) RoundCountdowns(ctx context.Context) ([]MonitorRound, error) {
 	}
 	return result, rounds.Err()
 }
+
+// Lulu follows upstream issues; hash retains the earliest unfinished issue.
+const monitorRoundsSQL = `SELECT gt.code,gt.name,COALESCE(r.sequence,0),
+	COALESCE(r.status,'waiting'),r.bet_closes_at,r.result_at
+	FROM game_types gt
+	LEFT JOIN LATERAL (
+		SELECT sequence,status,bet_closes_at,result_at FROM rounds
+		WHERE game_type_id=gt.id
+		ORDER BY
+			CASE WHEN gt.rules->>'source'='lulu_ws' THEN 0
+				WHEN status IN ('open','closed','settling','scheduled') THEN 0 ELSE 1 END,
+			CASE WHEN gt.rules->>'source' IS DISTINCT FROM 'lulu_ws'
+				AND status IN ('open','closed','settling','scheduled') THEN sequence END ASC,
+			sequence DESC LIMIT 1
+	) r ON true
+	WHERE gt.enabled=true ORDER BY gt.code`
 
 type PlayerStatistic struct {
 	Funds        []FundStatistic `json:"funds"`

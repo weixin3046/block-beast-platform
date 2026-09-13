@@ -61,6 +61,7 @@ type Server struct {
 	gameAdmin           GameAdminService
 	gameRoomAdmin       GameRoomService
 	hashConfig          HashConfigService
+	luluMenus           LuluMenuService
 	chat                ChatService
 	uploads             UploadService
 	leaderboards        LeaderboardService
@@ -198,6 +199,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/admin/currencies/{code}", server.protectRoles(server.updateCurrency, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/game-rooms", server.protect(server.gameRooms))
 	mux.HandleFunc("GET /v1/hash/menus", server.protect(server.hashMenus))
+	mux.HandleFunc("GET /v1/lulu/menus", server.protect(server.luluMenuConfig))
 	mux.HandleFunc("GET /v1/hash/trends", server.protect(server.hashTrends))
 	mux.HandleFunc("GET /v1/external-draws/{game}/history", server.protect(server.externalDrawHistoryEndpoint))
 	mux.HandleFunc("GET /v1/announcements", server.announcements)
@@ -330,6 +332,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/admin/lulu/login", server.protectRoles(server.secondPassword(server.luluSMSLogin(false)), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/lulu/config", server.protectRoles(server.adminLuluConfig, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/lulu/config", server.protectRoles(server.secondPassword(server.updateLuluConfig), identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/lulu/room-play-config", server.protectRoles(server.secondPassword(server.updateLuluRoomPlayConfig), identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/lulu/room-play-configs", server.protectRoles(server.secondPassword(server.updateLuluRoomPlayConfigs), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/lulu/config", server.protect(server.luluConfig))
 	mux.HandleFunc("POST /v1/lulu/deposits", server.protect(server.createLuluOrder("deposit")))
 	mux.HandleFunc("POST /v1/lulu/withdrawals", server.protect(server.createLuluOrder("withdrawal")))

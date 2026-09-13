@@ -46,7 +46,7 @@ func amountInputRoute(r *http.Request) bool {
 		return true
 	}
 	switch p {
-	case "/v1/bets", "/v1/withdrawals", "/v1/point-withdrawals", "/v1/stamina/consume", "/v1/admin/credits", "/v1/admin/wallet-adjustments", "/v1/admin/spins", "/v1/admin/tasks/bet-configs", "/v1/admin/leaderboard-reward-rules", "/v1/admin/hash/config", "/v1/admin/virtual-accounts":
+	case "/v1/bets", "/v1/withdrawals", "/v1/point-withdrawals", "/v1/stamina/consume", "/v1/admin/credits", "/v1/admin/wallet-adjustments", "/v1/admin/spins", "/v1/admin/tasks/bet-configs", "/v1/admin/leaderboard-reward-rules", "/v1/admin/hash/config", "/v1/admin/lulu/room-play-config", "/v1/admin/lulu/room-play-configs", "/v1/admin/virtual-accounts":
 		return true
 	}
 	return strings.HasPrefix(p, "/v1/admin/configs/") || (strings.HasPrefix(p, "/v1/chat/rooms/") && strings.HasSuffix(p, "/red-packets")) || (strings.HasPrefix(p, "/v1/admin/agents/") && strings.HasSuffix(p, "/commissions")) || (strings.HasPrefix(p, "/v1/admin/virtual-accounts/") && strings.HasSuffix(p, "/automation"))

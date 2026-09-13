@@ -165,3 +165,45 @@ func TestPostgresRepositoryCloseDue(t *testing.T) {
 		t.Fatalf("repeat begin settlement error = %v, want invalid transition", err)
 	}
 }
+
+func TestPostgresRepositoryStateUsesLatestLuluRoundWhenNoRoundIsInProgress(t *testing.T) {
+	dsn := os.Getenv("POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("POSTGRES_TEST_DSN is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	gameTypeID := uuid.NewString()
+	firstRoundID := uuid.NewString()
+	latestRoundID := uuid.NewString()
+	gameTypeCode := "test-lulu-state-" + gameTypeID
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO game_types(id,code,name,rules) VALUES($1,$2,'test lulu state','{"source":"lulu_ws"}');
+		INSERT INTO rounds(id,game_type_id,sequence,status,bet_closes_at,result_at,settled_at,outcome)
+		VALUES($3,$1,1,'settled',$4,$4,$4,'["1"]'),($5,$1,2,'settled',$6,$6,$6,'["2"]')`,
+		gameTypeID, gameTypeCode, firstRoundID, now.Add(-time.Minute), latestRoundID, now)
+	if err != nil {
+		t.Fatalf("create lulu rounds: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM rounds WHERE game_type_id=$1`, gameTypeID)
+		_, _ = pool.Exec(ctx, `DELETE FROM game_types WHERE id=$1`, gameTypeID)
+	})
+
+	state, err := NewPostgresRepository(pool).State(ctx, gameTypeCode)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if state.Current == nil || state.Current.RoundID != latestRoundID || state.Current.Status != RoundSettled {
+		t.Fatalf("current = %#v, want latest settled round %q", state.Current, latestRoundID)
+	}
+	if state.Previous == nil || state.Previous.RoundID != firstRoundID {
+		t.Fatalf("previous = %#v, want prior settled round %q", state.Previous, firstRoundID)
+	}
+}

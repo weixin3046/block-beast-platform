@@ -92,6 +92,7 @@ func (rules Rules) Validate() error {
 type luluExtras struct {
 	ExternalGame string              `json:"external_game"`
 	ResultMap    map[string][]string `json:"result_map"`
+	LuluShared   bool                `json:"lulu_shared"`
 }
 
 func (rules Rules) validateLuluExtras(outcomes map[string]struct{}) error {
@@ -101,6 +102,9 @@ func (rules Rules) validateLuluExtras(outcomes map[string]struct{}) error {
 	}
 	if extras.ExternalGame != "lh" && extras.ExternalGame != "xdy" && extras.ExternalGame != "race" {
 		return fmt.Errorf("%w: lulu external_game is invalid", ErrInvalidRules)
+	}
+	if extras.LuluShared {
+		return nil
 	}
 	if len(extras.ResultMap) == 0 {
 		return fmt.Errorf("%w: lulu result_map must not be empty", ErrInvalidRules)

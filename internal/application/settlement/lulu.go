@@ -21,8 +21,7 @@ func (source LuluResultSource) Outcome(ctx context.Context, round game.Round, ru
 		return nil, err
 	}
 	var extras struct {
-		ExternalGame string              `json:"external_game"`
-		ResultMap    map[string][]string `json:"result_map"`
+		ExternalGame string `json:"external_game"`
 	}
 	if rules.Source != "lulu_ws" || json.Unmarshal(rules.Extras, &extras) != nil || source.pool == nil {
 		return nil, game.ErrInvalidRules
@@ -39,6 +38,20 @@ func (source LuluResultSource) Outcome(ctx context.Context, round game.Round, ru
 	var values []string
 	if err := json.Unmarshal(raw, &values); err != nil || len(values) == 0 {
 		return nil, fmt.Errorf("decode lulu outcome: %w", err)
+	}
+	return luluOutcomeForRules(rules, values)
+}
+
+func luluOutcomeForRules(rules game.Rules, values []string) ([]string, error) {
+	var extras struct {
+		LuluShared bool                `json:"lulu_shared"`
+		ResultMap  map[string][]string `json:"result_map"`
+	}
+	if json.Unmarshal(rules.Extras, &extras) != nil {
+		return nil, game.ErrInvalidRules
+	}
+	if extras.LuluShared {
+		return append([]string(nil), values...), nil
 	}
 	seen := make(map[string]struct{})
 	outcome := make([]string, 0, len(values))

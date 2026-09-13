@@ -60,6 +60,29 @@ func TestAmountContractConversions(t *testing.T) {
 	}
 }
 
+func TestLuluRoomPlayConfigConvertsDisplayStakeLimits(t *testing.T) {
+	c := amountCodec{server: &Server{currencies: &amountTestCurrencies{}}, ctx: context.Background()}
+	v, err := readAmountJSON(strings.NewReader(`{"currency_configs":[{"currency":"POINTS","min_stake":"1","max_stake":"2000"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.convert(v, "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(v)
+	if !strings.Contains(string(b), `"min_stake_minor":1000`) || !strings.Contains(string(b), `"max_stake_minor":2000000`) {
+		t.Fatalf("converted request=%s", b)
+	}
+	request := httptest.NewRequest(http.MethodPut, "/v1/admin/lulu/room-play-config", nil)
+	if !amountInputRoute(request) {
+		t.Fatal("lulu room play config must accept display amounts")
+	}
+	request = httptest.NewRequest(http.MethodPut, "/v1/admin/lulu/room-play-configs", nil)
+	if !amountInputRoute(request) {
+		t.Fatal("batch lulu room play config must accept display amounts")
+	}
+}
+
 func TestAmountContractRejectsAmbiguousOrInvalidInputs(t *testing.T) {
 	for _, body := range []string{`{"currency":"POINTS","stake_minor":100}`, `{"currency":"POINTS","stake":1,"stake_minor":1000}`, `{"currency":"POINTS","stake":1.0001}`, `{"currency":"POINTS","stake":0}`, `{"currency":"POINTS","stake":-1}`, `{"currency":"POINTS","stake":true}`, `{"currency":"POINTS","stake":1e3}`, `{"currency":"MISSING","stake":1}`, `{"currency":"POINTS","stake":9223372036854775807}`} {
 		c := amountCodec{server: &Server{currencies: &amountTestCurrencies{}}, ctx: context.Background()}

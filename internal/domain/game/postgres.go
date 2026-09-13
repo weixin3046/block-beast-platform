@@ -334,7 +334,11 @@ func (repository *PostgresRepository) State(ctx context.Context, gameType string
 	current, err := repository.findGameTypeRound(
 		ctx,
 		gameType,
-		"status IN ('open','closed','settling')",
+		`status IN ('open','closed','settling') AND (
+			game_types.rules->>'source' IS DISTINCT FROM 'lulu_ws'
+			OR rounds.sequence=(SELECT MAX(latest.sequence) FROM rounds latest
+				WHERE latest.game_type_id=game_types.id)
+		)`,
 		"result_at ASC",
 	)
 	if err != nil && !errors.Is(err, ErrRoundNotFound) {
@@ -342,8 +346,23 @@ func (repository *PostgresRepository) State(ctx context.Context, gameType string
 	}
 	if err == nil {
 		state.Current = &current
+	} else {
+		// Between upstream issues there is no open, closed, or settling Lulu
+		// round. Keep the latest issue visible instead of returning current=null.
+		latest, latestErr := repository.findGameTypeRound(
+			ctx,
+			gameType,
+			"game_types.rules->>'source'='lulu_ws'",
+			"rounds.sequence DESC",
+		)
+		if latestErr != nil && !errors.Is(latestErr, ErrRoundNotFound) {
+			return state, latestErr
+		}
+		if latestErr == nil {
+			state.Current = &latest
+		}
 	}
-	previous, err := repository.findGameTypeRound(ctx, gameType, "status = 'settled'", "result_at DESC")
+	previous, err := repository.previousRound(ctx, gameType, state.Current)
 	if err != nil && !errors.Is(err, ErrRoundNotFound) {
 		return state, err
 	}
@@ -351,6 +370,44 @@ func (repository *PostgresRepository) State(ctx context.Context, gameType string
 		state.Previous = &previous
 	}
 	return state, nil
+}
+
+// Upstream Lulu issues can remain closed while their result is quarantined for
+// review. The game page must still show the immediately preceding issue rather
+// than hiding it until settlement completes.
+func (repository *PostgresRepository) previousRound(ctx context.Context, gameType string, current *Round) (Round, error) {
+	if current == nil {
+		return repository.findGameTypeRound(ctx, gameType, "status = 'settled'", "result_at DESC")
+	}
+	query := `
+		SELECT rounds.id,game_types.code,rounds.sequence,rounds.status,
+			rounds.bet_closes_at,rounds.result_at,rounds.settled_at,rounds.outcome
+		FROM rounds
+		JOIN game_types ON game_types.id=rounds.game_type_id
+		WHERE game_types.code=$1 AND (
+			(game_types.rules->>'source'='lulu_ws' AND rounds.sequence<$2)
+			OR (game_types.rules->>'source' IS DISTINCT FROM 'lulu_ws' AND rounds.status='settled')
+		)
+		ORDER BY CASE WHEN game_types.rules->>'source'='lulu_ws' THEN rounds.sequence END DESC,
+			rounds.result_at DESC,rounds.id LIMIT 1`
+	var round Round
+	var outcome json.RawMessage
+	err := repository.pool.QueryRow(ctx, query, gameType, current.Sequence).Scan(
+		&round.RoundID, &round.GameType, &round.Sequence, &round.Status,
+		&round.BetClosesAt, &round.ResultAt, &round.SettledAt, &outcome,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Round{}, ErrRoundNotFound
+	}
+	if err != nil {
+		return Round{}, err
+	}
+	if len(outcome) > 0 {
+		if err := json.Unmarshal(outcome, &round.Outcome); err != nil {
+			return Round{}, err
+		}
+	}
+	return round, nil
 }
 
 func (repository *PostgresRepository) findGameTypeRound(ctx context.Context, gameType, statusClause, orderBy string) (Round, error) {
