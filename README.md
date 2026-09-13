@@ -132,10 +132,10 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 
 Worker 可选地订阅怒翎破阵（`lh`）、星海逃杀（`xdy`）和绿茵疾冲（`race`）的 Lulu 实时轮次与开奖结果。启用 `LULU_DRAW_ENABLED=true` 后，它复用后台 Lulu 上下分配置中加密保存的登录令牌、UID 与协议密钥；凭据不会写入日志或数据库。`LULU_DRAW_GAMES` 控制订阅游戏，`LULU_DRAW_CLOSE_BEFORE_SECONDS` 控制平台提前封盘秒数。
 
-平台自身仍是投注、赔率、资金、账本与派奖的唯一权威。后台通过既有游戏类型接口维护 `source:"lulu_ws"` 的 `extras.external_game` 和 `extras.result_map`；配置修改仅影响后续投注，已下注订单沿用赔率快照。
+平台自身仍是投注、赔率、资金、账本与派奖的唯一权威。后台通过 `GET`、`POST /v1/admin/game-types` 与 `PUT /v1/admin/game-types/{gameTypeID}` 维护 `source:"lulu_ws"` 的 `extras.external_game` 和 `extras.result_map`；写入要求 admin/operator 与二级操作密码。配置修改仅影响后续投注，已下注订单沿用赔率快照。
 | `GET/PUT /v1/admin/hash/config` | 通过版本号原子查询或更新哈希房间名称、顺序、状态、倍率和累计投注上限。仅 operator/admin。 |
 | `GET /v1/admin/game-rooms` | 查询固定六个哈希房间。仅 operator/admin。 |
-| `GET /v1/admin/game-types` | 查询固定六个共享哈希玩法。仅 operator/admin。 |
+| `GET/POST /v1/admin/game-types`、`PUT /v1/admin/game-types/{gameTypeID}` | 查询、创建或编辑游戏玩法（含 Lulu 三游戏赔率、限额、启停及结果映射）。写入仅 operator/admin 且需二级密码。 |
 | `GET /v1/admin/rounds` | 查询系统根据 TRON 目标区块自动创建的轮次。仅 operator/admin。 |
 | `GET /v1/rounds?game_type={code}&limit={1-100}` | 查询指定游戏类型的开放轮次。 |
 | `GET /v1/rounds/{round_id}` | 查询单个轮次。 |

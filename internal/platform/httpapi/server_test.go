@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/block-beast/platform/internal/application/betting"
+	"github.com/block-beast/platform/internal/application/operations"
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/domain/wallet"
@@ -166,7 +167,6 @@ func TestFixedHashAdminWriteRoutesAreNotExposed(t *testing.T) {
 	server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil)
 	for _, target := range []string{
 		"/v1/admin/game-rooms",
-		"/v1/admin/game-types",
 		"/v1/admin/rounds",
 	} {
 		request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(`{}`))
@@ -175,6 +175,61 @@ func TestFixedHashAdminWriteRoutesAreNotExposed(t *testing.T) {
 		if response.Code != http.StatusMethodNotAllowed {
 			t.Fatalf("POST %s status = %d, want 405", target, response.Code)
 		}
+	}
+}
+
+type gameAdminWriteStub struct {
+	created int
+	updated int
+}
+
+func (s *gameAdminWriteStub) ListGameTypes(context.Context) ([]operations.GameType, error) {
+	return nil, nil
+}
+
+func (s *gameAdminWriteStub) CreateGameType(context.Context, operations.GameTypeInput) (operations.GameType, error) {
+	s.created++
+	return operations.GameType{ID: "game-type-1", Code: "play-test", Name: "测试玩法"}, nil
+}
+
+func (s *gameAdminWriteStub) UpdateGameType(context.Context, string, operations.GameTypeInput) (operations.GameType, error) {
+	s.updated++
+	return operations.GameType{ID: "game-type-1", Code: "lulu-xdy-direct", Name: "星海逃杀直选"}, nil
+}
+
+func (s *gameAdminWriteStub) ListRounds(context.Context, string, string, int) ([]operations.ManagedRound, error) {
+	return nil, nil
+}
+
+func (s *gameAdminWriteStub) CreateRound(context.Context, string, time.Time) (operations.ManagedRound, error) {
+	return operations.ManagedRound{}, nil
+}
+
+func TestGameTypeWriteRoutesRequireRoleAndSecondPassword(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path, role, body string
+		want                           int
+	}{
+		{"admin create", http.MethodPost, "/v1/admin/game-types", "admin", `{"second_password":"secret","name":"测试玩法","enabled":true,"rules":{"outcomes":["1"],"payout_multiplier":2}}`, http.StatusCreated},
+		{"operator update", http.MethodPut, "/v1/admin/game-types/game-type-1", "operator", `{"second_password":"secret","name":"星海逃杀直选","enabled":true,"rules":{"outcomes":["1"],"payout_multiplier":7.5,"source":"lulu_ws","extras":{"external_game":"xdy","result_map":{"1":["1"]}}}}`, http.StatusOK},
+		{"player forbidden", http.MethodPut, "/v1/admin/game-types/game-type-1", "player", `{"second_password":"secret","name":"测试玩法","enabled":true,"rules":{"outcomes":["1"],"payout_multiplier":2}}`, http.StatusForbidden},
+		{"missing password", http.MethodPut, "/v1/admin/game-types/game-type-1", "admin", `{"name":"测试玩法","enabled":true,"rules":{"outcomes":["1"],"payout_multiplier":2}}`, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			games := &gameAdminWriteStub{}
+			server := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
+				WithAuth(NewAuthenticator(testSecret)), WithAdminSecurity(&securityStub{}), WithGameAdmin(games))
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "Bearer "+issueTestToken(t, "actor", []string{tc.role}))
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != tc.want {
+				t.Fatalf("status = %d, want %d: %s", response.Code, tc.want, response.Body.String())
+			}
+			if tc.want >= 400 && (games.created != 0 || games.updated != 0) {
+				t.Fatalf("game service unexpectedly invoked: %+v", games)
+			}
+		})
 	}
 }
 

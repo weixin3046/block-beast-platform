@@ -2611,6 +2611,64 @@ paths:
       responses:
         '200':
           description: 游戏玩法列表。
+    post:
+      tags:
+      - Admin
+      operationId: adminCreateGameType
+      summary: 创建游戏玩法
+      description: 仅 admin/operator。请求体最外层必须包含 second_password；平台会校验后移除该字段，不会保存或审计密码。Lulu 外部开奖玩法的规则使用 source=lulu_ws、extras.external_game 与 extras.result_map；通常只编辑系统预置的 lulu-* 玩法。
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/GameTypeInput"
+      responses:
+        '201':
+          description: 已创建的游戏玩法。
+        '400':
+          "$ref": "#/components/responses/BadRequest"
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+  "/v1/admin/game-types/{gameTypeID}":
+    put:
+      tags:
+      - Admin
+      operationId: adminUpdateGameType
+      summary: 编辑游戏玩法配置
+      description: 仅 admin/operator。提交完整玩法配置及最外层 second_password；配置变更仅影响之后的新投注，已下注订单使用自身赔率快照。
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: gameTypeID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/GameTypeInput"
+      responses:
+        '200':
+          description: 已更新的游戏玩法。
+        '400':
+          "$ref": "#/components/responses/BadRequest"
+        '401':
+          "$ref": "#/components/responses/Unauthorized"
+        '403':
+          "$ref": "#/components/responses/Forbidden"
+        '404':
+          "$ref": "#/components/responses/NotFound"
+        '409':
+          "$ref": "#/components/responses/Conflict"
   "/v1/admin/rounds":
     get:
       tags:
@@ -7041,10 +7099,16 @@ components:
       type: object
       additionalProperties: false
       required:
+      - second_password
       - name
       - enabled
       - rules
       properties:
+        second_password:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: 创建或编辑时必填的后台全局二级操作密码；校验后不会保存、返回或写入审计日志。
         room_id:
           type: string
           format: uuid
@@ -7109,6 +7173,8 @@ components:
               enum:
               - tron_hash
               - okx_kline
+              - lulu_ws
+              description: lulu_ws 时必须在 extras 指定 external_game（lh、xdy 或 race）和完整 result_map。
             extras:
               type: object
             dodge_mode:

@@ -320,6 +320,8 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/admin/tasks/bet-configs/{taskID}/enabled", server.protectRoles(server.secondPassword(server.taskState), identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/tasks/progress", server.protectRoles(server.taskProgress, identity.RoleAdmin))
 	mux.HandleFunc("GET /v1/admin/game-types", server.protectRoles(server.adminGameTypes, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/game-types", server.protectRoles(server.secondPassword(server.createGameType), identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("PUT /v1/admin/game-types/{gameTypeID}", server.protectRoles(server.secondPassword(server.updateGameType), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/hash/config", server.protectRoles(server.adminHashConfig, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/hash/config", server.protectRoles(server.secondPassword(server.updateHashConfig), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/game-rooms", server.protectRoles(server.adminGameRooms, identity.RoleAdmin, identity.RoleOperator))

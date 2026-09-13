@@ -33,6 +33,10 @@ type GameType struct {
 }
 
 type GameTypeInput struct {
+	// SecondPassword is verified and removed by the HTTP middleware before this
+	// input reaches the application service. It is kept here so the OpenAPI
+	// request contract accurately documents protected admin write endpoints.
+	SecondPassword  string          `json:"second_password,omitempty"`
 	RoomID          string          `json:"room_id,omitempty"`
 	Name            string          `json:"name"`
 	Mode            string          `json:"mode,omitempty"`

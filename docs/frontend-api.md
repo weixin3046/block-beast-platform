@@ -8,7 +8,48 @@
 
 ## Lulu 实时游戏玩法配置
 
-三款 Lulu 游戏由 Worker 订阅外部期号、封盘和开奖结果；玩家下注仍只调用本平台既有轮次与投注接口。后台在既有游戏类型创建、编辑接口中使用 `rules.source="lulu_ws"`，并在 `rules.extras` 指定 `external_game`（`lh`、`xdy` 或 `race`）及 `result_map`。`result_map` 的键是外部结果编号，值为该玩法结算使用的选项数组。每种币种的 `bet_limits` 由后台单独维护，金额为最小单位；修改规则只影响之后的新投注，订单保存自己的赔率快照。
+三款 Lulu 游戏由 Worker 订阅外部期号、封盘和开奖结果；玩家下注仍只调用本平台既有轮次与投注接口。后台在既有游戏类型创建、编辑接口中使用 `rules.source="lulu_ws"`，并在 `rules.extras` 指定 `external_game`（`lh`、`xdy` 或 `race`）及 `result_map`。`result_map` 的键是外部结果编号，值为该玩法结算使用的选项数组。每种币种的 `bet_limits` 由后台单独维护；管理接口请求和响应使用实际币种金额（例如 `5000`），服务端按币种精度换算最小单位。修改规则只影响之后的新投注，订单保存自己的赔率快照。
+
+### 后台三游戏管理
+
+后台先调用 `GET /v1/admin/game-types`，在返回数组中按固定 `code` 找到预置玩法。创建或编辑接口分别为 `POST /v1/admin/game-types`、`PUT /v1/admin/game-types/{id}`，均限 `admin/operator`，请求体最外层必须带后台全局二级操作密码 `second_password`。读取接口不需要二级密码；写入成功会生成审计记录，但密码不会保存、返回或进入审计内容。
+
+| 管理项 | 操作方式 |
+| --- | --- |
+| 启用、停用玩法 | 编辑完整配置，将 `enabled` 改为 `true` 或 `false`。停用后不再生成可投注期，不修改历史订单。 |
+| 倍率、选项和映射 | 编辑 `rules.outcomes`、`payout_multiplier`、`extras.result_map`。映射必须覆盖每一个外部结果编号，且映射出的选项必须存在于 `outcomes`。 |
+| 各币种限额 | `rules.bet_limits` 必须列出 `GET /v1/currencies` 中所有当前启用币种；每项提供 `min_stake`、`max_stake`，金额为实际显示金额。 |
+| 封盘时间 | `close_before_seconds` 为开奖前封盘秒数。Worker 仍以收到的上游轮次与开奖结果为准。 |
+| 轮次监控 | `GET /v1/admin/rounds?game_type=lulu-xdy-direct&status=open` 可按玩法和状态查看已创建轮次；不要为 `lulu_ws` 玩法人工创建轮次。 |
+
+`code` 是系统固定标识，不在编辑请求中传递。三游戏日常只应编辑预置的 `lulu-*` 类型；不要把它们关联 `room_id`，也不要改为 `tron_hash` 或 `okx_kline`。示例为更新星海逃杀直选（示例仅展示两种币种；实际请求须补齐全部已启用币种）：
+
+```json
+{
+  "second_password": "后台二级密码",
+  "name": "星海逃杀直选",
+  "close_before_seconds": 3,
+  "enabled": true,
+  "rules": {
+    "source": "lulu_ws",
+    "outcomes": ["1", "2", "3", "4", "5", "6", "7", "8"],
+    "payout_multiplier": 7.5,
+    "bet_limits": {
+      "USDT": {"min_stake": "1", "max_stake": "2000"},
+      "POINTS": {"min_stake": "1", "max_stake": "2000"}
+    },
+    "extras": {
+      "external_game": "xdy",
+      "result_map": {
+        "1": ["1"], "2": ["2"], "3": ["3"], "4": ["4"],
+        "5": ["5"], "6": ["6"], "7": ["7"], "8": ["8"]
+      }
+    }
+  }
+}
+```
+
+接口对规则进行校验：`lulu_ws` 仅允许 `lh`、`xdy`、`race`，`result_map` 不能为空且目标选项必须有效。若要暂停整个外部通道，使用 `PUT /v1/admin/lulu/config` 的 `enabled`；该接口同样要求二级密码。通道暂停不会篡改已确认开奖或已结算订单。
 
 ### 三游戏玩家端对接
 
