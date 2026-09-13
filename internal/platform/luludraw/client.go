@@ -89,13 +89,17 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 		connection, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{})
 		if err == nil {
 			backoff = time.Second
+			lastRound := ""
 			for ctx.Err() == nil {
 				_, message, readErr := connection.Read(ctx)
 				if readErr != nil {
 					break
 				}
 				for _, plain := range client.decryptFrame(message) {
-					if event, ok := parseMessage(game, plain); ok {
+					if event, ok := parseMessageWithRound(game, plain, lastRound); ok {
+						if event.Round != "" {
+							lastRound = event.Round
+						}
 						handle(event)
 					}
 				}
@@ -156,6 +160,12 @@ type envelope struct {
 }
 
 func parseMessage(game string, raw []byte) (Event, bool) {
+	return parseMessageWithRound(game, raw, "")
+}
+
+// parseMessageWithRound uses the most recently observed round when an official
+// result frame omits its own round_id. The cache is scoped to one game socket.
+func parseMessageWithRound(game string, raw []byte, fallbackRound string) (Event, bool) {
 	var message envelope
 	if json.Unmarshal(raw, &message) != nil {
 		return Event{}, false
@@ -165,6 +175,9 @@ func parseMessage(game string, raw []byte) (Event, bool) {
 		return Event{}, false
 	}
 	round := rawRound(data)
+	if round == "" {
+		round = fallbackRound
+	}
 	event := Event{Game: game, Kind: message.Event, Round: round}
 	if (message.Event == "3001" || message.Event == "3002" || message.Event == "3006") && round != "" {
 		if closeAt, ok := closeTime(data); ok {

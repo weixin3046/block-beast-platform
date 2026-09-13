@@ -39,3 +39,10 @@ func TestParseRaceFinalMessageKeepsResultAndCloseTime(t *testing.T) {
 		t.Fatalf("event=%#v ok=%v", event, ok)
 	}
 }
+
+func TestParseRaceWinnerUsesCachedRound(t *testing.T) {
+	event, ok := parseMessageWithRound("race", []byte(`{"e":"3005","d":{"race_rank_info":[{"item_id":6,"rank":1}]}}`), "42")
+	if !ok || event.Round != "42" || !reflect.DeepEqual(event.Result, []string{"6"}) {
+		t.Fatalf("event=%#v ok=%v", event, ok)
+	}
+}

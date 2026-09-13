@@ -200,8 +200,15 @@ func (repository *PostgresRepository) ListOpen(ctx context.Context, gameType str
 		JOIN game_types ON game_types.id = rounds.game_type_id
 		WHERE rounds.status = 'open' AND game_types.code = $1
 		AND rounds.bet_closes_at>now()
-		AND NOT EXISTS(SELECT 1 FROM rounds prior WHERE prior.game_type_id=rounds.game_type_id
-		 AND prior.sequence<rounds.sequence AND prior.status IN ('scheduled','open','closed','settling'))
+		AND NOT EXISTS(
+			SELECT 1 FROM rounds prior
+			WHERE prior.game_type_id=rounds.game_type_id
+			AND prior.sequence<rounds.sequence AND prior.status IN ('scheduled','open','closed','settling')
+			AND (
+				COALESCE(game_types.rules->>'source','') <> 'lulu_ws'
+				OR EXISTS(SELECT 1 FROM bets WHERE bets.round_id=prior.id AND bets.status='accepted')
+			)
+		)
 		ORDER BY rounds.bet_closes_at, rounds.id
 		LIMIT $2`, gameType, limit)
 	if err != nil {
