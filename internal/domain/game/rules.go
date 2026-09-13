@@ -81,6 +81,40 @@ func (rules Rules) Validate() error {
 	if rules.ResultCount < 0 || rules.ResultCount > len(rules.Outcomes) {
 		return fmt.Errorf("%w: result_count must be between 1 and the outcome pool size", ErrInvalidRules)
 	}
+	if rules.Source == "lulu_ws" {
+		if err := rules.validateLuluExtras(seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type luluExtras struct {
+	ExternalGame string              `json:"external_game"`
+	ResultMap    map[string][]string `json:"result_map"`
+}
+
+func (rules Rules) validateLuluExtras(outcomes map[string]struct{}) error {
+	var extras luluExtras
+	if len(rules.Extras) == 0 || json.Unmarshal(rules.Extras, &extras) != nil {
+		return fmt.Errorf("%w: lulu extras must be valid", ErrInvalidRules)
+	}
+	if extras.ExternalGame != "lh" && extras.ExternalGame != "xdy" && extras.ExternalGame != "race" {
+		return fmt.Errorf("%w: lulu external_game is invalid", ErrInvalidRules)
+	}
+	if len(extras.ResultMap) == 0 {
+		return fmt.Errorf("%w: lulu result_map must not be empty", ErrInvalidRules)
+	}
+	for raw, mapped := range extras.ResultMap {
+		if strings.TrimSpace(raw) == "" || len(mapped) == 0 {
+			return fmt.Errorf("%w: lulu result_map is invalid", ErrInvalidRules)
+		}
+		for _, outcome := range mapped {
+			if _, ok := outcomes[outcome]; !ok {
+				return fmt.Errorf("%w: lulu result_map contains unknown outcome", ErrInvalidRules)
+			}
+		}
+	}
 	return nil
 }
 

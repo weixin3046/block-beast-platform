@@ -164,3 +164,20 @@ func TestPayoutScaleSupportsRoomOddsAndLegacyRules(t *testing.T) {
 		t.Fatalf("legacy payout scale = %d, want 1", got)
 	}
 }
+
+func TestParseRulesRejectsLuluRulesWithoutExternalGameOrResultMap(t *testing.T) {
+	_, err := ParseRules(json.RawMessage(`{"outcomes":["up"],"payout_multiplier":1972,"payout_divisor":100,"source":"lulu_ws","extras":{}}`))
+	if !errors.Is(err, ErrInvalidRules) {
+		t.Fatalf("err = %v, want invalid rules", err)
+	}
+}
+
+func TestParseRulesAcceptsLuluResultMap(t *testing.T) {
+	rules, err := ParseRules(json.RawMessage(`{"outcomes":["up"],"payout_multiplier":1972,"payout_divisor":100,"source":"lulu_ws","extras":{"external_game":"xdy","result_map":{"1":["up"]}}}`))
+	if err != nil {
+		t.Fatalf("parse lulu rules: %v", err)
+	}
+	if rules.Source != "lulu_ws" {
+		t.Fatalf("source = %q, want lulu_ws", rules.Source)
+	}
+}
