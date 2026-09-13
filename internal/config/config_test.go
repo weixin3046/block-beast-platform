@@ -45,14 +45,13 @@ func TestTronGridAPIKeyLoads(t *testing.T) {
 	}
 }
 
-func TestLotteryDrawUpstreamURLLoadsWithoutDefault(t *testing.T) {
-	t.Setenv("LOTTERY_DRAW_UPSTREAM_URL", "")
-	if got := Load().LotteryDrawUpstreamURL; got != "" {
-		t.Fatalf("lottery draw upstream URL default = %q", got)
-	}
-	t.Setenv("LOTTERY_DRAW_UPSTREAM_URL", "https://draw-provider.example")
-	if got := Load().LotteryDrawUpstreamURL; got != "https://draw-provider.example" {
-		t.Fatalf("lottery draw upstream URL = %q", got)
+func TestLuluDrawConfigurationLoadsWithoutCredentials(t *testing.T) {
+	t.Setenv("LULU_DRAW_ENABLED", "true")
+	t.Setenv("LULU_DRAW_GAMES", "lh,xdy")
+	t.Setenv("LULU_DRAW_CLOSE_BEFORE_SECONDS", "4")
+	config := Load()
+	if !config.LuluDrawEnabled || len(config.LuluDrawGames) != 2 || config.LuluDrawCloseBeforeSec != 4 {
+		t.Fatalf("lulu draw config = %#v", config)
 	}
 }
 

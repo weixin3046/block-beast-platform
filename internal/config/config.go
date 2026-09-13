@@ -33,7 +33,6 @@ type Config struct {
 	TronGridGRPCEndpoint   string
 	OkxRESTURL             string
 	OkxWebSocketURL        string
-	LotteryDrawUpstreamURL string
 	PQPAAPIURL             string
 	PQPAAPIKey             string
 	PQPAAPISecret          string
@@ -82,7 +81,6 @@ func Load() Config {
 		TronGridGRPCEndpoint:   valueOrDefault("TRON_GRID_GRPC_ENDPOINT", "grpc.trongrid.io:50051"),
 		OkxRESTURL:             valueOrDefault("OKX_REST_URL", "https://www.okx.com"),
 		OkxWebSocketURL:        valueOrDefault("OKX_WEBSOCKET_URL", "wss://ws.okx.com:8443/ws/v5/business"),
-		LotteryDrawUpstreamURL: strings.TrimSpace(os.Getenv("LOTTERY_DRAW_UPSTREAM_URL")),
 		PQPAAPIURL:             os.Getenv("PQPA_API_URL"),
 		PQPAAPIKey:             os.Getenv("PQPA_API_KEY"),
 		PQPAAPISecret:          os.Getenv("PQPA_API_SECRET"),

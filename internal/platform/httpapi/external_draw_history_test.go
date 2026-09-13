@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/block-beast/platform/internal/application/externaldraw"
 	"github.com/block-beast/platform/internal/config"
-	"github.com/block-beast/platform/internal/platform/lotterydraw"
 )
 
 func TestExternalDrawHistoryReturnsRecordsForAuthenticatedPlayer(t *testing.T) {
-	reader := &externalDrawHistoryStub{items: []lotterydraw.Record{{Issue: "6653", Room: []int{4}}}}
+	reader := &externalDrawHistoryStub{items: []externaldraw.Record{{Issue: "6653", Room: []int{4}}}}
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil,
 		WithAuth(NewAuthenticator(testSecret)), WithExternalDrawHistory(reader))
 	request := httptest.NewRequest(http.MethodGet, "/v1/external-draws/star_sea/history?count=2", nil)
@@ -79,13 +79,13 @@ func TestExternalDrawHistoryMapsUnavailableInvalidAndProviderErrors(t *testing.T
 }
 
 type externalDrawHistoryStub struct {
-	items []lotterydraw.Record
+	items []externaldraw.Record
 	err   error
 	game  string
 	count int
 }
 
-func (stub *externalDrawHistoryStub) History(_ context.Context, game string, count int) ([]lotterydraw.Record, error) {
+func (stub *externalDrawHistoryStub) History(_ context.Context, game string, count int) ([]externaldraw.Record, error) {
 	stub.game, stub.count = game, count
 	return stub.items, stub.err
 }

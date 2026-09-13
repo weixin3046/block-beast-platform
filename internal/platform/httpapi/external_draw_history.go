@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/block-beast/platform/internal/platform/lotterydraw"
+	"github.com/block-beast/platform/internal/application/externaldraw"
 )
 
 type ExternalDrawHistoryReader interface {
-	History(ctx context.Context, game string, count int) ([]lotterydraw.Record, error)
+	History(ctx context.Context, game string, count int) ([]externaldraw.Record, error)
 }
 
 func WithExternalDrawHistory(reader ExternalDrawHistoryReader) Option {
@@ -22,7 +22,7 @@ func (server *Server) externalDrawHistoryEndpoint(writer http.ResponseWriter, re
 		return
 	}
 	game := request.PathValue("game")
-	if game != lotterydraw.GameStarSea && game != lotterydraw.GameAngryFeather {
+	if game != externaldraw.GameStarSea && game != externaldraw.GameAngryFeather && game != externaldraw.GameGreenSprint {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "unknown external draw game"})
 		return
 	}

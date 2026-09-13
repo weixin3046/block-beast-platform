@@ -19,6 +19,7 @@ import (
 	"github.com/block-beast/platform/internal/application/chat"
 	"github.com/block-beast/platform/internal/application/credit"
 	"github.com/block-beast/platform/internal/application/currency"
+	"github.com/block-beast/platform/internal/application/externaldraw"
 	"github.com/block-beast/platform/internal/application/leaderboard"
 	"github.com/block-beast/platform/internal/application/lulu"
 	"github.com/block-beast/platform/internal/application/operations"
@@ -35,7 +36,6 @@ import (
 	"github.com/block-beast/platform/internal/domain/wallet"    // 钱包仓储
 	"github.com/block-beast/platform/internal/platform/httpapi" // API路由/业务处理器
 	"github.com/block-beast/platform/internal/platform/localstorage"
-	"github.com/block-beast/platform/internal/platform/lotterydraw"
 	luluprovider "github.com/block-beast/platform/internal/platform/lulu" // 积分/体力充值应用服务
 	"github.com/block-beast/platform/internal/platform/objectstorage"
 	"github.com/block-beast/platform/internal/platform/pqpa"
@@ -137,14 +137,7 @@ func main() {
 		return
 	}
 	options = append(options, httpapi.WithDepositHistory(chainService))
-	if cfg.LotteryDrawUpstreamURL != "" {
-		drawReader, err := lotterydraw.New(cfg.LotteryDrawUpstreamURL)
-		if err != nil {
-			logger.Error("invalid lottery draw upstream configuration", "error", err)
-			return
-		}
-		options = append(options, httpapi.WithExternalDrawHistory(drawReader))
-	}
+	options = append(options, httpapi.WithExternalDrawHistory(externaldraw.NewHistoryReader(pool)))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithLulu(lulu.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey).WithBalanceFactory(func(base, uid, token, key string) (lulu.BalanceReader, error) {

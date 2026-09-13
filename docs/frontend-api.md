@@ -2,9 +2,9 @@
 
 ## 外部开奖历史
 
-`GET /v1/external-draws/{game}/history?count=100` 查询平台后端已解密的外部开奖记录；必须携带玩家访问令牌。`game` 目前仅支持 `star_sea`（星海逃杀，房间号 1–8）和 `angry_feather`（怒翎破阵，房间号 1–2）。`count` 可选，范围 1–100，默认 100。
+`GET /v1/external-draws/{game}/history?count=100` 查询 Worker 从 Lulu 官方实时接口接收、确认并落库的开奖记录；必须携带玩家访问令牌。`game` 支持 `star_sea`（星海逃杀，房间号 1–8）、`angry_feather`（怒翎破阵，胜方 1–2）和 `green_sprint`（绿茵疾冲，冠军 1–6）。`count` 可选，范围 1–100，默认 100。
 
-成功响应为 `{"game":"star_sea","items":[{"issue":"6653","room":[4]}]}`；`issue` 保持字符串，`room` 始终按整数数组处理。前端不请求外部开奖服务、不处理 XOR 解密，也不会接触上游地址。上游未配置返回 503，上游超时、格式异常或业务失败返回 502。
+成功响应为 `{"game":"star_sea","items":[{"issue":"6653","room":[4]}]}`；`issue` 保持字符串，`room` 始终按整数数组处理。前端不请求外部开奖服务、不处理加密帧，也不会接触上游地址。Worker 尚未采集到结果时返回空数组；数据库读取失败返回 502。
 
 ## Lulu 实时游戏玩法配置
 
