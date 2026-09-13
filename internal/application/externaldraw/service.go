@@ -104,6 +104,12 @@ func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, game strin
 		if string(saved) != string(encoded) {
 			_, err = tx.Exec(ctx, `UPDATE external_draw_rounds SET status='conflict',conflict_outcome=$4,updated_at=now()
 				WHERE source=$1 AND game=$2 AND external_round=$3`, source, game, sequence, encoded)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `INSERT INTO audit_logs(id,action,target_type,target_id,payload)
+				VALUES($1,'lulu_draw.result_conflict','external_draw_round',$2,jsonb_build_object('game',$3,'external_round',$4))`,
+				uuid.NewString(), source+":"+game+":"+strconv.FormatInt(sequence, 10), game, sequence)
 		}
 		return err
 	}
