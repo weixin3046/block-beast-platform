@@ -10,6 +10,42 @@
 
 三款 Lulu 游戏由 Worker 订阅外部期号、封盘和开奖结果；玩家下注仍只调用本平台既有轮次与投注接口。后台在既有游戏类型创建、编辑接口中使用 `rules.source="lulu_ws"`，并在 `rules.extras` 指定 `external_game`（`lh`、`xdy` 或 `race`）及 `result_map`。`result_map` 的键是外部结果编号，值为该玩法结算使用的选项数组。每种币种的 `bet_limits` 由后台单独维护，金额为最小单位；修改规则只影响之后的新投注，订单保存自己的赔率快照。
 
+### 三游戏玩家端对接
+
+玩家端不直接连接 Lulu，也不使用上游期号、Token、UID 或协议密钥。进入具体玩法页后，调用 `GET /v1/rounds?game_type={code}&limit=1`；响应为空数组表示 Worker 尚未接收到可投注期。用返回的 `round_id` 下单，`sequence` 是页面展示期号，`bet_closes_at` 是服务端权威封盘时间。倒计时调用 `GET /v1/rounds/state?game_type={code}`，使用响应 `server_time` 校准本地时钟，按 `current.bet_closes_at` 计算；不能以客户端本地时钟决定是否允许下单。
+
+这些玩法均为独立游戏类型，下注请求只传 `selection:{"pick":"选项"}`，**不要**传 `game_room_id` 或 `play_mode`。`stake` 是实际金额（数字或十进制字符串），不是最小单位；每次确认下注生成新的 `client_request_id`，网络重试复用同一 ID。币种可用性和实际精度以 `GET /v1/currencies` 为准；默认规则已为所有启用币种配置限额，后台可以逐币种调整。
+
+```json
+{
+  "client_request_id": "lulu-xdy-直选-0001",
+  "round_id": "从GET /v1/rounds返回的UUID",
+  "account_id": 100001,
+  "currency": "POINTS",
+  "selection": {"pick": "1"},
+  "stake": "10"
+}
+```
+
+| 游戏 | 玩法 `game_type` | `pick` 取值 | 默认倍率 | 单注上限 |
+| --- | --- | --- | ---: | ---: |
+| 星海逃杀 | `lulu-xdy-direct` | `1`货舱、`2`医务室、`3`休息室、`4`维生舱、`5`指挥室、`6`食堂、`7`通讯室、`8`操作台 | 7.5 | 2000 |
+| 星海逃杀 | `lulu-xdy-up-down` | `up`、`down` | 1.972 | 5000 |
+| 星海逃杀 | `lulu-xdy-left-right` | `left`、`right` | 1.972 | 5000 |
+| 星海逃杀 | `lulu-xdy-odd-even` | `odd`、`even` | 1.972 | 5000 |
+| 星海逃杀 | `lulu-xdy-dodge` | `1` 至 `8`（躲该房间） | 1.12 | 10000 |
+| 怒翎破阵 | `lulu-lh-winner` | `1`啄不服、`2`咯无敌 | 1.972 | 5000 |
+| 绿茵疾冲 | `lulu-race-direct` | `1` 至 `6`（选手编号） | 7.5 | 2000 |
+| 绿茵疾冲 | `lulu-race-up-down` | `up`、`down` | 1.972 | 5000 |
+| 绿茵疾冲 | `lulu-race-odd-even` | `odd`、`even` | 1.972 | 5000 |
+| 绿茵疾冲 | `lulu-race-dodge` | `1` 至 `6`（躲该选手） | 1.18 | 10000 |
+
+星海分组：`up={1,2,3,4}`，`down={5,6,7,8}`；`left={1,4,6,8}`，`right={2,3,5,7}`；`odd={1,3,5,7}`，`even={2,4,6,8}`。绿茵分组：`up={1,2,3}`，`down={4,5,6}`；`odd={1,3,5}`，`even={2,4,6}`。直选与分组选项在开奖结果命中时中奖；躲避玩法在最终结果**不等于**所选编号时中奖。
+
+结算后通过 `GET /v1/bets/{betID}` 或 `GET /v1/bets?status=won` 查询状态和金额快照；`accepted`、`won`、`lost`、`refunded` 是唯一可展示的订单状态。历史开奖调用：`GET /v1/external-draws/star_sea/history`、`GET /v1/external-draws/angry_feather/history`、`GET /v1/external-draws/green_sprint/history`。`items[].issue` 与对应玩法轮次的 `sequence` 一致，`items[].room` 为原始结果编号数组。
+
+当前玩家端没有读取后台玩法配置的公开接口；因此后台修改选项、赔率、限额或分组后，必须与前端发布同步。服务端始终以成交时规则校验和赔率快照为准，前端展示不一致不会绕过限额或改变已下注订单。
+
 ## 活动任务与转盘对齐（0056–0059）
 
 所有管理写操作仍仅 admin，并验证后台全局二级密码 second_password；不放宽 operator 权限。金额传真实数量，响应为金额字符串，配置 ID 均由服务端生成。

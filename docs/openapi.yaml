@@ -2628,6 +2628,7 @@ paths:
       - Rounds
       operationId: listOpenRounds
       summary: 查询指定游戏的开放轮次
+      description: Lulu 三游戏使用已配置的独立game_type，例如lulu-xdy-direct、lulu-lh-winner、lulu-race-direct；提交投注时使用响应round_id和selection.pick，不传game_room_id或play_mode。具体选项与默认赔率见docs/frontend-api.md。
       security:
       - bearerAuth: []
       parameters:
