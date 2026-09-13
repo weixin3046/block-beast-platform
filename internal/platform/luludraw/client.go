@@ -169,7 +169,6 @@ func parseMessage(game string, raw []byte) (Event, bool) {
 	if (message.Event == "3001" || message.Event == "3002" || message.Event == "3006") && round != "" {
 		if closeAt, ok := closeTime(data); ok {
 			event.CloseAt = &closeAt
-			return event, true
 		}
 	}
 	switch game {
@@ -201,7 +200,7 @@ func parseMessage(game string, raw []byte) (Event, bool) {
 			}
 		}
 	case "race":
-		if message.Event == "3005" && round != "" {
+		if (message.Event == "3005" || message.Event == "3006") && round != "" {
 			var ranks []struct {
 				ItemID int64 `json:"item_id"`
 				Rank   int64 `json:"rank"`
@@ -215,6 +214,9 @@ func parseMessage(game string, raw []byte) (Event, bool) {
 				}
 			}
 		}
+	}
+	if event.CloseAt != nil {
+		return event, true
 	}
 	return Event{}, false
 }

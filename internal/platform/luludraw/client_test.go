@@ -32,3 +32,10 @@ func TestParseRaceWinner(t *testing.T) {
 		t.Fatalf("event=%#v ok=%v", event, ok)
 	}
 }
+
+func TestParseRaceFinalMessageKeepsResultAndCloseTime(t *testing.T) {
+	event, ok := parseMessage("race", []byte(`{"e":"3006","d":{"round_id":9,"countdownEndTime":1760000000000,"race_rank_info":[{"item_id":3,"rank":1}]}}`))
+	if !ok || event.CloseAt == nil || event.Round != "9" || !reflect.DeepEqual(event.Result, []string{"3"}) {
+		t.Fatalf("event=%#v ok=%v", event, ok)
+	}
+}
