@@ -184,7 +184,7 @@ func TestVirtualBatchNamesAndRooms(t *testing.T) {
 func TestVirtualNameVocabulary(t *testing.T) {
 	characters := map[rune]bool{}
 	names := map[string]bool{}
-	for _, name := range virtualDisplayNameCandidates()[:100] {
+	for _, name := range selectVirtualDisplayNames(map[string]struct{}{}, 100) {
 		if names[name] {
 			t.Fatalf("duplicate name: %s", name)
 		}
@@ -198,18 +198,9 @@ func TestVirtualNameVocabulary(t *testing.T) {
 	}
 }
 
-func TestVirtualDisplayNameFallbackDoesNotExhaust(t *testing.T) {
-	used := map[string]struct{}{}
-	for _, name := range virtualDisplayNameCandidates() {
-		used[strings.ToLower(name)] = struct{}{}
-	}
-	names := selectVirtualDisplayNames(used, 2)
-	if len(names) != 2 || names[0] == names[1] {
-		t.Fatalf("fallback names=%v", names)
-	}
-	for _, name := range names {
-		if !strings.HasPrefix(name, "星途玩家-") {
-			t.Fatalf("expected fallback name, got %s", name)
-		}
+func TestVirtualDisplayNameGeneratorDoesNotExhaust(t *testing.T) {
+	names := selectVirtualDisplayNames(map[string]struct{}{}, 1000)
+	if len(names) != 1000 {
+		t.Fatalf("names=%d", len(names))
 	}
 }

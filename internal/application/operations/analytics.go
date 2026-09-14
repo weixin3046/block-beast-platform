@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/block-beast/platform/internal/domain/identity"
+	"github.com/go-faker/faker/v4"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -373,42 +374,19 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	return created, nil
 }
 
-// This intentionally mixes people names, casual handles, English names, and
-// game-style IDs. Picking from a curated pool avoids batches that all follow
-// the same visible prefix/suffix pattern.
-var virtualDisplayNamePool = strings.Fields(`
-林知夏 苏晚晴 沈清欢 顾念安 陆星野 江予安 程书瑶 叶初雪 周亦辰 方可欣
-许晨曦 唐语嫣 宋子墨 韩晓月 白若溪 贺思远 夏沐阳 温以宁 黎安然 罗雨桐
-姜晚舟 邵景行 袁梦琪 马会宁 魏星河 段知远 汪小满 陶一诺 何书言 谢安歌
-彭念秋 邹雨薇 龚子涵 钟沐晴 邱晨朗 曾若南 韦乐天 傅青禾 杜向晚 秦明月
-小熊饼干 草莓奶昔 芝士玉米 海盐苏打 蓝莓松饼 橘子汽水 蜜桃乌龙 柠檬气泡
-薄荷可可 焦糖布丁 抹茶拿铁 芋泥波波 红豆年糕 奶油泡芙 香草曲奇 可乐加冰
-今天不熬夜 周末去钓鱼 正在吃火锅 喜欢晒太阳 先睡五分钟 一起看月亮 慢慢来就好
-不想写作业 爱喝冰美式 早起困难户 认真摸鱼中 周三喝奶茶 周末不加班 追剧到天亮
-像风一样快 月亮收集员 云朵搬运工 星星观察员 晚风听众 海边散步者 森林迷路人
-橘猫铲屎官 小狗探险家 企鹅冲刺中 松鼠存金币 白鲸游泳队 小鹿跑得快 狐狸不加班
-NovaMia LunaKai SunnyLeo CocoLin MiloChen IrisWang EthanXu RubyZhou OwenGu
-MasonHe DaisyLu KevinFan AliceQin FelixHan EmmaSong JasonYe MiaTang LeoShen
-LuckyAce CoolBean MoonKid SkyWalker PixelFox GameOn WinMore FastFish BigDream
-ZeroRush GoldPanda FireTiger NightOwl BlueWhale RedRocket StarPilot EchoWave
-`)
-
-var virtualNameSurnames = strings.Fields("陈 林 黄 张 王 李 刘 杨 赵 周 吴 徐 孙 朱 马 胡 郭 何 高 罗 梁 谢 宋 唐 许 韩 冯 曹 彭 曾 萧 田 董 袁 潘 于 蒋 蔡 杜")
-var virtualNameGivenNames = strings.Fields("安然 子涵 语桐 书瑶 景行 知夏 晨曦 若溪 念安 星野 清欢 沐阳 晚晴 子墨 雨薇 思远 一诺 青禾 可欣 明月 初雪 晓月 乐天 向晚 以宁 安歌 子言 予安 梦琪 晨朗 晚舟 若南 星河 子衿 书言 雨桐 可可 小满")
-
-func virtualDisplayNameCandidates() []string {
-	candidates := append([]string(nil), virtualDisplayNamePool...)
-	for _, surname := range virtualNameSurnames {
-		for _, givenName := range virtualNameGivenNames {
-			candidates = append(candidates, surname+givenName)
-		}
-	}
-	return candidates
-}
-
 func selectVirtualDisplayNames(used map[string]struct{}, count int) []string {
 	available := make([]string, 0, count)
-	for _, candidate := range virtualDisplayNameCandidates() {
+	for attempts := 0; len(available) < count; attempts++ {
+		candidate := faker.ChineseName()
+		switch rand.IntN(3) {
+		case 1:
+			candidate = faker.Username()
+		case 2:
+			candidate += "_" + faker.Username()
+		}
+		if attempts >= count*100 {
+			candidate = faker.Username() + "_" + uuid.NewString()[:8]
+		}
 		normalized := strings.ToLower(candidate)
 		if _, exists := used[normalized]; exists {
 			continue
@@ -416,21 +394,7 @@ func selectVirtualDisplayNames(used map[string]struct{}, count int) []string {
 		used[normalized] = struct{}{}
 		available = append(available, candidate)
 	}
-	for len(available) < count {
-		candidate := "星途玩家-" + strings.ToUpper(uuid.NewString()[:8])
-		normalized := strings.ToLower(candidate)
-		if _, exists := used[normalized]; exists {
-			continue
-		}
-		used[normalized] = struct{}{}
-		available = append(available, candidate)
-	}
-	indices := rand.Perm(len(available))
-	names := make([]string, count)
-	for i, index := range indices[:count] {
-		names[i] = available[index]
-	}
-	return names
+	return available
 }
 
 func (s *Service) randomVirtualDisplayNames(ctx context.Context, count int) ([]string, error) {
