@@ -204,32 +204,32 @@ func startLuluDraw(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool,
 		return cancel, done
 	}
 	settings := luluapp.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey)
-	runtime, err := settings.RuntimeConfig(ctx)
-	if err != nil || !runtime.Enabled {
-		logger.Warn("Lulu draw subscription is not configured")
-		return cancel, done
-	}
-	client, err := luludraw.NewClient(runtime.Token, runtime.ReceiverUID, runtime.ProtocolKey, cfg.LuluDrawGames)
-	if err != nil {
-		logger.Warn("Lulu draw subscription configuration is invalid")
-		return cancel, done
-	}
-	client.WithErrorHandler(func(game, operation string, err error) {
-		if drawCtx.Err() == nil {
-			logger.Warn("Lulu draw transport failed", "game", game, "operation", operation, "error", err)
-		}
-	})
 	syncService := externaldraw.NewService(pool, cfg.LuluDrawCloseBeforeSec)
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = client.Run(drawCtx, func(event luludraw.Event) {
-			if handleErr := syncService.Handle(drawCtx, event); handleErr != nil && drawCtx.Err() == nil {
-				logger.Error("Lulu draw event sync failed", "game", event.Game, "event", event.Kind, "round", event.Round, "error", handleErr)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		runLuluDrawReload(drawCtx, ticker.C, settings.RuntimeConfig, func(runtime luluapp.RuntimeConfig) (func(context.Context), error) {
+			client, err := luludraw.NewClient(runtime.Token, runtime.ReceiverUID, runtime.ProtocolKey, cfg.LuluDrawGames)
+			if err != nil {
+				return nil, err
 			}
-		})
+			return func(subscriptionCtx context.Context) {
+				client.WithErrorHandler(func(game, operation string, err error) {
+					if subscriptionCtx.Err() == nil {
+						logger.Warn("Lulu draw transport failed", "game", game, "operation", operation, "error", err)
+					}
+				})
+				logger.Info("Lulu draw subscription started", "games", cfg.LuluDrawGames, "config_version", runtime.Version)
+				_ = client.Run(subscriptionCtx, func(event luludraw.Event) {
+					if err := syncService.Handle(subscriptionCtx, event); err != nil && subscriptionCtx.Err() == nil {
+						logger.Error("Lulu draw event sync failed", "game", event.Game, "event", event.Kind, "round", event.Round, "error", err)
+					}
+				})
+			}, nil
+		}, logger)
 	}()
-	logger.Info("Lulu draw subscription started", "games", cfg.LuluDrawGames)
 	return cancel, done
 }
 
