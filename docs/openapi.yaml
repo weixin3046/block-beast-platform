@@ -5,7 +5,7 @@ info:
   description: |
     所有环境密码只要求非空且不能全为空白，不设长度上下限，仍受HTTP请求体大小限制。适用于注册、自助改密、后台创建/重置账号密码及全局操作密码；旧AUTH_STRICT_PASSWORD_POLICY开关不再生效。
     Socket个人投注结算事件game.bet.settled每位玩家每个round_id一条，bets包含中奖和未中奖主单，totals按币种汇总实际金额stake/payout/net_win；具体契约见docs/realtime-api.md。
-    0066起真实玩家注册和后台创建账号时原子创建上分/下分客服房间，虚拟账号不自动创建；POST /v1/chat/customer-service仍提供幂等获取或创建，注册响应结构不变。
+    0066起真实玩家注册和后台创建账号时原子创建上分/下分客服房间，0093起虚拟账号也原子创建，并补齐历史虚拟玩家缺失房间；POST /v1/chat/customer-service仍提供幂等获取或创建，注册响应结构不变。
     0067起所有账号仅保留最新成功登录会话，旧访问令牌返回401、旧刷新令牌失效；请求字段不变，无需设备ID。刷新沿用会话。迁移撤销旧会话，升级后需重新登录；Socket定期检测撤销并以1008关闭。
     金额响应去掉小数末尾多余的零，仍为字符串：2223.000000返回"2223"，1.500返回"1.5"，0.000返回"0"；有效小数不截断，币种decimals与输入精度限制不变。HTTP和Socket一致，旧示例补零金额以此规则为准。
     前端金额协议：请求提交实际币种金额（JSON数字或十进制字符串），响应仅返回实际金额的十进制字符串，不返回最小单位金额字段。币种精度由后端查询currencies表并转换。旧最小单位请求字段会被拒绝。链上机器回调仍遵循其签名协议。
@@ -1715,7 +1715,7 @@ paths:
       tags:
       - Operations
       summary: 创建可登录但不能下分的虚拟账户
-      description: admin/operator 可创建。count 为 1–100 时以 login_name 为前缀生成可排序的编号账号（如 sadewf1 到 sadewf99），密码相同，空昵称各自生成随机 2–5 字昵称。头像只能使用当前操作人已确认的图片上传 storage_key；不接受外链。创建不启动挂机，无需初始余额，随后通过 robot-plans 创建计划。
+      description: admin/operator 可创建。count 为 1–100 时以 login_name 为前缀生成可排序的编号账号（如 sadewf1 到 sadewf99），密码相同，空昵称随机混用中文人名、日常昵称、英文昵称和游戏 ID，并排除已有虚拟账号昵称。头像只能使用当前操作人已确认的图片上传 storage_key；不接受外链。创建不启动挂机，无需初始余额，随后通过 robot-plans 创建计划。
       security:
       - bearerAuth: []
       requestBody:

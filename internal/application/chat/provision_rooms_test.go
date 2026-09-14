@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestProvisionCustomerRoomsPreservesExistingAndSkipsVirtual(t *testing.T) {
+func TestProvisionCustomerRoomsPreservesExistingAndIncludesVirtual(t *testing.T) {
 	dsn := os.Getenv("POSTGRES_TEST_DSN")
 	if dsn == "" {
 		t.Skip("POSTGRES_TEST_DSN is not set")
@@ -49,7 +49,7 @@ func TestProvisionCustomerRoomsPreservesExistingAndSkipsVirtual(t *testing.T) {
 	if e = tx.QueryRow(ctx, `SELECT count(*) FROM chat_rooms WHERE customer_user_id=$1`, virtual).Scan(&virtualRooms); e != nil {
 		t.Fatal(e)
 	}
-	if rooms != 2 || members != 2 || !preserved || virtualRooms != 0 {
+	if rooms != 2 || members != 2 || !preserved || virtualRooms != 2 {
 		t.Fatalf("rooms=%d members=%d preserved=%t virtual=%d", rooms, members, preserved, virtualRooms)
 	}
 }

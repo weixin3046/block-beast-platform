@@ -135,3 +135,81 @@ func TestVirtualCreationAvatarOwnershipAndRead(t *testing.T) {
 	}
 	reader.Close()
 }
+
+func TestVirtualBatchNamesAndRooms(t *testing.T) {
+	dsn := os.Getenv("POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("POSTGRES_TEST_DSN not set")
+	}
+	ctx := context.Background()
+	p, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	accounts, err := NewService(p).CreateVirtualAccounts(ctx, VirtualAccountInput{LoginName: "batch-" + uuid.NewString(), Password: "test", Count: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	characters := map[rune]bool{}
+	for _, a := range accounts {
+		if names[a.DisplayName] {
+			t.Fatalf("duplicate name: %s", a.DisplayName)
+		}
+		names[a.DisplayName] = true
+		for _, r := range a.DisplayName {
+			characters[r] = true
+		}
+		var rooms int
+		err := p.QueryRow(ctx, `SELECT count(*) FROM chat_rooms r JOIN users u ON u.id=r.customer_user_id JOIN chat_room_members m ON m.room_id=r.id AND m.user_id=u.id AND m.member_role='owner' WHERE u.public_id=$1 AND r.service_type IN ('deposit','withdrawal')`, a.UserID).Scan(&rooms)
+		if err != nil || rooms != 2 {
+			t.Fatalf("user %d rooms=%d err=%v", a.UserID, rooms, err)
+		}
+	}
+	if len(characters) < 40 {
+		t.Fatalf("nickname vocabulary too narrow: %d characters", len(characters))
+	}
+	secondBatch, err := NewService(p).CreateVirtualAccounts(ctx, VirtualAccountInput{LoginName: "second-batch-" + uuid.NewString(), Password: "test", Count: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range secondBatch {
+		if names[account.DisplayName] {
+			t.Fatalf("nickname repeats an earlier batch: %s", account.DisplayName)
+		}
+	}
+}
+
+func TestVirtualNameVocabulary(t *testing.T) {
+	characters := map[rune]bool{}
+	names := map[string]bool{}
+	for _, name := range virtualDisplayNameCandidates()[:100] {
+		if names[name] {
+			t.Fatalf("duplicate name: %s", name)
+		}
+		names[name] = true
+		for _, r := range name {
+			characters[r] = true
+		}
+	}
+	if len(characters) < 100 {
+		t.Fatalf("nickname vocabulary too narrow: %d characters", len(characters))
+	}
+}
+
+func TestVirtualDisplayNameFallbackDoesNotExhaust(t *testing.T) {
+	used := map[string]struct{}{}
+	for _, name := range virtualDisplayNameCandidates() {
+		used[strings.ToLower(name)] = struct{}{}
+	}
+	names := selectVirtualDisplayNames(used, 2)
+	if len(names) != 2 || names[0] == names[1] {
+		t.Fatalf("fallback names=%v", names)
+	}
+	for _, name := range names {
+		if !strings.HasPrefix(name, "星途玩家-") {
+			t.Fatalf("expected fallback name, got %s", name)
+		}
+	}
+}

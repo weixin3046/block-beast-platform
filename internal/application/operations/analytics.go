@@ -2,9 +2,9 @@ package operations
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -373,23 +373,84 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	return created, nil
 }
 
-var virtualNameParts = []string{"阿", "乐", "星", "小", "云", "森", "安", "米", "诺", "言", "夏", "青", "可", "元", "飞", "果"}
+// This intentionally mixes people names, casual handles, English names, and
+// game-style IDs. Picking from a curated pool avoids batches that all follow
+// the same visible prefix/suffix pattern.
+var virtualDisplayNamePool = strings.Fields(`
+林知夏 苏晚晴 沈清欢 顾念安 陆星野 江予安 程书瑶 叶初雪 周亦辰 方可欣
+许晨曦 唐语嫣 宋子墨 韩晓月 白若溪 贺思远 夏沐阳 温以宁 黎安然 罗雨桐
+姜晚舟 邵景行 袁梦琪 马会宁 魏星河 段知远 汪小满 陶一诺 何书言 谢安歌
+彭念秋 邹雨薇 龚子涵 钟沐晴 邱晨朗 曾若南 韦乐天 傅青禾 杜向晚 秦明月
+小熊饼干 草莓奶昔 芝士玉米 海盐苏打 蓝莓松饼 橘子汽水 蜜桃乌龙 柠檬气泡
+薄荷可可 焦糖布丁 抹茶拿铁 芋泥波波 红豆年糕 奶油泡芙 香草曲奇 可乐加冰
+今天不熬夜 周末去钓鱼 正在吃火锅 喜欢晒太阳 先睡五分钟 一起看月亮 慢慢来就好
+不想写作业 爱喝冰美式 早起困难户 认真摸鱼中 周三喝奶茶 周末不加班 追剧到天亮
+像风一样快 月亮收集员 云朵搬运工 星星观察员 晚风听众 海边散步者 森林迷路人
+橘猫铲屎官 小狗探险家 企鹅冲刺中 松鼠存金币 白鲸游泳队 小鹿跑得快 狐狸不加班
+NovaMia LunaKai SunnyLeo CocoLin MiloChen IrisWang EthanXu RubyZhou OwenGu
+MasonHe DaisyLu KevinFan AliceQin FelixHan EmmaSong JasonYe MiaTang LeoShen
+LuckyAce CoolBean MoonKid SkyWalker PixelFox GameOn WinMore FastFish BigDream
+ZeroRush GoldPanda FireTiger NightOwl BlueWhale RedRocket StarPilot EchoWave
+`)
 
-func randomVirtualDisplayName() string {
-	length := 2
-	var b [1]byte
-	if _, err := rand.Read(b[:]); err == nil {
-		length += int(b[0] % 4)
-	}
-	name := make([]string, length)
-	for i := range name {
-		if _, err := rand.Read(b[:]); err == nil {
-			name[i] = virtualNameParts[int(b[0])%len(virtualNameParts)]
-		} else {
-			name[i] = virtualNameParts[i%len(virtualNameParts)]
+var virtualNameSurnames = strings.Fields("陈 林 黄 张 王 李 刘 杨 赵 周 吴 徐 孙 朱 马 胡 郭 何 高 罗 梁 谢 宋 唐 许 韩 冯 曹 彭 曾 萧 田 董 袁 潘 于 蒋 蔡 杜")
+var virtualNameGivenNames = strings.Fields("安然 子涵 语桐 书瑶 景行 知夏 晨曦 若溪 念安 星野 清欢 沐阳 晚晴 子墨 雨薇 思远 一诺 青禾 可欣 明月 初雪 晓月 乐天 向晚 以宁 安歌 子言 予安 梦琪 晨朗 晚舟 若南 星河 子衿 书言 雨桐 可可 小满")
+
+func virtualDisplayNameCandidates() []string {
+	candidates := append([]string(nil), virtualDisplayNamePool...)
+	for _, surname := range virtualNameSurnames {
+		for _, givenName := range virtualNameGivenNames {
+			candidates = append(candidates, surname+givenName)
 		}
 	}
-	return strings.Join(name, "")
+	return candidates
+}
+
+func selectVirtualDisplayNames(used map[string]struct{}, count int) []string {
+	available := make([]string, 0, count)
+	for _, candidate := range virtualDisplayNameCandidates() {
+		normalized := strings.ToLower(candidate)
+		if _, exists := used[normalized]; exists {
+			continue
+		}
+		used[normalized] = struct{}{}
+		available = append(available, candidate)
+	}
+	for len(available) < count {
+		candidate := "星途玩家-" + strings.ToUpper(uuid.NewString()[:8])
+		normalized := strings.ToLower(candidate)
+		if _, exists := used[normalized]; exists {
+			continue
+		}
+		used[normalized] = struct{}{}
+		available = append(available, candidate)
+	}
+	indices := rand.Perm(len(available))
+	names := make([]string, count)
+	for i, index := range indices[:count] {
+		names[i] = available[index]
+	}
+	return names
+}
+
+func (s *Service) randomVirtualDisplayNames(ctx context.Context, count int) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT lower(display_name) FROM users WHERE is_virtual=true`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	used := make(map[string]struct{})
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		used[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return selectVirtualDisplayNames(used, count), nil
 }
 
 func (s *Service) CreateVirtualAccounts(ctx context.Context, in VirtualAccountInput) ([]VirtualAccount, error) {
@@ -401,6 +462,14 @@ func (s *Service) CreateVirtualAccounts(ctx context.Context, in VirtualAccountIn
 	}
 	accounts := make([]VirtualAccount, 0, in.Count)
 	base := strings.TrimSpace(in.LoginName)
+	var names []string
+	if strings.TrimSpace(in.DisplayName) == "" {
+		var err error
+		names, err = s.randomVirtualDisplayNames(ctx, in.Count)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for i := 1; i <= in.Count; i++ {
 		item := in
 		item.Count = 0
@@ -408,7 +477,7 @@ func (s *Service) CreateVirtualAccounts(ctx context.Context, in VirtualAccountIn
 			item.LoginName = base + strconv.Itoa(i)
 		}
 		if strings.TrimSpace(item.DisplayName) == "" {
-			item.DisplayName = randomVirtualDisplayName()
+			item.DisplayName = names[i-1]
 		}
 		account, err := s.CreateVirtualAccount(ctx, item)
 		if err != nil {
