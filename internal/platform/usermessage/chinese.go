@@ -293,7 +293,7 @@ var messages = map[string]string{
 	"login_name, password and invitation_code are required":                    "请填写账号、密码和邀请码",
 	"logout is unavailable":                                                    "退出登录服务暂不可用",
 	"message must contain 1-2000 characters":                                   "消息内容须为 1 至 2000 个字符",
-	"missing or invalid access token":                                          "登录凭证缺失或无效，请重新登录",
+	"missing or invalid access token":                                          "登录状态已无效，请重新登录",
 	"missing required bet fields":                                              "请填写完整的投注参数",
 	"missing required fields":                                                  "缺少必填参数",
 	"offset must be zero or greater":                                           "分页偏移量不能小于 0",
@@ -486,4 +486,5 @@ var messages = map[string]string{
 	"unable to update virtual automation":                                     "修改虚拟账号挂机配置失败",
 	"unable to verify secondary password":                                     "验证二级密码失败",
 	"unable to verify upload":                                                 "确认上传文件失败",
+	"invalid chat room query":                                                 "聊天室查询参数无效",
 }

@@ -31,9 +31,15 @@ done
 
 cp migrations/*.sql "${WORK_DIR}/release/migrations/"
 cp scripts/migrate.sh scripts/deploy-baota-remote.sh "${WORK_DIR}/release/scripts/"
+# 统一入口显式提供生产配置；旧调用方式仍沿用服务器已有配置。
+if [ -n "${DEPLOY_ENV_FILE:-}" ]; then
+  [ -f "${DEPLOY_ENV_FILE}" ] || { echo "生产配置不存在" >&2; exit 1; }
+  cp "${DEPLOY_ENV_FILE}" "${WORK_DIR}/release/.env.production"
+  chmod 0600 "${WORK_DIR}/release/.env.production"
+fi
 chmod 0755 "${WORK_DIR}/release/scripts/"*.sh
 COPYFILE_DISABLE=1 tar -C "${WORK_DIR}/release" -czf "${ARCHIVE}" .
 
-ssh "${DEPLOY_HOST}" "mkdir -p '${REMOTE_RELEASE}'"
+ssh "${DEPLOY_HOST}" "umask 077; mkdir -p '${REMOTE_RELEASE}'"
 scp "${ARCHIVE}" "${DEPLOY_HOST}:/tmp/block-beast-${VERSION}.tar.gz"
 ssh "${DEPLOY_HOST}" "tar -xzf '/tmp/block-beast-${VERSION}.tar.gz' -C '${REMOTE_RELEASE}' && rm -f '/tmp/block-beast-${VERSION}.tar.gz' && bash '${REMOTE_RELEASE}/scripts/deploy-baota-remote.sh' '${REMOTE_RELEASE}'"

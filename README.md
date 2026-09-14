@@ -255,3 +255,7 @@ DEPLOY_HOST=root@121.43.230.83 ./scripts/deploy-baota.sh
 发布包的五个可执行程序统一位于 `bin/`，与服务启动路径
 `/opt/block-beast/current/bin/<进程名>` 保持一致。远程脚本在停止服务前检查
 这些文件及迁移脚本是否存在、可执行；目录不匹配时直接拒绝发布。
+
+### 新的部署命令
+./scripts/deploy.sh staging
+./scripts/deploy.sh production

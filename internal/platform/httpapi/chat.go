@@ -12,7 +12,7 @@ import (
 type ChatService interface {
 	DeleteMessage(ctx context.Context, roomID, messageID, actorID string) error
 	OpenCustomerServiceRooms(ctx context.Context, userID string) (chat.CustomerServiceRooms, error)
-	ListRooms(ctx context.Context, userID string, staff bool, limit int) ([]chat.Room, error)
+	ListRooms(ctx context.Context, userID string, staff bool, query chat.RoomQuery) ([]chat.Room, error)
 	ListMessages(ctx context.Context, roomID, userID string, staff bool, limit int) ([]chat.Message, error)
 }
 
@@ -40,7 +40,15 @@ func (server *Server) chatRooms(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
-	items, err := server.chat.ListRooms(request.Context(), claims.Subject, isStaff(claims), queryLimit(request, 50))
+	items, err := server.chat.ListRooms(request.Context(), claims.Subject, isStaff(claims), chat.RoomQuery{
+		ServiceType: request.URL.Query().Get("service_type"),
+		Search:      request.URL.Query().Get("q"),
+		Limit:       queryLimit(request, 50),
+	})
+	if errors.Is(err, chat.ErrInvalidRoomQuery) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid chat room query"})
+		return
+	}
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list chat rooms"})
 		return

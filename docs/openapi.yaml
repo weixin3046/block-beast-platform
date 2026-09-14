@@ -1715,7 +1715,7 @@ paths:
       tags:
       - Operations
       summary: 创建可登录但不能下分的虚拟账户
-      description: admin/operator 可创建。count 为 1–100 时以 login_name 为前缀生成可排序的编号账号（如 sadewf1 到 sadewf99），密码相同，空昵称使用成熟资料生成库生成中文姓名、用户名及其组合，并排除已有虚拟账号昵称。头像只能使用当前操作人已确认的图片上传 storage_key；不接受外链。创建不启动挂机，无需初始余额，随后通过 robot-plans 创建计划。
+      description: admin/operator 可创建。count 为 1–100 时以 login_name 为前缀生成可排序的编号账号（如 sadewf1 到 sadewf99），密码相同，空昵称使用成熟资料生成库随机生成 2–8 位中文昵称，并排除已有虚拟账号昵称；大量同名碰撞时使用 8 位中文编码标识。头像只能使用当前操作人已确认的图片上传 storage_key；不接受外链。创建不启动挂机，无需初始余额，随后通过 robot-plans 创建计划。
       security:
       - bearerAuth: []
       requestBody:
@@ -3826,7 +3826,7 @@ paths:
     get:
       tags:
       - Chat
-      summary: 查询当前账号可访问的聊天房间
+      summary: 查询当前账号可访问的聊天房间；后台可筛选和搜索客服会话
       security:
       - bearerAuth: []
       parameters:
@@ -3837,6 +3837,18 @@ paths:
           minimum: 1
           maximum: 100
           default: 50
+      - name: service_type
+        in: query
+        schema:
+          type: string
+          enum: [deposit, withdrawal]
+        description: 后台客服队列筛选；deposit 为上分，withdrawal 为下分。
+      - name: q
+        in: query
+        schema:
+          type: string
+          maxLength: 100
+        description: 后台客服会话搜索，匹配玩家公开ID、账号、昵称或邀请码。
       responses:
         '200':
           description: 房间列表。
@@ -6790,6 +6802,9 @@ components:
           description: 客服会话列表中的玩家公开ID
         customer_display_name:
           type: string
+        customer_login_name:
+          type: string
+          description: 客服会话列表中的玩家登录账号。
         customer_invitation_code:
           type: integer
           format: int64
@@ -6812,6 +6827,10 @@ components:
         created_at:
           type: string
           format: date-time
+        last_message_at:
+          type: string
+          format: date-time
+          description: 最近一条可见消息时间；无消息时省略。客服列表按此时间倒序。
     CustomerServiceRooms:
       type: object
       required:

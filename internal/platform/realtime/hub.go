@@ -108,7 +108,7 @@ func (hub *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	token, protocol := accessToken(request)
 	claims, err := identity.VerifyAccessToken(hub.secret, token, time.Now().UTC())
 	if err != nil || !hub.validSession(request.Context(), claims) {
-		http.Error(writer, "登录凭证缺失或无效，请重新登录", http.StatusUnauthorized)
+		http.Error(writer, "登录状态已无效，请重新登录", http.StatusUnauthorized)
 		return
 	}
 	options := &websocket.AcceptOptions{OriginPatterns: hub.origins}

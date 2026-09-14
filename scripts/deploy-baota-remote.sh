@@ -24,9 +24,23 @@ done
 [ -r "${ENV_FILE}" ] || { echo "无法读取环境文件: ${ENV_FILE}" >&2; exit 1; }
 [ -x "${SUPERVISORCTL}" ] || { echo "无法执行 Supervisor: ${SUPERVISORCTL}" >&2; exit 1; }
 
+# 保存配置和发布链接；失败时恢复旧配置及旧发布目录。
+ENV_BACKUP=""
+PREVIOUS_RELEASE="$(readlink -f "${APP_DIR}/current" || true)"
+if [ -f "${RELEASE_DIR}/.env.production" ]; then
+  ENV_BACKUP="${ENV_FILE}.backup-$(date -u +%Y%m%dT%H%M%SZ)"
+  cp -p "${ENV_FILE}" "${ENV_BACKUP}"
+fi
 started=0
 restore_services() {
   if [ "${started}" -eq 0 ]; then
+    if [ -n "${ENV_BACKUP}" ]; then
+      cp -p "${ENV_BACKUP}" "${ENV_FILE}"
+    fi
+    if [ -n "${PREVIOUS_RELEASE}" ]; then
+      ln -sfn "${PREVIOUS_RELEASE}" "${APP_DIR}/current.next"
+      mv -Tf "${APP_DIR}/current.next" "${APP_DIR}/current"
+    fi
     "${SUPERVISORCTL}" start "${SERVICES[@]}" >/dev/null 2>&1 || true
   fi
 }
@@ -34,6 +48,12 @@ trap restore_services EXIT
 
 "${SUPERVISORCTL}" stop "${SERVICES[@]}"
 
+# 保留原配置属主、权限，供现有启动脚本读取。
+if [ -n "${ENV_BACKUP}" ]; then
+  cp -p "${ENV_FILE}" "${ENV_FILE}.next"
+  cat "${RELEASE_DIR}/.env.production" > "${ENV_FILE}.next"
+  mv -f "${ENV_FILE}.next" "${ENV_FILE}"
+fi
 set -a
 # shellcheck disable=SC1090
 . "${ENV_FILE}"

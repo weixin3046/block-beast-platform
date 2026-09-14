@@ -18,6 +18,7 @@ var ErrRoomAccessDenied = errors.New("chat room access denied")
 var ErrChatMuted = errors.New("账号已被禁言")
 var ErrInvalidMessage = errors.New("message must contain 1-2000 characters")
 var ErrInvalidRequestID = errors.New("client_request_id is required")
+var ErrInvalidRoomQuery = errors.New("invalid chat room query")
 
 const (
 	ServiceTypeDeposit    = "deposit"
@@ -25,13 +26,21 @@ const (
 )
 
 type Room struct {
-	CustomerUserID         *int64    `json:"customer_user_id,omitempty"`
-	CustomerDisplayName    *string   `json:"customer_display_name,omitempty"`
-	CustomerInvitationCode *int64    `json:"customer_invitation_code,omitempty"`
-	ID                     string    `json:"id"`
-	Type                   string    `json:"type"`
-	ServiceType            string    `json:"service_type,omitempty"`
-	CreatedAt              time.Time `json:"created_at"`
+	CustomerUserID         *int64     `json:"customer_user_id,omitempty"`
+	CustomerDisplayName    *string    `json:"customer_display_name,omitempty"`
+	CustomerLoginName      *string    `json:"customer_login_name,omitempty"`
+	CustomerInvitationCode *int64     `json:"customer_invitation_code,omitempty"`
+	LastMessageAt          *time.Time `json:"last_message_at,omitempty"`
+	ID                     string     `json:"id"`
+	Type                   string     `json:"type"`
+	ServiceType            string     `json:"service_type,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+}
+
+type RoomQuery struct {
+	ServiceType string
+	Search      string
+	Limit       int
 }
 
 type CustomerServiceRooms struct {
@@ -109,17 +118,33 @@ func (service *Service) OpenCustomerServiceRooms(ctx context.Context, userID str
 	return rooms, nil
 }
 
-func (service *Service) ListRooms(ctx context.Context, userID string, staff bool, limit int) ([]Room, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 50
+func (service *Service) ListRooms(ctx context.Context, userID string, staff bool, query RoomQuery) ([]Room, error) {
+	query.ServiceType = strings.TrimSpace(query.ServiceType)
+	query.Search = strings.TrimSpace(query.Search)
+	if query.ServiceType != "" && query.ServiceType != ServiceTypeDeposit && query.ServiceType != ServiceTypeWithdrawal {
+		return nil, ErrInvalidRoomQuery
+	}
+	if len(query.Search) > 100 {
+		return nil, ErrInvalidRoomQuery
+	}
+	if query.Limit <= 0 || query.Limit > 100 {
+		query.Limit = 50
 	}
 	rows, err := service.pool.Query(ctx, `
-		SELECT DISTINCT r.id::text,r.room_type,COALESCE(r.service_type,''),r.created_at,u.public_id,u.display_name,u.invitation_code
+		SELECT r.id::text,r.room_type,COALESCE(r.service_type,''),r.created_at,u.public_id,u.display_name,u.login_name,u.invitation_code,last_message.last_message_at
 		FROM chat_rooms r
 		LEFT JOIN users u ON u.id=r.customer_user_id AND r.room_type='customer_service'
 		LEFT JOIN chat_room_members m ON m.room_id=r.id AND m.user_id=$1
-		WHERE r.room_type IN ('global','game') OR m.user_id IS NOT NULL OR ($2 AND r.room_type='customer_service')
-		ORDER BY r.created_at DESC LIMIT $3`, userID, staff, limit)
+		LEFT JOIN LATERAL (
+			SELECT max(created_at) AS last_message_at FROM chat_messages
+			WHERE room_id=r.id AND status='visible'
+		) last_message ON true
+		WHERE (r.room_type IN ('global','game') OR m.user_id IS NOT NULL OR ($2 AND r.room_type='customer_service'))
+		AND ($3='' OR (r.room_type='customer_service' AND r.service_type=$3))
+		AND ($4='' OR (r.room_type='customer_service' AND (
+			u.public_id::text=$4 OR u.invitation_code::text=$4 OR u.login_name ILIKE '%' || $4 || '%' OR u.display_name ILIKE '%' || $4 || '%'
+		)))
+		ORDER BY COALESCE(last_message.last_message_at,r.created_at) DESC,r.id DESC LIMIT $5`, userID, staff, query.ServiceType, query.Search, query.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +152,7 @@ func (service *Service) ListRooms(ctx context.Context, userID string, staff bool
 	items := make([]Room, 0)
 	for rows.Next() {
 		var item Room
-		if err := rows.Scan(&item.ID, &item.Type, &item.ServiceType, &item.CreatedAt, &item.CustomerUserID, &item.CustomerDisplayName, &item.CustomerInvitationCode); err != nil {
+		if err := rows.Scan(&item.ID, &item.Type, &item.ServiceType, &item.CreatedAt, &item.CustomerUserID, &item.CustomerDisplayName, &item.CustomerLoginName, &item.CustomerInvitationCode, &item.LastMessageAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

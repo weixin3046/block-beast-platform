@@ -35,7 +35,7 @@ func TestChineseHandshakeFailures(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		hub.ServeHTTP(w, r)
-		wantCode, want := http.StatusUnauthorized, "登录凭证缺失或无效，请重新登录"
+		wantCode, want := http.StatusUnauthorized, "登录状态已无效，请重新登录"
 		if authenticated {
 			wantCode, want = http.StatusUpgradeRequired, "请通过 WebSocket 协议建立连接"
 		}

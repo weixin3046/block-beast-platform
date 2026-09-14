@@ -374,18 +374,44 @@ func (s *Service) CreateVirtualAccount(ctx context.Context, in VirtualAccountInp
 	return created, nil
 }
 
+var chineseHexDigits = []rune("零一二三四五六七八九甲乙丙丁戊己")
+
+func chineseUniqueSuffix(length int) string {
+	id := uuid.NewString()
+	var suffix strings.Builder
+	written := 0
+	for _, r := range id {
+		if r == '-' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			suffix.WriteRune(chineseHexDigits[r-'0'])
+		} else {
+			suffix.WriteRune(chineseHexDigits[r-'a'+10])
+		}
+		written++
+		if written == length {
+			break
+		}
+	}
+	return suffix.String()
+}
+
+func randomChineseNickname() string {
+	length := 2 + rand.IntN(7)
+	name := []rune(faker.ChineseFirstName())
+	for len(name) < length {
+		name = append(name, []rune(faker.ChineseLastName())...)
+	}
+	return string(name[:length])
+}
+
 func selectVirtualDisplayNames(used map[string]struct{}, count int) []string {
 	available := make([]string, 0, count)
 	for attempts := 0; len(available) < count; attempts++ {
-		candidate := faker.ChineseName()
-		switch rand.IntN(3) {
-		case 1:
-			candidate = faker.Username()
-		case 2:
-			candidate += "_" + faker.Username()
-		}
+		candidate := randomChineseNickname()
 		if attempts >= count*100 {
-			candidate = faker.Username() + "_" + uuid.NewString()[:8]
+			candidate = "号" + chineseUniqueSuffix(7)
 		}
 		normalized := strings.ToLower(candidate)
 		if _, exists := used[normalized]; exists {

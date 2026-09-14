@@ -21,12 +21,25 @@ func (stubChatService) OpenCustomerServiceRooms(context.Context, string) (chat.C
 	return chat.CustomerServiceRooms{Deposit: chat.Room{ID: "room-1", Type: "customer_service", ServiceType: chat.ServiceTypeDeposit}, Withdrawal: chat.Room{ID: "room-2", Type: "customer_service", ServiceType: chat.ServiceTypeWithdrawal}}, nil
 }
 
-func (stubChatService) ListRooms(context.Context, string, bool, int) ([]chat.Room, error) {
+func (stubChatService) ListRooms(context.Context, string, bool, chat.RoomQuery) ([]chat.Room, error) {
 	return []chat.Room{{ID: "room-1"}}, nil
 }
 
 func (stubChatService) ListMessages(context.Context, string, string, bool, int) ([]chat.Message, error) {
 	return []chat.Message{}, nil
+}
+
+type roomQueryStub struct {
+	stubChatService
+	query chat.RoomQuery
+}
+
+func (s *roomQueryStub) ListRooms(_ context.Context, _ string, _ bool, query chat.RoomQuery) ([]chat.Room, error) {
+	s.query = query
+	if query.ServiceType == "bad" {
+		return nil, chat.ErrInvalidRoomQuery
+	}
+	return []chat.Room{{ID: "room-1"}}, nil
 }
 
 func TestOpenCustomerServiceRoomsReturnsBothRooms(t *testing.T) {
@@ -46,6 +59,26 @@ func TestOpenCustomerServiceRoomsReturnsBothRooms(t *testing.T) {
 	}
 	if rooms.Deposit.ServiceType != chat.ServiceTypeDeposit || rooms.Withdrawal.ServiceType != chat.ServiceTypeWithdrawal {
 		t.Fatalf("service types = %+v", rooms)
+	}
+}
+
+func TestChatRoomsPassesCustomerServiceFilters(t *testing.T) {
+	service := &roomQueryStub{}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithChat(service))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/chat/rooms?service_type=deposit&q=10110&limit=20", nil))
+	if response.Code != http.StatusOK || service.query.ServiceType != chat.ServiceTypeDeposit || service.query.Search != "10110" || service.query.Limit != 20 {
+		t.Fatalf("status=%d query=%+v", response.Code, service.query)
+	}
+}
+
+func TestChatRoomsRejectsInvalidCustomerServiceType(t *testing.T) {
+	service := &roomQueryStub{}
+	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithChat(service))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/chat/rooms?service_type=bad", nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d", response.Code)
 	}
 }
 

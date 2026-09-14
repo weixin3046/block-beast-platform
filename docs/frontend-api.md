@@ -238,7 +238,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 }
 ```
 
-`count` 省略时创建一个账号；填写 1–100 时以 `login_name` 为前缀生成可排序账号，例如上述请求生成 `sadewf1` 到 `sadewf99`。整批账号使用同一个密码；昵称留空时，使用成熟资料生成库生成中文姓名、用户名及其组合，并排除已有虚拟账号昵称。账号 ID 由后端生成，保存响应的 `user_id`。初始余额传真实金额，不乘精度；不需要的币种省略，不传零。创建默认不开启挂机。账号有 player 角色，可使用 `POST /v1/auth/login` 正常登录；不需要先登录玩家账号才能保存挂机配置。创建接口没有请求幂等键，网络超时应先按登录名查询确认，避免盲目重试。
+`count` 省略时创建一个账号；填写 1–100 时以 `login_name` 为前缀生成可排序账号，例如上述请求生成 `sadewf1` 到 `sadewf99`。整批账号使用同一个密码；昵称留空时，使用成熟资料生成库随机生成 2–8 位中文昵称，并排除已有虚拟账号昵称。发生大量同名碰撞时，会使用 8 位中文编码标识。账号 ID 由后端生成，保存响应的 `user_id`。初始余额传真实金额，不乘精度；不需要的币种省略，不传零。创建默认不开启挂机。账号有 player 角色，可使用 `POST /v1/auth/login` 正常登录；不需要先登录玩家账号才能保存挂机配置。创建接口没有请求幂等键，网络超时应先按登录名查询确认，避免盲目重试。
 
 `display_name` 可省略或传空白，单个创建时后端生成“用户+公开用户ID”，批量创建时使用上述随机昵称；自定义昵称去除首尾空白后最多100字节。`avatar_url` 可省略或为空；指定头像时，使用同一个后台操作人的令牌调用 `POST /v1/uploads/authorize` → 按返回的上传地址、方法和请求头上传图片 → `POST /v1/uploads/{upload_id}/confirm`，把已确认记录的 `storage_key` 传给创建接口。仅支持 JPEG/PNG/WebP，不接受外链、未确认图片或其他操作人的上传。不需要转交上传记录所有权，也不需要登录机器人上传。
 
@@ -923,7 +923,7 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 ## 聊天与客服
 
 - `POST /v1/chat/customer-service`：幂等获取或创建玩家自己的两间独立客服房间。响应中的 `deposit` 是上分（充值）客服，`withdrawal` 是下分（提现）客服；前端首次进入客服页调用一次并分别保存两个 `id`。
-- `GET /v1/chat/rooms`：玩家查询全局聊天室和自己的两间客服房间；后台角色可查询全部客服房间。客服房间会返回 `service_type`：`deposit` 为上分客服，`withdrawal` 为下分客服。
+- `GET /v1/chat/rooms`：玩家查询全局聊天室和自己的两间客服房间；后台角色可查询全部客服房间。后台客服队列可传 `service_type=deposit|withdrawal` 筛选上分/下分，传 `q` 按玩家公开ID、登录账号、昵称或邀请码搜索；结果按 `last_message_at` 倒序。客服房间会返回 `service_type`：`deposit` 为上分客服，`withdrawal` 为下分客服，并包含 `customer_login_name`。
 - `GET /v1/chat/rooms/{roomID}/messages`：查询可访问房间的最近消息。
 - 发送消息：使用 WebSocket `chat.send` 命令，不能再调用 HTTP `POST /v1/chat/rooms/{roomID}/messages`。
 

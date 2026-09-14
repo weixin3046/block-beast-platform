@@ -188,6 +188,14 @@ func TestVirtualNameVocabulary(t *testing.T) {
 		if names[name] {
 			t.Fatalf("duplicate name: %s", name)
 		}
+		if length := len([]rune(name)); length < 2 || length > 8 {
+			t.Fatalf("nickname length=%d name=%s", length, name)
+		}
+		for _, r := range name {
+			if r < 0x3400 || r > 0x9fff {
+				t.Fatalf("non-Chinese nickname: %s", name)
+			}
+		}
 		names[name] = true
 		for _, r := range name {
 			characters[r] = true
@@ -202,5 +210,10 @@ func TestVirtualDisplayNameGeneratorDoesNotExhaust(t *testing.T) {
 	names := selectVirtualDisplayNames(map[string]struct{}{}, 1000)
 	if len(names) != 1000 {
 		t.Fatalf("names=%d", len(names))
+	}
+	for _, name := range names {
+		if length := len([]rune(name)); length < 2 || length > 8 {
+			t.Fatalf("nickname length=%d name=%s", length, name)
+		}
 	}
 }

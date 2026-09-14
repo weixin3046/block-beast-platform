@@ -81,7 +81,7 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	if err != nil || sameRooms.Deposit.ID != room.ID || sameRooms.Withdrawal.ID != rooms.Withdrawal.ID {
 		t.Fatalf("idempotent rooms = %+v, err = %v", sameRooms, err)
 	}
-	listed, err := service.ListRooms(ctx, userID, false, 100)
+	listed, err := service.ListRooms(ctx, userID, false, RoomQuery{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	for _, item := range listed {
 		if item.ID == room.ID {
 			found = true
-			if item.CustomerUserID == nil || *item.CustomerUserID < 100000 || item.CustomerDisplayName == nil || *item.CustomerDisplayName != "chat user" || item.CustomerInvitationCode == nil {
+			if item.CustomerUserID == nil || *item.CustomerUserID <= 0 || item.CustomerDisplayName == nil || *item.CustomerDisplayName != "chat user" || item.CustomerInvitationCode == nil {
 				t.Fatalf("customer identity: %+v", item)
 			}
 		}
@@ -97,7 +97,7 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 	if !found {
 		t.Fatal("own customer room missing")
 	}
-	otherRooms, err := service.ListRooms(ctx, otherUserID, false, 100)
+	otherRooms, err := service.ListRooms(ctx, otherUserID, false, RoomQuery{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,11 +106,15 @@ func TestCustomerServiceMessagePersistenceAndIdempotency(t *testing.T) {
 			t.Fatal("other player's customer room leaked")
 		}
 	}
+	staffRooms, err := service.ListRooms(ctx, staffIDs[0], true, RoomQuery{ServiceType: ServiceTypeDeposit, Search: "chat-" + userID, Limit: 100})
+	if err != nil || len(staffRooms) != 1 || staffRooms[0].ID != room.ID {
+		t.Fatalf("staff search=%+v err=%v", staffRooms, err)
+	}
 	first, created, err := service.SendMessage(ctx, room.ID, userID, "request-1", "hello", false)
 	if err != nil || !created {
 		t.Fatalf("send message = %+v/%v/%v", first, created, err)
 	}
-	if first.Sender == nil || first.Sender.UserID < 100000 || first.Sender.DisplayName != "chat user" || first.Sender.AvatarURL != "https://cdn.example/chat-user.png" {
+	if first.Sender == nil || first.Sender.UserID <= 0 || first.Sender.DisplayName != "chat user" || first.Sender.AvatarURL != "https://cdn.example/chat-user.png" {
 		t.Fatalf("message sender = %+v", first.Sender)
 	}
 	duplicate, created, err := service.SendMessage(ctx, room.ID, userID, "request-1", "changed body", false)
