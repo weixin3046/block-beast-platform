@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +81,49 @@ func TestTronHashBlockNotFound(t *testing.T) {
 	_, err := source.Outcome(context.Background(), game.Round{Sequence: 1}, game.Rules{Source: "tron_hash", Extras: json.RawMessage(`{"block_interval":9}`)})
 	if !errors.Is(err, ErrBlockNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestTronHashMarksHTTP429AsRateLimited(t *testing.T) {
+	var calls atomic.Int32
+	server, source := tronTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		writer.Header().Set("Retry-After", "15")
+		writer.WriteHeader(http.StatusTooManyRequests)
+	})
+	defer server.Close()
+
+	round := game.Round{Sequence: 1}
+	rules := game.Rules{Source: "tron_hash", Extras: json.RawMessage(`{"block_interval":9}`)}
+	_, err := source.Outcome(context.Background(), round, rules)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("err = %v, want rate-limited error", err)
+	}
+	_, err = source.Outcome(context.Background(), round, rules)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("second err = %v, want rate-limited error", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls = %d, want 1 during Retry-After cooldown", got)
+	}
+}
+
+func TestTronHashCooldownPreventsGRPCRequests(t *testing.T) {
+	source := newTronHashResultSourceForEndpoint("http://unused", "")
+	source.grpc = &tronGRPCBlockClient{endpoint: "127.0.0.1:1"}
+	source.rateLimit.deferUntil(time.Now().Add(time.Minute))
+
+	started := time.Now()
+	_, _, err := source.CurrentBlock(context.Background())
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("CurrentBlock error = %v, want rate-limited", err)
+	}
+	_, err = source.Outcome(context.Background(), game.Round{Sequence: 1}, game.Rules{Source: "tron_hash", Extras: json.RawMessage(`{"block_interval":9}`)})
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("Outcome error = %v, want rate-limited", err)
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("cooldown attempted a gRPC request; elapsed = %s", elapsed)
 	}
 }
 

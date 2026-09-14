@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/block-beast/platform/internal/application/audit"
@@ -153,7 +154,7 @@ type BetPlacer interface {
 
 type BetReader interface {
 	Find(ctx context.Context, betID string) (betting.PlacedBet, error)
-	ListUserBets(ctx context.Context, userID, status string, limit, offset int) ([]betting.PlacedBet, error)
+	ListUserBets(ctx context.Context, userID, status string, statuses []string, limit, offset int) ([]betting.PlacedBet, error)
 	ListPublicBets(ctx context.Context, query betting.PublicBetQuery) ([]betting.PublicBet, error)
 	CancelBet(ctx context.Context, betID, userID string) (betting.PlacedBet, error)
 }
@@ -716,7 +717,16 @@ func (server *Server) userBets(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid bet status"})
 		return
 	}
-	items, err := server.bets.ListUserBets(request.Context(), userID, status, limit, offset)
+	statuses, valid := parseBetStatuses(request.URL.Query().Get("statuses"))
+	if !valid {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid bet statuses"})
+		return
+	}
+	if status != "" && len(statuses) > 0 {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "status and statuses cannot be used together"})
+		return
+	}
+	items, err := server.bets.ListUserBets(request.Context(), userID, status, statuses, limit, offset)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to list bets"})
 		return
@@ -785,6 +795,27 @@ func betPage(writer http.ResponseWriter, request *http.Request) (int, int, bool)
 
 func validBetStatus(status string) bool {
 	return status == "" || status == "accepted" || status == "cancelled" || status == "won" || status == "lost" || status == "refunded" || status == "voided"
+}
+
+// parseBetStatuses parses the comma-separated multi-status filter while keeping
+// the legacy single-value status parameter independent.
+func parseBetStatuses(value string) ([]string, bool) {
+	if value == "" {
+		return nil, true
+	}
+	seen := make(map[string]struct{})
+	statuses := make([]string, 0, len(strings.Split(value, ",")))
+	for _, status := range strings.Split(value, ",") {
+		if !validBetStatus(status) || status == "" {
+			return nil, false
+		}
+		if _, exists := seen[status]; exists {
+			continue
+		}
+		seen[status] = struct{}{}
+		statuses = append(statuses, status)
+	}
+	return statuses, true
 }
 
 func (server *Server) openRounds(writer http.ResponseWriter, request *http.Request) {
@@ -1013,9 +1044,26 @@ func (server *Server) platform(writer http.ResponseWriter, _ *http.Request) {
 func (server *Server) withRequestLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		started := time.Now()
-		next.ServeHTTP(writer, request)
-		server.logger.Info("request completed", "method", request.Method, "path", request.URL.Path, "duration", time.Since(started))
+		recorded := &statusResponseWriter{ResponseWriter: writer, status: http.StatusOK}
+		next.ServeHTTP(recorded, request)
+		server.logger.Info("request completed", "method", request.Method, "path", request.URL.Path, "status", recorded.status, "duration", time.Since(started))
 	})
+}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (writer *statusResponseWriter) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
+
+func (writer *statusResponseWriter) WriteHeader(status int) {
+	writer.status = status
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *statusResponseWriter) Write(body []byte) (int, error) {
+	return writer.ResponseWriter.Write(body)
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {

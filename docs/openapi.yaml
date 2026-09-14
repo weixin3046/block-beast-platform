@@ -2955,6 +2955,12 @@ paths:
           - refunded
           - cancelled
           - voided
+      - name: statuses
+        in: query
+        description: 以逗号分隔的一至多个状态，例如 `won,lost`。与 `status` 不能同时传入。
+        schema:
+          type: string
+          example: won,lost
       - name: limit
         in: query
         schema:
@@ -2982,7 +2988,7 @@ paths:
       - Bets
       operationId: placeBet
       summary: 创建幂等投注
-      description: 同玩家/期/币种/房间/玩法/选项的accepted哈希订单合单。stake传本次追加额，返回当前合计；同请求编号重试不扣款，改变原参数返回409。仅本人或operator/admin可为指定账号投注。
+      description: 同玩家/期/币种/房间（可空）/玩法（可空）/选项的accepted订单合单，适用于哈希与Lulu三游戏。stake传本次追加额，返回当前合计；同请求编号重试不扣款，改变原参数返回409。仅本人或operator/admin可为指定账号投注。
       security:
       - bearerAuth: []
       requestBody:
@@ -7720,7 +7726,7 @@ components:
           description: 实际币种金额；请求可传数字或十进制字符串，响应返回十进制字符串。后端按对应币种精度转换。
     Bet:
       type: object
-      description: 哈希待结算投注合单，stake为合计金额，bet_id稳定，首单赔率和时间保留，取消/退款/结算处理整单。历史单不追溯合并。
+      description: 待结算投注合单，适用于哈希与Lulu三游戏；stake为合计金额，bet_id稳定，首单赔率和时间保留，取消/退款/结算处理整单。历史单不追溯合并。
       required:
       - bet_id
       - client_request_id

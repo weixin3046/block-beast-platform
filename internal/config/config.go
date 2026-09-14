@@ -59,8 +59,11 @@ type Config struct {
 func Load() Config {
 	environment := valueOrDefault("APP_ENV", "development")
 	return Config{
-		LuluEncryptionKey:      os.Getenv("LULU_CONFIG_ENCRYPTION_KEY"),
-		LuluDrawEnabled:        boolOrDefault("LULU_DRAW_ENABLED", false),
+		LuluEncryptionKey: os.Getenv("LULU_CONFIG_ENCRYPTION_KEY"),
+		// RuntimeConfig.Enabled is the authoritative database-backed switch. Keep
+		// subscription enabled by default so older production env files that
+		// predate this optional override do not silently stop every Lulu round.
+		LuluDrawEnabled:        boolOrDefault("LULU_DRAW_ENABLED", true),
 		LuluDrawGames:          splitOrDefault("LULU_DRAW_GAMES", []string{"lh", "xdy", "race"}),
 		LuluDrawCloseBeforeSec: intOrDefault("LULU_DRAW_CLOSE_BEFORE_SECONDS", 10),
 		LuluTrendEnabled:       boolOrDefault("LULU_TREND_ENABLED", false),

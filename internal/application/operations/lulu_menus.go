@@ -138,40 +138,77 @@ func updateLuluRoomPlayConfigTx(ctx context.Context, tx pgx.Tx, input LuluRoomPl
 
 func (service *Service) GetLuluMenus(ctx context.Context) (LuluMenus, error) {
 	result := LuluMenus{ServerTime: time.Now().UTC(), Games: make([]LuluMenuGame, 0, 3)}
-	games, err := service.pool.Query(ctx, `
-		SELECT id::text,code,name FROM game_types
-		WHERE enabled=true AND rules->>'source'='lulu_ws'
-			AND rules->'extras'->>'lulu_shared'='true'
-		ORDER BY code`)
+	rows, err := service.pool.Query(ctx, `
+		SELECT gt.code,gt.name,r.id::text,r.code,r.name,r.sort_order,
+			p.code,p.name,p.outcomes,p.dodge_mode,
+			c.currency,c.payout_multiplier,c.payout_divisor,c.min_stake_minor,c.max_stake_minor
+		FROM game_types gt
+		JOIN game_room_types rt ON rt.game_type_id=gt.id
+		JOIN game_rooms r ON r.id=rt.room_id AND r.enabled=true
+		JOIN lulu_play_configs p ON p.game_type_id=gt.id AND p.enabled=true
+		JOIN lulu_room_play_currency_configs c ON c.game_type_id=gt.id AND c.room_id=r.id AND c.play_code=p.code
+		WHERE gt.enabled=true AND gt.rules->>'source'='lulu_ws'
+			AND gt.rules->'extras'->>'lulu_shared'='true'
+		ORDER BY gt.code,r.sort_order,r.id,p.sort_order,p.code,c.currency`)
 	if err != nil {
 		return LuluMenus{}, err
 	}
-	defer games.Close()
-	type gameRow struct {
-		id   string
-		game LuluMenuGame
-	}
-	items := make([]gameRow, 0, 3)
-	for games.Next() {
-		var game LuluMenuGame
-		var gameID string
-		if err := games.Scan(&gameID, &game.Code, &game.Name); err != nil {
+	defer rows.Close()
+	items := make([]luluMenuRow, 0, 64)
+	for rows.Next() {
+		var item luluMenuRow
+		if err := rows.Scan(&item.gameCode, &item.gameName, &item.roomID, &item.roomCode, &item.roomName, &item.roomSort,
+			&item.playCode, &item.playName, &item.outcomes, &item.dodge,
+			&item.currency, &item.multiplier, &item.divisor, &item.min, &item.max); err != nil {
 			return LuluMenus{}, err
 		}
-		items = append(items, gameRow{id: gameID, game: game})
+		items = append(items, item)
 	}
-	if err := games.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return LuluMenus{}, err
 	}
-	games.Close()
-	for _, item := range items {
-		item.game.Rooms, err = service.luluMenuRooms(ctx, item.id)
-		if err != nil {
-			return LuluMenus{}, err
-		}
-		result.Games = append(result.Games, item.game)
-	}
+	result.Games = assembleLuluMenus(items).Games
 	return result, nil
+}
+
+type luluMenuRow struct {
+	gameCode, gameName, roomID, roomCode, roomName, playCode, playName, currency string
+	roomSort                                                                     int
+	outcomes                                                                     json.RawMessage
+	dodge                                                                        bool
+	multiplier, divisor, min, max                                                int64
+}
+
+func assembleLuluMenus(rows []luluMenuRow) LuluMenus {
+	result := LuluMenus{Games: make([]LuluMenuGame, 0, 3)}
+	gameIndex := map[string]int{}
+	roomIndex := map[string]int{}
+	playIndex := map[string]int{}
+	for _, row := range rows {
+		gamePos, ok := gameIndex[row.gameCode]
+		if !ok {
+			gamePos = len(result.Games)
+			gameIndex[row.gameCode] = gamePos
+			result.Games = append(result.Games, LuluMenuGame{Code: row.gameCode, Name: row.gameName, Rooms: make([]LuluMenuRoom, 0, 6)})
+		}
+		roomKey := row.gameCode + "\x00" + row.roomID
+		roomPos, ok := roomIndex[roomKey]
+		if !ok {
+			roomPos = len(result.Games[gamePos].Rooms)
+			roomIndex[roomKey] = roomPos
+			result.Games[gamePos].Rooms = append(result.Games[gamePos].Rooms, LuluMenuRoom{ID: row.roomID, Code: row.roomCode, Name: row.roomName, SortOrder: row.roomSort, Plays: make([]LuluMenuPlay, 0)})
+		}
+		playKey := roomKey + "\x00" + row.playCode
+		playPos, ok := playIndex[playKey]
+		if !ok {
+			playPos = len(result.Games[gamePos].Rooms[roomPos].Plays)
+			playIndex[playKey] = playPos
+			result.Games[gamePos].Rooms[roomPos].Plays = append(result.Games[gamePos].Rooms[roomPos].Plays, LuluMenuPlay{Code: row.playCode, Name: row.playName, Outcomes: row.outcomes, DodgeMode: row.dodge, CurrencyConfigs: make([]LuluPlayCurrencyConfig, 0)})
+		}
+		play := &result.Games[gamePos].Rooms[roomPos].Plays[playPos]
+		play.CurrencyConfigs = append(play.CurrencyConfigs, LuluPlayCurrencyConfig{Currency: row.currency, PayoutMultiplier: row.multiplier, PayoutDivisor: row.divisor, MinStakeMinor: row.min, MaxStakeMinor: row.max})
+	}
+	return result
 }
 
 func (service *Service) luluMenuRooms(ctx context.Context, gameID string) ([]LuluMenuRoom, error) {

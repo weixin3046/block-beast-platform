@@ -32,6 +32,10 @@ type Event struct {
 
 var ErrConfig = errors.New("invalid lulu draw configuration")
 
+// luluReadLimit is intentionally bounded, but large enough for the upstream
+// xdy snapshot frames that exceed the websocket library's 32KiB default.
+const luluReadLimit = 1 << 20
+
 type Client struct {
 	token, uid string
 	enc, mac   []byte
@@ -105,6 +109,7 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 		u.RawQuery = q.Encode()
 		connection, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{})
 		if err == nil {
+			connection.SetReadLimit(luluReadLimit)
 			backoff = time.Second
 			client.subscribe(ctx, connection, game)
 			pollCtx, stopPoll := context.WithCancel(ctx)

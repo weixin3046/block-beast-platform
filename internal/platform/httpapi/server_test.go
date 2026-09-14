@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,29 @@ func TestPlaceBetRejectsStringAccountID(t *testing.T) {
 
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "请求参数格式不正确") {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestParseBetStatuses(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+		valid bool
+	}{
+		{name: "empty", input: "", valid: true},
+		{name: "multiple statuses", input: "won,lost", want: []string{"won", "lost"}, valid: true},
+		{name: "deduplicates statuses", input: "won,lost,won", want: []string{"won", "lost"}, valid: true},
+		{name: "rejects invalid status", input: "won,pending", valid: false},
+		{name: "rejects empty item", input: "won,", valid: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, valid := parseBetStatuses(test.input)
+			if valid != test.valid || !slices.Equal(got, test.want) {
+				t.Fatalf("parseBetStatuses(%q) = %#v, %v; want %#v, %v", test.input, got, valid, test.want, test.valid)
+			}
+		})
 	}
 }
 
@@ -381,7 +405,7 @@ func (reader *recordingBetReader) Find(_ context.Context, betID string) (betting
 	return reader.bet, reader.err
 }
 
-func (reader *recordingBetReader) ListUserBets(_ context.Context, _ string, _ string, _, _ int) ([]betting.PlacedBet, error) {
+func (reader *recordingBetReader) ListUserBets(_ context.Context, _ string, _ string, _ []string, _, _ int) ([]betting.PlacedBet, error) {
 	return nil, nil
 }
 

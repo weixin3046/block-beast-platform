@@ -85,7 +85,7 @@ func TestHashMergedPlacementsLifecycle(t *testing.T) {
 	}
 	count(`SELECT count(*) FROM bets WHERE user_id=$1 AND status='accepted'`, user, 1)
 	count(`SELECT count(*) FROM ledger_entries WHERE business_id=$1 AND entry_type='bet_debit'`, first.BetID, 3)
-	mine, e := s.ListUserBets(ctx, user, "accepted", 50, 0)
+	mine, e := s.ListUserBets(ctx, user, "accepted", nil, 50, 0)
 	if e != nil || len(mine) != 1 || mine[0].Stake != "30.000" {
 		t.Fatalf("mine=%+v %v", mine, e)
 	}

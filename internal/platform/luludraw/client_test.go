@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+func TestReadLimitAllowsLuluSnapshots(t *testing.T) {
+	if luluReadLimit <= 32769 {
+		t.Fatalf("read limit = %d, must accommodate upstream snapshots larger than 32KiB", luluReadLimit)
+	}
+}
+
 func TestParseAngryFeatherResult(t *testing.T) {
 	event, ok := parseMessage("lh", []byte(`{"e":"3005","d":{"round_id":42,"win_item_id":2}}`))
 	if !ok || event.Round != "42" || !reflect.DeepEqual(event.Result, []string{"2"}) {

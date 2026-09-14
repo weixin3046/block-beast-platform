@@ -43,7 +43,7 @@
 
 ### 哈希订单与逐次下单记录（0064）
 
-新哈希订单按玩家、轮次、钱包币种、房间、玩法及 pick 合单，仅accepted可追加，partial unique index兜底。下单沿用用户→轮次→投注→钱包锁，取消/作废/结算锁轮次后不会与追加交错。bet_placements保存每次增量、请求编号及机器人计划，(user_id,client_request_id)与(plan,round)唯一；账本business_id仍引用稳定订单ID，bet_placement_id区分每次扣款。其他账本业务的原唯一语义保留。追加、扣增量余额、不可变账本与outbox同事务。
+新订单按玩家、轮次、钱包币种、房间（可空）、玩法（可空）及完整选项合单，适用于哈希与 Lulu 三游戏，仅accepted可追加，partial unique index兜底。下单沿用用户→轮次→投注→钱包锁，取消/作废/结算锁轮次后不会与追加交错。bet_placements保存每次增量、请求编号及机器人计划，(user_id,client_request_id)与(plan,round)唯一；账本business_id仍引用稳定订单ID，bet_placement_id区分每次扣款。其他账本业务的原唯一语义保留。追加、扣增量余额、不可变账本与outbox同事务。
 
 合单保留首单created_at、赔率与返水快照；placement_count和last_placed_at记录追加版本/时间。结算及退款按总本金一次执行，保留原资金/模拟属性。历史单只回填请求记录，不合并、不改旧账本；新订单merge_enabled显式启用。升级停止旧写入后执行0064，同版本三个进程一起启动。公开事件含最新合单和增量added_stake，消费者不能用合计额再次累加。
 

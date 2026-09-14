@@ -81,6 +81,12 @@ func (service *Service) SettleDueRounds(ctx context.Context, source ResultSource
 				continue
 			}
 			failures = append(failures, fmt.Errorf("round %s outcome: %w", item.round.RoundID, err))
+			// A shared upstream rate limit applies to every remaining hash round in
+			// this batch. Stop immediately instead of multiplying calls and making
+			// recovery take longer.
+			if errors.Is(err, ErrRateLimited) {
+				break
+			}
 			continue
 		}
 		result, err := service.SettleRound(ctx, item.round.RoundID, outcome, rules)

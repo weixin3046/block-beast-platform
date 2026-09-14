@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/block-beast/platform/internal/domain/game"
@@ -18,10 +20,36 @@ const tronGridFullNodeURL = "https://api.trongrid.io"
 // TronHashResultSource 从 TRON 官方 FullNode HTTP API 的区块哈希提取尾数作为开奖结果。
 // 哈希轮次的 sequence 就是创建轮次时锁定的目标区块高度。
 type TronHashResultSource struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
-	grpc    *tronGRPCBlockClient
+	baseURL   string
+	apiKey    string
+	client    *http.Client
+	grpc      *tronGRPCBlockClient
+	rateLimit *tronRateLimit
+}
+
+type tronRateLimit struct {
+	mu    sync.Mutex
+	until time.Time
+}
+
+func (limit *tronRateLimit) blocked(now time.Time) bool {
+	if limit == nil {
+		return false
+	}
+	limit.mu.Lock()
+	defer limit.mu.Unlock()
+	return now.Before(limit.until)
+}
+
+func (limit *tronRateLimit) deferUntil(until time.Time) {
+	if limit == nil {
+		return
+	}
+	limit.mu.Lock()
+	defer limit.mu.Unlock()
+	if until.After(limit.until) {
+		limit.until = until
+	}
 }
 
 // NewTronHashResultSource 创建使用 TRON 官方 TronGrid FullNode API 的哈希结果源。
@@ -34,15 +62,16 @@ func NewTronHashResultSourceWithGRPC(apiKey, grpcEndpoint string) TronHashResult
 		return newTronHashResultSourceForEndpoint(apiKey, "")
 	}
 	return TronHashResultSource{
-		baseURL: tronGridFullNodeURL,
-		apiKey:  strings.TrimSpace(apiKey),
-		client:  &http.Client{Timeout: 10 * time.Second},
-		grpc:    newTronGRPCBlockClient(strings.TrimSpace(grpcEndpoint), strings.TrimSpace(apiKey)),
+		baseURL:   tronGridFullNodeURL,
+		apiKey:    strings.TrimSpace(apiKey),
+		client:    &http.Client{Timeout: 10 * time.Second},
+		grpc:      newTronGRPCBlockClient(strings.TrimSpace(grpcEndpoint), strings.TrimSpace(apiKey)),
+		rateLimit: &tronRateLimit{},
 	}
 }
 
 func newTronHashResultSourceForEndpoint(endpoint string, apiKey string) TronHashResultSource {
-	return TronHashResultSource{baseURL: strings.TrimRight(endpoint, "/"), apiKey: strings.TrimSpace(apiKey), client: &http.Client{Timeout: 10 * time.Second}}
+	return TronHashResultSource{baseURL: strings.TrimRight(endpoint, "/"), apiKey: strings.TrimSpace(apiKey), client: &http.Client{Timeout: 10 * time.Second}, rateLimit: &tronRateLimit{}}
 }
 
 // tronExtras 解析 rules.extras 中的 TRON 数据源参数。
@@ -77,7 +106,10 @@ type blockResult struct {
 	Hash string `json:"hash"`
 }
 
-var ErrBlockNotFound = errors.New("target block not yet produced")
+var (
+	ErrBlockNotFound = errors.New("target block not yet produced")
+	ErrRateLimited   = errors.New("TRON full node rate limited")
+)
 
 // Outcome 实现 ResultSource 接口：根据轮次序号定位目标区块，取哈希尾数映射为 outcome。
 func (source TronHashResultSource) Outcome(ctx context.Context, round game.Round, rules game.Rules) ([]string, error) {
@@ -146,6 +178,12 @@ func (source TronHashResultSource) Close() error {
 }
 
 func (source TronHashResultSource) fetchCurrentBlock(ctx context.Context) (tronBlock, error) {
+	// The gRPC and HTTP paths use the same API key and quota. Check the shared
+	// cooldown before trying gRPC; otherwise a 250ms settlement loop can keep
+	// hitting gRPC while the HTTP fallback is already backing off after a 429.
+	if source.rateLimit.blocked(time.Now()) {
+		return tronBlock{}, ErrRateLimited
+	}
 	if source.grpc != nil && source.grpc.endpoint != "" {
 		block, err := tronGRPCNowBlock(ctx, source.grpc)
 		if err == nil {
@@ -156,6 +194,11 @@ func (source TronHashResultSource) fetchCurrentBlock(ctx context.Context) (tronB
 }
 
 func (source TronHashResultSource) fetchBlockByHeight(ctx context.Context, height int64) (tronBlock, error) {
+	// See fetchCurrentBlock: do not let the preferred gRPC path bypass a
+	// cooldown established by a rate-limited HTTP fallback.
+	if source.rateLimit.blocked(time.Now()) {
+		return tronBlock{}, ErrRateLimited
+	}
 	if source.grpc != nil && source.grpc.endpoint != "" {
 		block, err := tronGRPCBlockByNumber(ctx, source.grpc, height)
 		if err == nil {
@@ -179,6 +222,9 @@ func (block tronBlock) Number() int64    { return block.Header.RawData.Number }
 func (block tronBlock) Timestamp() int64 { return block.Header.RawData.Timestamp }
 
 func (source TronHashResultSource) fetchBlock(ctx context.Context, path string, payload map[string]any) (tronBlock, error) {
+	if source.rateLimit.blocked(time.Now()) {
+		return tronBlock{}, ErrRateLimited
+	}
 	requestBody, err := json.Marshal(payload)
 	if err != nil {
 		return tronBlock{}, errors.New("marshal TRON full node request")
@@ -197,6 +243,10 @@ func (source TronHashResultSource) fetchBlock(ctx context.Context, path string, 
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		if response.StatusCode == http.StatusTooManyRequests {
+			source.rateLimit.deferUntil(time.Now().Add(retryAfter(response.Header.Get("Retry-After"))))
+			return tronBlock{}, fmt.Errorf("%w: HTTP %d", ErrRateLimited, response.StatusCode)
+		}
 		return tronBlock{}, fmt.Errorf("TRON full node returned HTTP %d", response.StatusCode)
 	}
 	var block tronBlock
@@ -204,4 +254,16 @@ func (source TronHashResultSource) fetchBlock(ctx context.Context, path string, 
 		return tronBlock{}, errors.New("decode TRON full node response")
 	}
 	return block, nil
+}
+
+func retryAfter(header string) time.Duration {
+	if seconds, err := strconv.ParseInt(strings.TrimSpace(header), 10, 64); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(header); err == nil {
+		if delay := time.Until(when); delay > 0 {
+			return delay
+		}
+	}
+	return 30 * time.Second
 }

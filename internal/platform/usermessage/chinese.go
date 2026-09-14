@@ -252,6 +252,8 @@ var messages = map[string]string{
 	"invalid agent relation":                                                   "代理关系无效",
 	"invalid announcement":                                                     "公告配置无效",
 	"invalid bet status":                                                       "投注状态无效",
+	"invalid bet statuses":                                                     "投注状态列表无效",
+	"status and statuses cannot be used together":                              "status 和 statuses 不能同时使用",
 	"invalid commission adjustment":                                            "佣金调整参数无效",
 	"invalid currency definition":                                              "币种配置无效",
 	"invalid decimal amount":                                                   "金额格式不正确",

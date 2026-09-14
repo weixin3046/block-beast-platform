@@ -96,7 +96,7 @@
 
 星海分组：`up={1,2,3,4}`，`down={5,6,7,8}`；`left={1,4,6,8}`，`right={2,3,5,7}`；`odd={1,3,5,7}`，`even={2,4,6,8}`。绿茵选手编号为 `1=绿晶晶、2=紫莹莹、3=蓝溜溜、4=胖噜噜、5=黄沙沙、6=红墩墩`；分组为 `up={1,2,3}`，`down={4,5,6}`；`left={1,5,6}`（绿晶晶、黄沙沙、红墩墩），`right={2,3,4}`（紫莹莹、蓝溜溜、胖噜噜）；`odd={1,3,5}`，`even={2,4,6}`。直选与分组选项在开奖结果命中时中奖；躲避玩法在最终结果**不等于**所选编号时中奖。
 
-结算后通过 `GET /v1/bets/{betID}` 或 `GET /v1/bets?status=won` 查询状态和金额快照；`accepted`、`won`、`lost`、`refunded` 是唯一可展示的订单状态。历史开奖调用：`GET /v1/external-draws/star_sea/history`、`GET /v1/external-draws/angry_feather/history`、`GET /v1/external-draws/green_sprint/history`。`items[].issue` 与对应玩法轮次的 `sequence` 一致，`items[].room` 为原始结果编号数组。
+结算后通过 `GET /v1/bets/{betID}` 或 `GET /v1/bets?status=won` 查询状态和金额快照；需要在同一列表展示多种状态时，使用 `GET /v1/bets?statuses=won,lost`，由服务端统一排序和分页。`statuses` 是逗号分隔的状态列表，不能与保留单状态语义的 `status` 同时传入；`accepted`、`won`、`lost`、`refunded` 是唯一可展示的订单状态。历史开奖调用：`GET /v1/external-draws/star_sea/history`、`GET /v1/external-draws/angry_feather/history`、`GET /v1/external-draws/green_sprint/history`。`items[].issue` 与对应玩法轮次的 `sequence` 一致，`items[].room` 为原始结果编号数组。
 
 `GET /v1/lulu/menus` 必须在进入三游戏页面时读取，并在后台调整配置后重新获取；不得将倍率、限额或玩法写死在前端。服务端始终以成交时规则校验和赔率快照为准，前端展示不一致不会绕过限额或改变已下注订单。
 
@@ -434,9 +434,9 @@ HTTP和Socket金额响应统一去掉小数末尾多余的0，仍返回字符串
 
 `GET /v1/admin/users/{userID}/login-ips` 返回纯IPv4/IPv6地址，不带 `/32` 或 `/128`。每个IP下的users列出同地址登录过的账号；查询同IP用户时复用纯地址。未登录过返回空数组。本次修复不需要数据库迁移。
 
-## 哈希投注合单（0064）
+## 投注合单（0064、0092）
 
-同一玩家、同一期、同币种、同赔率房间、同玩法和同选项的 `accepted` 投注，在下单事务中合为一张订单。例如连续三次提交 `stake:10`、不同 `client_request_id`，返回同一个 `bet_id`，`stake` 依次为 `"10.000"`、`"20.000"`、`"30.000"`（宝石），`placement_count` 依次为 1、2、3。不同选项（例如单和小）或不同币种不合并，仍受现有同一期不能跨赔率房间规则限制。
+同一玩家、同一期、同币种、同赔率房间（没有房间的玩法按空房间）、同玩法（没有玩法的玩法按空玩法）和同选项的 `accepted` 投注，在下单事务中合为一张订单。该规则同时适用于哈希与 Lulu 三游戏。例如连续三次提交 `stake:10`、不同 `client_request_id`，返回同一个 `bet_id`，`stake` 依次为 `"10.000"`、`"20.000"`、`"30.000"`（宝石），`placement_count` 依次为 1、2、3。不同选项（例如单和小）或不同币种不合并，仍受现有同一期不能跨赔率房间规则限制。
 
 - 每次请求的 `stake` 都是本次追加的实际金额，不是希望订单达到的总额；前端不转换精度。累计限额按玩家、期号、币种、房间、玩法、选项校验。
 - 本人列表、公开列表、后台投注列表及监控直接返回合单结果，无需前端再次合计。本人/公开/后台投注列表的 `placement_count` 是成功下单次数，`last_placed_at` 是最后追加时间。`placed_at`（后台为 `created_at`）保留首单时间，日任务和榜单日期仍按首单时间归属。
@@ -447,7 +447,7 @@ HTTP和Socket金额响应统一去掉小数末尾多余的0，仍返回字符串
 - 结算对合计本金计算一次派奖并按最小单位向下取整，返水也按整单计算一次；任务、榜单与看板不得再次按 `placement_count` 乘本金。虚拟合单参与混合榜单但不进入真实资金统计及活动累计。
 - Socket `game.bet.placed` 的 `bet.stake` 是最新合计额；按 `bet_id` 更新已有行，按 `placement_count` 丢弃乱序旧版本。新增 `placement_id` 标识本次追加、`added_stake` 表示本次金额，可用于展示“刚投注10分”，不得用合计额重复累加。钱包仍以钱包事件或接口为准。
 
-仅0064上线后新建的哈希订单启用合单；历史订单及账本不改写，旧待结算单仍独立处理。部署需停止旧写入，迁移后启动同版本 API/Worker/Realtime，不能与旧写入程序混用。非哈希通用玩法不合单。
+仅0064、0092上线后新建的订单启用合单；历史订单及账本不改写，旧待结算单仍独立处理。部署需停止旧写入，迁移后启动同版本 API/Worker/Realtime，不能与旧写入程序混用。
 
 ## 调用顺序
 
@@ -457,7 +457,7 @@ HTTP和Socket金额响应统一去掉小数末尾多余的0，仍返回字符串
    游戏页同时调用 `GET /v1/rounds/state?game_type={code}` 展示当前轮次封盘倒计时
    与最近一期已结算结果；倒计时始终以响应中的 `bet_closes_at` 为准。使用同一响应的
    `server_time` 与收到响应时的本地时间计算时差，避免设备时钟快慢造成 1–2 秒误差。
-3. 调用 `POST /v1/bets` 创建投注。共享哈希轮次还必须提交 `game_room_id` 和 `play_mode`：竞猜/躲避使用 `selection={"pick":"0"}` 至 `{"pick":"9"}`，上下路使用 `big`、`small`、`odd`、`even`。`currency` 可传 `USDT`、`POINTS`（宝石）、`JADE`（玉石）或 `ORIGIN_STONE`（源石）。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
+3. 调用 `POST /v1/bets` 创建投注。共享哈希轮次还必须提交 `game_room_id` 和 `play_mode`：竞猜/躲避使用 `selection={"pick":"0"}` 至 `{"pick":"9"}`，上下路使用 `big`、`small`、`odd`、`even`。同一玩家、同一期、同币种、同房间、同玩法及相同选项的未结算投注会合并为一个订单；该规则同时适用于哈希和 Lulu 三游戏，每次成功请求仍会保留独立的 `client_request_id` 与资金流水。`currency` 可传 `USDT`、`POINTS`（宝石）、`JADE`（玉石）或 `ORIGIN_STONE`（源石）。浏览器应为每次用户确认操作生成稳定的 `client_request_id`；网络重试必须复用该值。`account_id` 必须与令牌主体一致（本人），否则返回 403。
 4. 使用 `GET /v1/bets/{betID}` 轮询投注状态；当前状态有 `accepted`、`won`、`lost` 与 `refunded`。
    玩家在 `bet_closes_at` 前可调用 `POST /v1/bets/{betID}/cancel` 取消自己的投注并原路退款；封盘后返回 409。
 5. 使用 `GET /v1/wallets/{accountID}?currency=USDT` 查询单币种余额，或 `GET /v1/wallets/{accountID}/all` 一次拉取全部币种。

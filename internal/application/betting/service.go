@@ -137,7 +137,7 @@ func (service *Service) Find(ctx context.Context, betID string) (PlacedBet, erro
 	return bet, nil
 }
 
-func (service *Service) ListUserBets(ctx context.Context, userID, status string, limit, offset int) ([]PlacedBet, error) {
+func (service *Service) ListUserBets(ctx context.Context, userID, status string, statuses []string, limit, offset int) ([]PlacedBet, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -149,6 +149,9 @@ func (service *Service) ListUserBets(ctx context.Context, userID, status string,
 	if status != "" {
 		query += ` AND b.status=$4`
 		args = append(args, status)
+	} else if len(statuses) > 0 {
+		query += ` AND b.status = ANY($4::text[])`
+		args = append(args, statuses)
 	}
 	query += ` ORDER BY b.created_at DESC,b.id DESC LIMIT $2 OFFSET $3`
 	rows, err := service.pool.Query(ctx, query, args...)
@@ -652,25 +655,26 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 		StakeMinor:      request.StakeMinor,
 		Status:          "accepted",
 	}
+	// The round lock is shared with cancel/void/settlement. Never combine
+	// different currencies, selections, rooms, modes, or historical orders.
+	// IS NOT DISTINCT FROM makes the rule work for games without a room or mode.
 	merging := false
-	if sharedHashRules(rules) {
-		// The round lock is shared with cancel/void/settlement. Never combine
-		// different currencies, picks, rooms, or historical non-merge orders.
-		var total int64
-		err = tx.QueryRow(ctx, `SELECT id::text,stake_minor FROM bets
-			WHERE user_id=$1 AND round_id=$2 AND wallet_id=$3 AND game_room_id=$4
-			AND play_mode=$5 AND selection->>'pick'=$6::jsonb->>'pick'
-			AND status='accepted' AND merge_enabled AND is_simulated=$7 FOR UPDATE`,
-			request.AccountID, request.RoundID, walletID, request.GameRoomID, request.PlayMode, request.Selection, simulated).Scan(&bet.BetID, &total)
-		if err == nil {
-			if total > math.MaxInt64-request.StakeMinor {
-				return PlacedBet{}, ErrStakeOutsideLimits
-			}
-			merging = true
-			bet.StakeMinor += total
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return PlacedBet{}, err
+	var total int64
+	err = tx.QueryRow(ctx, `SELECT id::text,stake_minor FROM bets
+		WHERE user_id=$1 AND round_id=$2 AND wallet_id=$3
+		AND game_room_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
+		AND play_mode IS NOT DISTINCT FROM NULLIF($5,'')
+		AND selection=$6::jsonb
+		AND status='accepted' AND merge_enabled AND is_simulated=$7 FOR UPDATE`,
+		request.AccountID, request.RoundID, walletID, request.GameRoomID, request.PlayMode, request.Selection, simulated).Scan(&bet.BetID, &total)
+	if err == nil {
+		if total > math.MaxInt64-request.StakeMinor {
+			return PlacedBet{}, ErrStakeOutsideLimits
 		}
+		merging = true
+		bet.StakeMinor += total
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return PlacedBet{}, err
 	}
 	if !simulated {
 		availableMinor -= request.StakeMinor
@@ -690,7 +694,7 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 			selection, stake_minor, status, payout_multiplier_snapshot, payout_divisor_snapshot,is_simulated,robot_plan_id,merge_enabled,last_placed_at)
 		VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9, 'accepted', $10, $11,$12,NULLIF($13,'')::uuid,$14,clock_timestamp())
 		RETURNING created_at`, bet.BetID, bet.ClientRequestID, bet.RoundID, bet.AccountID, walletID,
-			bet.GameRoomID, bet.PlayMode, bet.Selection, bet.StakeMinor, payoutMultiplier, payoutDivisor, simulated, request.RobotPlanID, sharedHashRules(rules)).
+			bet.GameRoomID, bet.PlayMode, bet.Selection, bet.StakeMinor, payoutMultiplier, payoutDivisor, simulated, request.RobotPlanID, true).
 			Scan(&bet.PlacedAt)
 	}
 	if err != nil {

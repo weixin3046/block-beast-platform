@@ -55,6 +55,18 @@ func TestLuluDrawConfigurationLoadsWithoutCredentials(t *testing.T) {
 	}
 }
 
+func TestLuluDrawDefaultsToDatabaseControlledSubscription(t *testing.T) {
+	t.Setenv("LULU_DRAW_ENABLED", "")
+	if !Load().LuluDrawEnabled {
+		t.Fatal("Lulu draw must start by default and defer the final decision to the database runtime setting")
+	}
+
+	t.Setenv("LULU_DRAW_ENABLED", "false")
+	if Load().LuluDrawEnabled {
+		t.Fatal("explicit false must keep the emergency subscription kill switch")
+	}
+}
+
 func TestTronGridGRPCEndpointLoads(t *testing.T) {
 	t.Setenv("TRON_GRID_GRPC_ENDPOINT", "grpc.example.test:50051")
 	if got := Load().TronGridGRPCEndpoint; got != "grpc.example.test:50051" {
