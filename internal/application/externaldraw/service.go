@@ -56,7 +56,7 @@ func (service *Service) Handle(ctx context.Context, event luludraw.Event) error 
 		}
 	}
 	if len(event.Result) > 0 {
-		if err = service.confirmResult(ctx, tx, event.Game, round, event.Result); err != nil {
+		if err = service.confirmResult(ctx, tx, event, round); err != nil {
 			return err
 		}
 		// Some upstream game messages contain only the official result and no
@@ -149,7 +149,8 @@ func (service *Service) createRounds(ctx context.Context, tx pgx.Tx, game string
 	return nil
 }
 
-func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, game string, sequence int64, result []string) error {
+func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, event luludraw.Event, sequence int64) error {
+	game, result := event.Game, event.Result
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("encode external draw result: %w", err)
@@ -161,24 +162,46 @@ func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, game strin
 	if err != nil {
 		return err
 	}
-	if status == "confirmed" {
+	if status == "confirmed" || status == "conflict" {
 		if !sameDrawResult(saved, result) {
-			_, err = tx.Exec(ctx, `UPDATE external_draw_rounds SET status='conflict',conflict_outcome=$4,updated_at=now()
-				WHERE source=$1 AND game=$2 AND external_round=$3`, source, game, sequence, encoded)
-			if err != nil {
-				return err
+			if status == "confirmed" {
+				_, err = tx.Exec(ctx, `UPDATE external_draw_rounds SET status='conflict',conflict_outcome=$4,updated_at=now()
+					WHERE source=$1 AND game=$2 AND external_round=$3`, source, game, sequence, encoded)
+				if err != nil {
+					return err
+				}
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO audit_logs(id,action,target_type,target_id,payload)
-				VALUES($1,'lulu_draw.result_conflict','external_draw_round',$2,jsonb_build_object('game',$3::text,'external_round',$4::bigint))`,
-				uuid.NewString(), source+":"+game+":"+strconv.FormatInt(sequence, 10), game, sequence)
+			return auditDrawResult(ctx, tx, "lulu_draw.result_conflict", event, sequence, saved)
 		}
-		return err
-	}
-	if status == "conflict" {
 		return nil
 	}
 	_, err = tx.Exec(ctx, `UPDATE external_draw_rounds SET outcome=$4,status='confirmed',result_received_at=now(),updated_at=now()
 		WHERE source=$1 AND game=$2 AND external_round=$3`, source, game, sequence, encoded)
+	if err != nil {
+		return err
+	}
+	return auditDrawResult(ctx, tx, "lulu_draw.result_confirmed", event, sequence, nil)
+}
+
+// Persist only result metadata, never credentials or raw provider messages.
+// The draw row is already locked, so identical retries cannot duplicate audits.
+func auditDrawResult(ctx context.Context, tx pgx.Tx, action string, event luludraw.Event, sequence int64, saved json.RawMessage) error {
+	transport := "websocket"
+	if event.Kind == "trend_backfill" {
+		transport = "http_trend"
+	}
+	payload, err := json.Marshal(map[string]any{
+		"game": event.Game, "external_round": sequence,
+		"transport": transport, "event_type": event.Kind, "result_field": event.ResultField,
+		"incoming_outcome": event.Result, "saved_outcome": saved,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO audit_logs(id,action,target_type,target_id,payload)
+		SELECT $1,$2,'external_draw_round',$3,$4::jsonb
+		WHERE NOT EXISTS (SELECT 1 FROM audit_logs WHERE action=$2 AND target_id=$3 AND payload=$4::jsonb)`,
+		uuid.NewString(), action, source+":"+event.Game+":"+strconv.FormatInt(sequence, 10), payload)
 	return err
 }
 

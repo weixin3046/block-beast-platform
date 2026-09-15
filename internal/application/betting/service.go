@@ -29,6 +29,7 @@ var ErrHashRoomRequired = errors.New("hash room and play mode are required")
 var ErrHashRoomConflict = errors.New("only one hash rate room may be used in the same round")
 var ErrBetCancellationClosed = errors.New("bet can only be cancelled before betting closes")
 var ErrRequestConflict = errors.New("bet request ID has already been used with different parameters")
+var ErrLuluXDYBettingClosed = errors.New("lulu-xdy betting is closed")
 
 type PlaceBetRequest struct {
 	RobotPlanID     string          `json:"-"`
@@ -513,7 +514,7 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 		return PlacedBet{}, err
 	}
 	if gameTypeCode == "lulu-xdy" && luluXDYBettingClosedAt(time.Now()) {
-		return PlacedBet{}, game.ErrBettingClosed
+		return PlacedBet{}, ErrLuluXDYBettingClosed
 	}
 	if rules.Source == "lulu_ws" {
 		// Upstream issues may remain closed while their official result is being

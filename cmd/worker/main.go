@@ -189,7 +189,7 @@ func syncLuluTrend(ctx context.Context, logger *slog.Logger, service *externaldr
 		}
 		for _, record := range records {
 			closedAt := record.ClosedAt
-			if err := service.Handle(ctx, luludraw.Event{Game: game, Kind: "trend_backfill", Round: record.Round, CloseAt: &closedAt, Result: record.Result}); err != nil {
+			if err := service.Handle(ctx, luludraw.Event{Game: game, Kind: "trend_backfill", ResultField: "list[].k", Round: record.Round, CloseAt: &closedAt, Result: record.Result}); err != nil {
 				logger.Error("Lulu trend record sync failed", "game", game, "round", record.Round, "error", err)
 			}
 		}

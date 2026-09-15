@@ -1007,7 +1007,7 @@ func writeBetError(writer http.ResponseWriter, err error) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, betting.ErrRoundNotFound), errors.Is(err, wallet.ErrWalletNotFound):
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
-	case errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds), errors.Is(err, betting.ErrStakeOutsideLimits), errors.Is(err, betting.ErrHashRoomConflict), errors.Is(err, betting.ErrRequestConflict):
+	case errors.Is(err, betting.ErrLuluXDYBettingClosed), errors.Is(err, game.ErrBettingClosed), errors.Is(err, wallet.ErrInsufficientFunds), errors.Is(err, betting.ErrStakeOutsideLimits), errors.Is(err, betting.ErrHashRoomConflict), errors.Is(err, betting.ErrRequestConflict):
 		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, betting.ErrAccountDisabled), errors.Is(err, betting.ErrBettingBanned):
 		writeJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})

@@ -23,11 +23,12 @@ import (
 )
 
 type Event struct {
-	Game    string
-	Kind    string
-	Round   string
-	CloseAt *time.Time
-	Result  []string
+	Game        string
+	Kind        string
+	ResultField string
+	Round       string
+	CloseAt     *time.Time
+	Result      []string
 }
 
 var ErrConfig = errors.New("invalid lulu draw configuration")
@@ -337,7 +338,7 @@ func parseMessagesWithRound(game string, raw []byte, fallbackRound string) []Eve
 				round := rawRound(row)
 				winner, ok := rawInt(row, "win_item_id")
 				if round != "" && ok && (winner == 1 || winner == 2) {
-					events = append(events, Event{Game: game, Kind: "2011", Round: round, Result: []string{strconv.FormatInt(winner, 10)}})
+					events = append(events, Event{Game: game, Kind: "2011", ResultField: "rounds[].win_item_id", Round: round, Result: []string{strconv.FormatInt(winner, 10)}})
 				}
 			}
 			return events
@@ -372,7 +373,7 @@ func parseMessagesWithRound(game string, raw []byte, fallbackRound string) []Eve
 		if item.Round < 1 {
 			continue
 		}
-		event := Event{Game: game, Kind: message.Event, Round: strconv.FormatInt(item.Round, 10)}
+		event := Event{Game: game, Kind: message.Event, ResultField: "result.list[].fail", Round: strconv.FormatInt(item.Round, 10)}
 		for _, room := range item.Fail {
 			if room >= 1 && room <= 8 {
 				event.Result = append(event.Result, strconv.FormatInt(room, 10))
@@ -429,10 +430,12 @@ func parseMessageWithRound(game string, raw []byte, fallbackRound string) (Event
 	case "xdy":
 		if message.Event == "3001" || message.Event == "3004" || message.Event == "3005" {
 			if value, ok := rawInt(data, "failedRoomId"); ok && value >= 1 && value <= 8 && round != "" {
+				event.ResultField = "failedRoomId"
 				event.Result = []string{strconv.FormatInt(value, 10)}
 				return event, true
 			}
 			if value, ok := data["killedRooms"]; ok && round != "" {
+				event.ResultField = "killedRooms"
 				var rooms []int64
 				if json.Unmarshal(value, &rooms) == nil {
 					for _, room := range rooms {

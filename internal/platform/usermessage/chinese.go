@@ -289,6 +289,7 @@ var messages = map[string]string{
 	"limit must be between 1 and 100":                                          "每页数量必须在 1 至 100 之间",
 	"login name is already taken":                                              "该账号名称已被使用",
 	"login name must be 3-32 chars of letters, digits, '-' or '_'":             "账号名称须为 3 至 32 位，只能包含字母、数字、短横线或下划线",
+	"lulu-xdy betting is closed":                                               "8-9点游戏关闭中",
 	"login_name and password are required":                                     "请填写账号和密码",
 	"login_name, password and invitation_code are required":                    "请填写账号、密码和邀请码",
 	"logout is unavailable":                                                    "退出登录服务暂不可用",
