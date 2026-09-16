@@ -60,6 +60,45 @@
 }
 ```
 
+### 星海逃杀八点档（北京时间 20:00-21:00）
+
+星海逃杀在北京时间 20:00-21:00 进入“多杀”时段，规则固定，不可配置：
+
+- 该时段**禁止** `up_down`（上下）和 `left_right`（左右）投注，下单返回 409，错误消息为“八点档期间暂停上下和左右玩法投注”；`odd_even`（单双）、`dodge`（躲避）、`direct`（直选）正常开放。
+- 时段内若配置了八点档赔率，则**整体替代**日常赔率和投注限额，下单快照锁定八点档数值；未配置的玩法、房间、币种组合继续使用日常配置。
+- `lulu-lh` 与 `lulu-race` 不受八点档影响。
+
+八点档赔率按“游戏 + 房间 + 玩法 + 币种”独立保存，粒度与日常 `room-play-configs` 一致，但存储独立、互不影响。后台接口：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /v1/admin/lulu/prime-time-configs` | 查询全部八点档配置（admin/operator），返回 `items` 数组，含 `enabled=false` 的停用行 |
+| `PUT /v1/admin/lulu/prime-time-config` | 保存单条玩法配置（admin/operator，需二级密码） |
+| `PUT /v1/admin/lulu/prime-time-configs` | 批量保存（admin/operator，需二级密码），同一事务，任一项无效则全部不修改 |
+
+请求示例（单位为显示金额，与 `room-play-configs` 相同）：
+
+```json
+{
+  "second_password": "后台二级密码",
+  "configs": [{
+    "game_type": "lulu-xdy",
+    "room_id": "97000000-0000-4000-8000-000000000001",
+    "play_code": "odd_even",
+    "currency_configs": [
+      {"currency": "POINTS", "payout_multiplier": 1900, "payout_divisor": 100, "min_stake": "1", "max_stake": "3000", "enabled": true},
+      {"currency": "USDT", "payout_multiplier": 1900, "payout_divisor": 100, "min_stake": "1", "max_stake": "3000", "enabled": true}
+    ]
+  }]
+}
+```
+
+说明：
+
+- `enabled: false` 保存该行但不生效，投注继续使用日常配置；删除某玩法全部币种行（`currency_configs` 传空数组）即回退日常配置。
+- `payout_multiplier`/`payout_divisor` 必须为正整数；`max_stake` 不小于 `min_stake`。
+- 玩家端无需新增接口：进入游戏页时按常规调用 `GET /v1/lulu/menus`，服务端投注校验始终以成交时刻生效配置（八点档或日常）为准；前端如需在八点档展示专属赔率，可依据北京时间自行判断时段并提示“上下/左右暂停”。
+
 ### 三游戏玩家端对接
 
 当 Lulu WebSocket 出现断期时，Worker 可选地从受控的趋势历史源补回最近 60 期

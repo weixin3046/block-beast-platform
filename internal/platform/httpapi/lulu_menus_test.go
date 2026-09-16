@@ -66,3 +66,12 @@ func (s *luluMenusStub) UpdateLuluRoomPlayConfig(context.Context, operations.Lul
 func (s *luluMenusStub) UpdateLuluRoomPlayConfigs(context.Context, []operations.LuluRoomPlayConfigUpdate) (operations.LuluMenus, error) {
 	return s.value, s.err
 }
+func (s *luluMenusStub) UpdateLuluPrimeTimeConfig(context.Context, operations.LuluPrimeTimeConfigUpdate) ([]operations.LuluPrimeTimeConfigUpdate, error) {
+	return nil, s.err
+}
+func (s *luluMenusStub) UpdateLuluPrimeTimeConfigs(context.Context, []operations.LuluPrimeTimeConfigUpdate) ([]operations.LuluPrimeTimeConfigUpdate, error) {
+	return nil, s.err
+}
+func (s *luluMenusStub) GetLuluPrimeTimeConfigs(context.Context) ([]operations.LuluPrimeTimeConfigUpdate, error) {
+	return nil, s.err
+}

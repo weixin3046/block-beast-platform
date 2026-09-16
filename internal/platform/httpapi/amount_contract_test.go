@@ -81,6 +81,14 @@ func TestLuluRoomPlayConfigConvertsDisplayStakeLimits(t *testing.T) {
 	if !amountInputRoute(request) {
 		t.Fatal("batch lulu room play config must accept display amounts")
 	}
+	request = httptest.NewRequest(http.MethodPut, "/v1/admin/lulu/prime-time-config", nil)
+	if !amountInputRoute(request) {
+		t.Fatal("lulu prime time config must accept display amounts")
+	}
+	request = httptest.NewRequest(http.MethodPut, "/v1/admin/lulu/prime-time-configs", nil)
+	if !amountInputRoute(request) {
+		t.Fatal("batch lulu prime time config must accept display amounts")
+	}
 }
 
 func TestAmountContractRejectsAmbiguousOrInvalidInputs(t *testing.T) {

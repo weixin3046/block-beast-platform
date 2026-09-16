@@ -63,6 +63,33 @@ type LuluRoomPlayConfigsUpdate struct {
 	Configs        []LuluRoomPlayConfigUpdate `json:"configs"`
 }
 
+// LuluPrimeTimeConfig is one prime-time (Beijing 20:00-21:00) odds override
+// for 星海逃杀. Rows with enabled=false keep the daily configuration.
+type LuluPrimeTimeConfig struct {
+	Currency         string `json:"currency"`
+	PayoutMultiplier int64  `json:"payout_multiplier"`
+	PayoutDivisor    int64  `json:"payout_divisor"`
+	MinStakeMinor    int64  `json:"min_stake_minor"`
+	MaxStakeMinor    int64  `json:"max_stake_minor"`
+	Enabled          bool   `json:"enabled"`
+}
+
+type LuluPrimeTimeConfigUpdate struct {
+	SecondPassword  string               `json:"second_password,omitempty"`
+	GameType        string               `json:"game_type"`
+	RoomID          string               `json:"room_id"`
+	PlayCode        string               `json:"play_code"`
+	CurrencyConfigs []LuluPrimeTimeConfig `json:"currency_configs"`
+}
+
+type LuluPrimeTimeConfigsUpdate struct {
+	SecondPassword string                      `json:"second_password,omitempty"`
+	Configs        []LuluPrimeTimeConfigUpdate `json:"configs"`
+}
+
+var ErrLuluPrimeTimeConfigInvalid = errors.New("invalid lulu prime time configuration")
+var ErrLuluPrimeTimeConfigNotFound = errors.New("lulu prime time configuration not found")
+
 func (service *Service) UpdateLuluRoomPlayConfig(ctx context.Context, input LuluRoomPlayConfigUpdate) (LuluMenus, error) {
 	return service.UpdateLuluRoomPlayConfigs(ctx, []LuluRoomPlayConfigUpdate{input})
 }
@@ -134,6 +161,127 @@ func updateLuluRoomPlayConfigTx(ctx context.Context, tx pgx.Tx, input LuluRoomPl
 		}
 	}
 	return nil
+}
+
+func (service *Service) UpdateLuluPrimeTimeConfig(ctx context.Context, input LuluPrimeTimeConfigUpdate) ([]LuluPrimeTimeConfigUpdate, error) {
+	return service.UpdateLuluPrimeTimeConfigs(ctx, []LuluPrimeTimeConfigUpdate{input})
+}
+
+// UpdateLuluPrimeTimeConfigs stores prime-time (Beijing 20:00-21:00) odds
+// overrides for 星海逃杀. All entries commit in one transaction. Pass an empty
+// currency_configs list to delete the override so the play falls back to the
+// daily configuration.
+func (service *Service) UpdateLuluPrimeTimeConfigs(ctx context.Context, inputs []LuluPrimeTimeConfigUpdate) ([]LuluPrimeTimeConfigUpdate, error) {
+	if len(inputs) == 0 {
+		return nil, ErrLuluPrimeTimeConfigInvalid
+	}
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	seen := make(map[string]struct{}, len(inputs))
+	for _, input := range inputs {
+		key := strings.TrimSpace(input.GameType) + ":" + strings.TrimSpace(input.RoomID) + ":" + strings.TrimSpace(input.PlayCode)
+		if _, ok := seen[key]; ok {
+			return nil, ErrLuluPrimeTimeConfigInvalid
+		}
+		seen[key] = struct{}{}
+		if err := updateLuluPrimeTimeConfigTx(ctx, tx, input); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	result := make([]LuluPrimeTimeConfigUpdate, 0, len(inputs))
+	for _, input := range inputs {
+		input.SecondPassword = ""
+		result = append(result, input)
+	}
+	return result, nil
+}
+
+func updateLuluPrimeTimeConfigTx(ctx context.Context, tx pgx.Tx, input LuluPrimeTimeConfigUpdate) error {
+	input.GameType = strings.TrimSpace(input.GameType)
+	input.RoomID = strings.TrimSpace(input.RoomID)
+	input.PlayCode = strings.TrimSpace(input.PlayCode)
+	if input.GameType == "" || input.RoomID == "" || input.PlayCode == "" {
+		return ErrLuluPrimeTimeConfigInvalid
+	}
+	seen := make(map[string]struct{}, len(input.CurrencyConfigs))
+	for i := range input.CurrencyConfigs {
+		item := &input.CurrencyConfigs[i]
+		item.Currency = strings.ToUpper(strings.TrimSpace(item.Currency))
+		if item.Currency == "" || item.PayoutMultiplier <= 0 || item.PayoutDivisor <= 0 || item.MinStakeMinor <= 0 || item.MaxStakeMinor < item.MinStakeMinor {
+			return ErrLuluPrimeTimeConfigInvalid
+		}
+		if _, ok := seen[item.Currency]; ok {
+			return ErrLuluPrimeTimeConfigInvalid
+		}
+		seen[item.Currency] = struct{}{}
+	}
+	var gameID string
+	err := tx.QueryRow(ctx, `SELECT gt.id::text FROM game_types gt
+		JOIN game_room_types rt ON rt.game_type_id=gt.id
+		JOIN lulu_play_configs p ON p.game_type_id=gt.id AND p.code=$3 AND p.enabled=true
+		WHERE gt.code=$1 AND rt.room_id=$2 AND gt.code='lulu-xdy' AND gt.enabled=true
+		AND gt.rules->>'source'='lulu_ws' AND gt.rules->'extras'->>'lulu_shared'='true'`, input.GameType, input.RoomID, input.PlayCode).Scan(&gameID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrLuluPrimeTimeConfigNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM lulu_prime_time_configs WHERE game_type_id=$1 AND room_id=$2 AND play_code=$3`, gameID, input.RoomID, input.PlayCode); err != nil {
+		return err
+	}
+	for _, item := range input.CurrencyConfigs {
+		if _, err = tx.Exec(ctx, `INSERT INTO lulu_prime_time_configs(game_type_id,room_id,play_code,currency,payout_multiplier,payout_divisor,min_stake_minor,max_stake_minor,enabled)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, gameID, input.RoomID, input.PlayCode, item.Currency, item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor, item.Enabled); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetLuluPrimeTimeConfigs returns every stored prime-time override keyed by
+// game type, room, and play code. Enabled=false rows are included so the
+// back office can display and re-enable them.
+func (service *Service) GetLuluPrimeTimeConfigs(ctx context.Context) ([]LuluPrimeTimeConfigUpdate, error) {
+	rows, err := service.pool.Query(ctx, `
+		SELECT gt.code,r.id::text,c.play_code,c.currency,c.payout_multiplier,c.payout_divisor,c.min_stake_minor,c.max_stake_minor,c.enabled
+		FROM lulu_prime_time_configs c
+		JOIN game_types gt ON gt.id=c.game_type_id
+		JOIN game_rooms r ON r.id=c.room_id
+		WHERE gt.code='lulu-xdy'
+		ORDER BY gt.code,r.sort_order,r.id,c.play_code,c.currency`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	index := map[string]int{}
+	result := make([]LuluPrimeTimeConfigUpdate, 0)
+	for rows.Next() {
+		var gameType, roomID, playCode, currency string
+		var multiplier, divisor, min, max int64
+		var enabled bool
+		if err := rows.Scan(&gameType, &roomID, &playCode, &currency, &multiplier, &divisor, &min, &max, &enabled); err != nil {
+			return nil, err
+		}
+		key := gameType + "\x00" + roomID + "\x00" + playCode
+		position, ok := index[key]
+		if !ok {
+			position = len(result)
+			index[key] = position
+			result = append(result, LuluPrimeTimeConfigUpdate{GameType: gameType, RoomID: roomID, PlayCode: playCode, CurrencyConfigs: make([]LuluPrimeTimeConfig, 0)})
+		}
+		result[position].CurrencyConfigs = append(result[position].CurrencyConfigs, LuluPrimeTimeConfig{
+			Currency: currency, PayoutMultiplier: multiplier, PayoutDivisor: divisor,
+			MinStakeMinor: min, MaxStakeMinor: max, Enabled: enabled,
+		})
+	}
+	return result, rows.Err()
 }
 
 func (service *Service) GetLuluMenus(ctx context.Context) (LuluMenus, error) {

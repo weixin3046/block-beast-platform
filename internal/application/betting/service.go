@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"slices"
 	"strings"
 	"time"
 
@@ -513,8 +514,10 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 	if err != nil {
 		return PlacedBet{}, err
 	}
-	if gameTypeCode == "lulu-xdy" && luluXDYBettingClosedAt(time.Now()) {
-		return PlacedBet{}, ErrLuluXDYBettingClosed
+	if gameTypeCode == "lulu-xdy" {
+		if restricted := luluXDYRestrictedPlays(time.Now()); len(restricted) > 0 && slices.Contains(restricted, request.PlayMode) {
+			return PlacedBet{}, ErrLuluXDYBettingClosed
+		}
 	}
 	if rules.Source == "lulu_ws" {
 		// Upstream issues may remain closed while their official result is being
@@ -603,6 +606,30 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 		}
 		if err != nil {
 			return PlacedBet{}, err
+		}
+		// Prime time (Beijing 20:00-21:00) replaces the daily odds and stake
+		// limits for 星海逃杀 whenever an enabled override exists. Missing or
+		// disabled rows keep the daily configuration.
+		if gameTypeCode == "lulu-xdy" && luluPrimeTime(time.Now()) {
+			var enabled bool
+			var multiplier, divisor, min, max int64
+			err := tx.QueryRow(ctx, `
+				SELECT c.payout_multiplier,c.payout_divisor,c.min_stake_minor,c.max_stake_minor,c.enabled
+				FROM rounds r
+				JOIN game_room_types grt ON grt.game_type_id=r.game_type_id
+				JOIN game_rooms gr ON gr.id=grt.room_id AND gr.enabled=true
+				JOIN lulu_prime_time_configs c ON c.game_type_id=r.game_type_id AND c.room_id=gr.id AND c.play_code=$4 AND c.currency=$3
+				WHERE r.id=$1 AND gr.id=$2`, request.RoundID, request.GameRoomID, request.Currency, request.PlayMode).
+				Scan(&multiplier, &divisor, &min, &max, &enabled)
+			switch {
+			case errors.Is(err, pgx.ErrNoRows):
+				// No prime-time override configured; keep the daily values.
+			case err != nil:
+				return PlacedBet{}, err
+			case enabled:
+				// Prime-time configuration replaces the daily one.
+				payoutMultiplier, payoutDivisor, minStake, maxStake = multiplier, divisor, min, max
+			}
 		}
 		if json.Unmarshal(outcomes, &play.Outcomes) != nil || json.Unmarshal(resultMap, &play.ResultMap) != nil || !play.SelectionAllowed(request.Selection) {
 			return PlacedBet{}, ErrSelectionOutsidePlay
