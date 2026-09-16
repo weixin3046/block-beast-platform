@@ -157,13 +157,28 @@ func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, event lulu
 	}
 	var saved json.RawMessage
 	var status string
-	err = tx.QueryRow(ctx, `SELECT COALESCE(outcome,'null'::jsonb),status FROM external_draw_rounds
-		WHERE source=$1 AND game=$2 AND external_round=$3 FOR UPDATE`, source, game, sequence).Scan(&saved, &status)
+	var closedAt *time.Time
+	err = tx.QueryRow(ctx, `SELECT COALESCE(outcome,'null'::jsonb),status,close_at FROM external_draw_rounds
+		WHERE source=$1 AND game=$2 AND external_round=$3 FOR UPDATE`, source, game, sequence).Scan(&saved, &status, &closedAt)
 	if err != nil {
 		return err
 	}
 	if status == "confirmed" || status == "conflict" {
 		if !sameDrawResult(saved, result) {
+			if isStarSeaMultiKillWindow(event, closedAt) {
+				if isLowerPriorityStarSeaResult(saved, event) {
+					return auditDrawResult(ctx, tx, "lulu_draw.result_ignored_lower_priority", event, sequence, saved)
+				}
+				if isAuthoritativeStarSeaMultiKill(saved, event) {
+					_, err = tx.Exec(ctx, `UPDATE external_draw_rounds
+						SET outcome=$4,status='confirmed',conflict_outcome=NULL,result_received_at=now(),updated_at=now()
+						WHERE source=$1 AND game=$2 AND external_round=$3`, source, game, sequence, encoded)
+					if err != nil {
+						return err
+					}
+					return auditDrawResult(ctx, tx, "lulu_draw.result_multikill_override", event, sequence, saved)
+				}
+			}
 			if status == "confirmed" {
 				_, err = tx.Exec(ctx, `UPDATE external_draw_rounds SET status='conflict',conflict_outcome=$4,updated_at=now()
 					WHERE source=$1 AND game=$2 AND external_round=$3`, source, game, sequence, encoded)
@@ -181,6 +196,60 @@ func (service *Service) confirmResult(ctx context.Context, tx pgx.Tx, event lulu
 		return err
 	}
 	return auditDrawResult(ctx, tx, "lulu_draw.result_confirmed", event, sequence, nil)
+}
+
+var chinaLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
+// Star Sea uses the full killedRooms result as the official outcome from
+// 20:00 through 20:59 China time. A later failedRoomId is a single-room event,
+// not a contradictory draw result.
+func isStarSeaMultiKillWindow(event luludraw.Event, closedAt *time.Time) bool {
+	if event.Game != "xdy" {
+		return false
+	}
+	when := time.Now()
+	if closedAt != nil {
+		when = *closedAt
+	} else if event.CloseAt != nil {
+		when = *event.CloseAt
+	}
+	hour := when.In(chinaLocation).Hour()
+	return hour == 20
+}
+
+func isLowerPriorityStarSeaResult(saved json.RawMessage, event luludraw.Event) bool {
+	if event.ResultField != "failedRoomId" || len(event.Result) != 1 {
+		return false
+	}
+	var savedRooms []string
+	if json.Unmarshal(saved, &savedRooms) != nil || len(savedRooms) < 2 {
+		return false
+	}
+	for _, room := range savedRooms {
+		if room == event.Result[0] {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuthoritativeStarSeaMultiKill(saved json.RawMessage, event luludraw.Event) bool {
+	if event.ResultField != "killedRooms" && event.ResultField != "result.list[].fail" {
+		return false
+	}
+	if len(event.Result) < 2 {
+		return false
+	}
+	var savedRooms []string
+	if json.Unmarshal(saved, &savedRooms) != nil || len(savedRooms) != 1 {
+		return false
+	}
+	for _, room := range event.Result {
+		if room == savedRooms[0] {
+			return true
+		}
+	}
+	return false
 }
 
 // Persist only result metadata, never credentials or raw provider messages.
