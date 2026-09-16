@@ -355,7 +355,7 @@ admin/operator可查询；保存调用 `POST /v1/admin/login-whitelist`，传 `{
 - 重置个人交易密码：`PUT /v1/admin/users/{userID}/secondary-password`，同上字段，不限制密码长度但不可为空或全空白；交易密码即用户个人二级密码，不是后台全局操作密码。仅admin。注册、自助改密、后台创建账号及全局操作密码也统一只要求非空且不能全为空白，不设长度上下限；生产与开发环境一致，旧 `AUTH_STRICT_PASSWORD_POLICY` 开关不再生效。前端不要额外设置长度限制，HTTP 请求体大小保护继续生效。
 - 两种重置均撤销目标会话，不保存明文、不返回密码；0067 起已绑定会话的访问令牌也失效，Socket 会检测并关闭。后台自己改登录密码仍可走原个人改密接口。
 - 禁言：`PUT /v1/admin/users/{userID}/mute`，`{"muted":true}`；解除传false。admin/operator可操作，operator不能禁言后台账号。全局聊天禁言独立于账号status，Socket发消息时检查，返回“账号已被禁言”；仍可登录、投注、读历史消息。
-- 用户搜索：`GET /v1/admin/users?q=100006&currency=USDT,JADE&user_type=real&available_min=1.5&available_max=10000&limit=50&offset=0`。`user_type`可选real/virtual，省略全部；q支持公开用户ID、登录名、昵称。币种可逗号分隔或重复传currency，任一所选钱包满足余额范围即匹配用户，余额筛选为展示单位、不得跨币种相加。返回数组，每个用户新增`is_virtual/chat_muted/balances`，balances含currency、decimals、available、frozen、available、frozen。未传币种返回全部钱包。
+- 用户搜索：`GET /v1/admin/users?q=100006&currency=USDT,JADE&user_type=real&available_min=1.5&available_max=10000&limit=50&offset=0`。`user_type`可选real/virtual，省略查全部玩家，接口不返回 admin/operator 后台账号；q支持公开用户ID、登录名、昵称。币种可逗号分隔或重复传currency，任一所选钱包满足余额范围即匹配用户，余额筛选为展示单位、不得跨币种相加。返回数组，每个用户新增`is_virtual/chat_muted/balances`，balances含currency、decimals、available、frozen、available、frozen。未传币种返回全部钱包。
 - 代理等级：读取用户列表的`agent_level`，不要根据`roles`是否存在agent角色判断。1–6表示代理，0表示非代理；设置等级不等于创建上下级关系。修复列表此前漏查代理等级的问题，调整等级不再清空已有佣金比例。
 
 ### 看板 /v1/admin/dashboard 每个字段的含义

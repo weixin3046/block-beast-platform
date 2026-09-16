@@ -4829,7 +4829,7 @@ paths:
     get:
       tags:
       - Admin
-      summary: 后台查询用户
+      summary: 后台查询玩家
       security:
       - bearerAuth: []
       parameters:
@@ -4881,7 +4881,7 @@ paths:
           type: string
       responses:
         '200':
-          description: 用户列表，包含可用于后台操作的用户 ID。
+          description: 玩家列表，不返回 admin/operator 后台账号；包含可用于后台操作的用户 ID。
           content:
             application/json:
               schema:

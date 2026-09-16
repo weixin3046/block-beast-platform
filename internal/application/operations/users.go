@@ -51,6 +51,8 @@ func (service *Service) ListUsers(ctx context.Context, status, query string, lim
 		FROM users
 		WHERE ($1='' OR status=$1)
 		  AND ($2='' OR login_name ILIKE '%'||$2||'%' OR display_name ILIKE '%'||$2||'%')
+		  AND EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=users.id AND r.code='player')
+		  AND NOT EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=users.id AND r.code IN ('admin','operator'))
 		ORDER BY created_at DESC LIMIT $3`, status, query, limit)
 	if err != nil {
 		return nil, err
