@@ -2529,35 +2529,12 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/LuluPrimeTimeConfigsList"
-  "/v1/admin/lulu/prime-time-config":
-    put:
-      tags:
-      - Admin
-      operationId: updateLuluPrimeTimeConfig
-      summary: 保存单条星海逃杀八点档赔率配置
-      description: 时段固定为北京时间 20:00-21:00，仅支持 lulu-xdy。八点档生效期间整体替代日常倍率与限额；currency_configs 传空数组即删除该玩法配置、回退日常配置。
-      security:
-      - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              "$ref": "#/components/schemas/LuluPrimeTimeConfigUpdate"
-      responses:
-        '200':
-          description: 保存后的八点档配置列表。
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/LuluPrimeTimeConfigsList"
-  "/v1/admin/lulu/prime-time-configs":
     put:
       tags:
       - Admin
       operationId: updateLuluPrimeTimeConfigs
       summary: 批量保存星海逃杀八点档赔率配置
-      description: 同一事务保存，任一项无效则全部不修改。八点档生效期间整体替代日常倍率与限额；currency_configs 传空数组即删除该玩法配置、回退日常配置。
+      description: 同一事务保存，任一项无效则全部不修改。仅支持 odd_even（单双）和 dodge（躲避）。八点档生效期间整体替代日常倍率与限额；currency_configs 传空数组即删除该玩法配置、回退日常配置。
       security:
       - bearerAuth: []
       requestBody:
@@ -2566,6 +2543,28 @@ paths:
           application/json:
             schema:
               "$ref": "#/components/schemas/LuluPrimeTimeConfigsUpdate"
+      responses:
+        '200':
+          description: 保存后的八点档配置列表。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/LuluPrimeTimeConfigsList"
+  "/v1/admin/lulu/prime-time-config":
+    put:
+      tags:
+      - Admin
+      operationId: updateLuluPrimeTimeConfig
+      summary: 保存单条星海逃杀八点档赔率配置
+      description: 时段固定为北京时间 20:00-21:00，仅支持 lulu-xdy 的 odd_even（单双）和 dodge（躲避）。八点档生效期间整体替代日常倍率与限额；currency_configs 传空数组即删除该玩法配置、回退日常配置。
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/LuluPrimeTimeConfigUpdate"
       responses:
         '200':
           description: 保存后的八点档配置列表。
@@ -7624,6 +7623,25 @@ components:
           format: uuid
         play_code:
           type: string
+          enum: [odd_even, dodge]
+        currency_configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/LuluPrimeTimeConfig'
+    LuluPrimeTimeConfigItem:
+      type: object
+      additionalProperties: false
+      required: [game_type, room_id, play_code, currency_configs]
+      properties:
+        game_type:
+          type: string
+          enum: [lulu-xdy]
+        room_id:
+          type: string
+          format: uuid
+        play_code:
+          type: string
+          enum: [odd_even, dodge]
         currency_configs:
           type: array
           items:
@@ -7641,7 +7659,7 @@ components:
           type: array
           minItems: 1
           items:
-            $ref: '#/components/schemas/LuluPrimeTimeConfigUpdate'
+            $ref: '#/components/schemas/LuluPrimeTimeConfigItem'
     LuluPrimeTimeConfigsList:
       type: object
       additionalProperties: false
@@ -7650,7 +7668,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/LuluPrimeTimeConfigUpdate'
+            $ref: '#/components/schemas/LuluPrimeTimeConfigItem'
     HashConfigUpdate:
       type: object
       additionalProperties: false

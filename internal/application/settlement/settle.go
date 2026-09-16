@@ -151,7 +151,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			return SettlementResult{}, e
 		}
 		var payout int64
-		won, winErr := selectionWins(rules, luluPlays, b.playMode, b.selection, outcome)
+		won, winErr := selectionWins(rules, luluPlays, b.playMode, b.selection, b.placedAt, outcome)
 		if winErr != nil {
 			return SettlementResult{}, winErr
 		}
@@ -223,7 +223,7 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		if err := tx.QueryRow(ctx, `SELECT available_minor FROM wallets WHERE id = $1 FOR UPDATE`, bet.walletID).Scan(&availableMinor); err != nil {
 			return SettlementResult{}, err
 		}
-		won, winErr := selectionWins(rules, luluPlays, bet.playMode, bet.selection, outcome)
+		won, winErr := selectionWins(rules, luluPlays, bet.playMode, bet.selection, bet.placedAt, outcome)
 		if winErr != nil {
 			return SettlementResult{}, winErr
 		}
@@ -377,8 +377,17 @@ func loadLuluPlaysTx(ctx context.Context, tx pgx.Tx, roundID string) (map[string
 	return plays, rows.Err()
 }
 
-func selectionWins(rules game.Rules, luluPlays map[string]game.LuluPlay, mode string, selection json.RawMessage, outcome []string) (bool, error) {
+func selectionWins(rules game.Rules, luluPlays map[string]game.LuluPlay, mode string, selection json.RawMessage, placedAt time.Time, outcome []string) (bool, error) {
 	if sharedLuluRules(rules) {
+		if luluPrimeTimeOddEven(rules, mode, placedAt) {
+			var pick struct {
+				Pick string `json:"pick"`
+			}
+			if json.Unmarshal(selection, &pick) != nil || (pick.Pick != "odd" && pick.Pick != "even") {
+				return false, game.ErrInvalidRules
+			}
+			return (len(outcome)%2 == 1 && pick.Pick == "odd") || (len(outcome)%2 == 0 && pick.Pick == "even"), nil
+		}
 		play, ok := luluPlays[mode]
 		if !ok {
 			return false, game.ErrInvalidRules
@@ -389,6 +398,22 @@ func selectionWins(rules game.Rules, luluPlays map[string]game.LuluPlay, mode st
 		return hashSelectionWins(mode, selection, outcome), nil
 	}
 	return rules.SelectionWins(selection, outcome), nil
+}
+
+// During Star Sea's Beijing 20:00-21:00 multi-kill window, odd/even means
+// the parity of the number of eliminated rooms. Use placement time so a bet
+// placed before 21:00 keeps its agreed rule even if settlement happens later.
+func luluPrimeTimeOddEven(rules game.Rules, mode string, placedAt time.Time) bool {
+	if mode != "odd_even" || placedAt.IsZero() {
+		return false
+	}
+	var extras struct {
+		ExternalGame string `json:"external_game"`
+	}
+	if json.Unmarshal(rules.Extras, &extras) != nil || extras.ExternalGame != "xdy" {
+		return false
+	}
+	return placedAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Hour() == 20
 }
 
 func settledResult(ctx context.Context, tx pgx.Tx, roundID string, rawOutcome json.RawMessage, settledAt *time.Time) (SettlementResult, error) {

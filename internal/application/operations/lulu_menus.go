@@ -75,10 +75,10 @@ type LuluPrimeTimeConfig struct {
 }
 
 type LuluPrimeTimeConfigUpdate struct {
-	SecondPassword  string               `json:"second_password,omitempty"`
-	GameType        string               `json:"game_type"`
-	RoomID          string               `json:"room_id"`
-	PlayCode        string               `json:"play_code"`
+	SecondPassword  string                `json:"second_password,omitempty"`
+	GameType        string                `json:"game_type"`
+	RoomID          string                `json:"room_id"`
+	PlayCode        string                `json:"play_code"`
 	CurrencyConfigs []LuluPrimeTimeConfig `json:"currency_configs"`
 }
 
@@ -207,6 +207,9 @@ func updateLuluPrimeTimeConfigTx(ctx context.Context, tx pgx.Tx, input LuluPrime
 	input.RoomID = strings.TrimSpace(input.RoomID)
 	input.PlayCode = strings.TrimSpace(input.PlayCode)
 	if input.GameType == "" || input.RoomID == "" || input.PlayCode == "" {
+		return ErrLuluPrimeTimeConfigInvalid
+	}
+	if input.PlayCode != "odd_even" && input.PlayCode != "dodge" {
 		return ErrLuluPrimeTimeConfigInvalid
 	}
 	seen := make(map[string]struct{}, len(input.CurrencyConfigs))

@@ -14,10 +14,10 @@ func TestLuluXDYRestrictedPlaysDuringShanghaiPrimeTime(t *testing.T) {
 		restricted []string
 	}{
 		{name: "before window", now: time.Date(2026, 9, 13, 19, 59, 59, 0, shanghai), restricted: nil},
-		{name: "window opens", now: time.Date(2026, 9, 13, 20, 0, 0, 0, shanghai), restricted: []string{"up_down", "left_right"}},
-		{name: "during window", now: time.Date(2026, 9, 13, 20, 30, 0, 0, shanghai), restricted: []string{"up_down", "left_right"}},
+		{name: "window opens", now: time.Date(2026, 9, 13, 20, 0, 0, 0, shanghai), restricted: []string{"direct", "up_down", "left_right"}},
+		{name: "during window", now: time.Date(2026, 9, 13, 20, 30, 0, 0, shanghai), restricted: []string{"direct", "up_down", "left_right"}},
 		{name: "window closes", now: time.Date(2026, 9, 13, 21, 0, 0, 0, shanghai), restricted: nil},
-		{name: "utc input", now: time.Date(2026, 9, 13, 12, 30, 0, 0, time.UTC), restricted: []string{"up_down", "left_right"}},
+		{name: "utc input", now: time.Date(2026, 9, 13, 12, 30, 0, 0, time.UTC), restricted: []string{"direct", "up_down", "left_right"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := luluXDYRestrictedPlays(tc.now)

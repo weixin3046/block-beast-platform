@@ -12,11 +12,11 @@ func luluPrimeTime(now time.Time) bool {
 }
 
 // luluXDYRestrictedPlays returns the plays that may not be bet during prime
-// time. Prime time only allows 单双 (odd_even), 躲避 (dodge) and 直选 (direct);
-// 上下 and 左右 are blocked. Other game types are never restricted.
+// time. Prime time only allows 单双 (odd_even) and 躲避 (dodge); 直选、上下
+// and 左右 are blocked. Other game types are never restricted.
 func luluXDYRestrictedPlays(now time.Time) []string {
 	if !luluPrimeTime(now) {
 		return nil
 	}
-	return []string{"up_down", "left_right"}
+	return []string{"direct", "up_down", "left_right"}
 }

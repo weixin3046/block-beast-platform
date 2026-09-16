@@ -289,7 +289,7 @@ var messages = map[string]string{
 	"limit must be between 1 and 100":                                          "每页数量必须在 1 至 100 之间",
 	"login name is already taken":                                              "该账号名称已被使用",
 	"login name must be 3-32 chars of letters, digits, '-' or '_'":             "账号名称须为 3 至 32 位，只能包含字母、数字、短横线或下划线",
-	"lulu-xdy betting is closed":                                               "八点档期间暂停上下和左右玩法投注",
+	"lulu-xdy betting is closed":                                               "八点档期间仅支持单双和躲避玩法投注",
 	"invalid lulu prime time configuration":                                    "星海逃杀八点档赔率配置无效",
 	"lulu prime time configuration not found":                                  "星海逃杀八点档赔率配置不存在",
 	"unable to load lulu prime time configuration":                             "无法读取星海逃杀八点档赔率配置",
