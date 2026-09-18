@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/block-beast/platform/internal/domain/identity"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -17,6 +18,7 @@ var ErrCannotDisableOwnAdmin = errors.New("administrator cannot disable own acco
 var ErrCannotDisableLastAdmin = errors.New("cannot disable the platform's last active admin")
 var ErrInvalidAgentLevel = errors.New("agent level must be between 0 and 6")
 var ErrInvalidProfile = errors.New("display_name is required and profile fields are too long")
+var ErrRestrictedDisplayName = errors.New("昵称包含不允许使用的敏感词")
 var ErrInvalidAvatar = errors.New("avatar_url must be empty or a confirmed image upload owned by the current user")
 
 type User struct {
@@ -96,6 +98,9 @@ func (service *Service) UpdateCurrentProfile(ctx context.Context, userID, displa
 	avatarURL = strings.TrimSpace(avatarURL)
 	if displayName == "" || len(displayName) > 100 || len(avatarURL) > 2048 {
 		return User{}, ErrInvalidProfile
+	}
+	if identity.HasRestrictedDisplayNameTerm(displayName) {
+		return User{}, ErrRestrictedDisplayName
 	}
 	result, err := service.pool.Exec(ctx, `
 		UPDATE users

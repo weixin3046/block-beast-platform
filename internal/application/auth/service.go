@@ -21,6 +21,7 @@ var ErrAccountDisabled = errors.New("account is not active")
 var ErrAuthNotConfigured = errors.New("authentication is not configured")
 var ErrInvalidLoginName = errors.New("login name must be 3-32 chars of letters, digits, '-' or '_'")
 var ErrInvalidPassword = errors.New("password must not be empty or whitespace")
+var ErrRestrictedDisplayName = errors.New("昵称包含不允许使用的敏感词")
 var ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 var ErrInvalidInvitationCode = errors.New("invitation code is required and must be valid")
 var ErrSecondaryPasswordNotSet = errors.New("secondary password is not set")
@@ -236,6 +237,9 @@ func (service *Service) Register(ctx context.Context, loginName string, displayN
 	}
 	if strings.TrimSpace(password) == "" {
 		return LoginResult{}, ErrInvalidPassword
+	}
+	if identity.HasRestrictedDisplayNameTerm(displayName) {
+		return LoginResult{}, ErrRestrictedDisplayName
 	}
 	invite, err := strconv.ParseInt(strings.TrimSpace(invitationCode), 10, 64)
 	if err != nil || invite < identity.MinimumInvitationCode {

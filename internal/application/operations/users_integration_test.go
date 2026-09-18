@@ -67,3 +67,11 @@ func TestUpdateCurrentProfileRequiresOwnedConfirmedImage(t *testing.T) {
 		t.Fatalf("cleared avatar user = %+v, err = %v", user, err)
 	}
 }
+
+func TestUpdateCurrentProfileRejectsRestrictedDisplayName(t *testing.T) {
+	for _, displayName := range []string{"平台客服", "官方运营", "系统管理员"} {
+		if _, err := NewService(nil).UpdateCurrentProfile(context.Background(), "unused", displayName, ""); !errors.Is(err, ErrRestrictedDisplayName) {
+			t.Fatalf("display name %q error = %v, want ErrRestrictedDisplayName", displayName, err)
+		}
+	}
+}

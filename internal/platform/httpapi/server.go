@@ -450,7 +450,7 @@ func (server *Server) register(writer http.ResponseWriter, request *http.Request
 	}
 	result, err := server.registers.Register(request.Context(), input.LoginName, input.DisplayName, input.Password, input.InvitationCode)
 	switch {
-	case errors.Is(err, auth.ErrInvalidLoginName), errors.Is(err, auth.ErrInvalidPassword), errors.Is(err, auth.ErrInvalidInvitationCode), errors.Is(err, identity.ErrInvitationCodeNotFound):
+	case errors.Is(err, auth.ErrInvalidLoginName), errors.Is(err, auth.ErrInvalidPassword), errors.Is(err, auth.ErrRestrictedDisplayName), errors.Is(err, auth.ErrInvalidInvitationCode), errors.Is(err, identity.ErrInvitationCodeNotFound):
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	case errors.Is(err, identity.ErrLoginNameTaken):

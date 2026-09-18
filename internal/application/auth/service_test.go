@@ -306,6 +306,11 @@ func TestRegisterValidatesInput(t *testing.T) {
 	if _, err := newService().Register(context.Background(), "bad name!", "", "valid-password-12", "10001"); !errors.Is(err, ErrInvalidLoginName) {
 		t.Fatalf("invalid chars error = %v, want ErrInvalidLoginName", err)
 	}
+	for _, displayName := range []string{"平台客服", "官方运营", "系统管理员"} {
+		if _, err := newService().Register(context.Background(), "valid-name", displayName, "valid-password-12", "10001"); !errors.Is(err, ErrRestrictedDisplayName) {
+			t.Fatalf("display name %q error = %v, want ErrRestrictedDisplayName", displayName, err)
+		}
+	}
 	if _, err := newService().Register(context.Background(), "valid-name", "", "", "10001"); !errors.Is(err, ErrInvalidPassword) {
 		t.Fatalf("empty password error = %v, want ErrInvalidPassword", err)
 	}

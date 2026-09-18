@@ -36,7 +36,7 @@ func (server *Server) updateCurrentProfile(writer http.ResponseWriter, request *
 	}
 	claims, _ := ClaimsFromContext(request.Context())
 	user, err := server.userAdmin.UpdateCurrentProfile(request.Context(), claims.Subject, input.DisplayName, input.AvatarURL)
-	if errors.Is(err, operations.ErrInvalidProfile) || errors.Is(err, operations.ErrInvalidAvatar) {
+	if errors.Is(err, operations.ErrInvalidProfile) || errors.Is(err, operations.ErrRestrictedDisplayName) || errors.Is(err, operations.ErrInvalidAvatar) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
