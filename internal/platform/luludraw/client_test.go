@@ -27,6 +27,10 @@ func TestAngryFeatherHistoryAndSnapshot(t *testing.T) {
 	if !ok || event.Round != "43" || event.CloseAt == nil || event.CloseAt.Format("2006-01-02T15:04:05Z07:00") != "2026-09-13T12:30:00Z" {
 		t.Fatalf("snapshot=%+v ok=%v", event, ok)
 	}
+	event, ok = parseMessage("lh", []byte(`{"e":"2001","d":{"round":{"round_id":44}}}`))
+	if !ok || event.Round != "44" || event.CloseAt != nil {
+		t.Fatalf("round-only snapshot=%#v ok=%v", event, ok)
+	}
 }
 
 func TestParseStarSeaFailedRoom(t *testing.T) {
@@ -47,6 +51,10 @@ func TestParseStarSeaSnapshotAnd3001Result(t *testing.T) {
 	event, ok := parseMessage("xdy", []byte(`{"e":"2001","d":{"result":{"roundId":42,"countdownEndTime":1760000000000}}}`))
 	if !ok || event.Round != "42" || event.CloseAt == nil {
 		t.Fatalf("snapshot=%#v ok=%v", event, ok)
+	}
+	event, ok = parseMessage("xdy", []byte(`{"e":"2001","d":{"result":{"roundId":43}}}`))
+	if !ok || event.Round != "43" || event.CloseAt != nil {
+		t.Fatalf("round-only snapshot=%#v ok=%v", event, ok)
 	}
 	event, ok = parseMessage("xdy", []byte(`{"e":"3001","d":{"roundId":42,"killedRooms":[5]}}`))
 	if !ok || !reflect.DeepEqual(event.Result, []string{"5"}) {
@@ -72,6 +80,13 @@ func TestParseRaceFinalMessageKeepsResultAndCloseTime(t *testing.T) {
 	event, ok := parseMessage("race", []byte(`{"e":"3006","d":{"round_id":9,"countdownEndTime":1760000000000,"race_rank_info":[{"item_id":3,"rank":1}]}}`))
 	if !ok || event.CloseAt == nil || event.Round != "9" || !reflect.DeepEqual(event.Result, []string{"3"}) {
 		t.Fatalf("event=%#v ok=%v", event, ok)
+	}
+}
+
+func TestParseRaceRoundOnlySnapshot(t *testing.T) {
+	event, ok := parseMessage("race", []byte(`{"e":"2001","d":{"round":{"round_id":10}}}`))
+	if !ok || event.Round != "10" || event.CloseAt != nil {
+		t.Fatalf("round-only snapshot=%#v ok=%v", event, ok)
 	}
 }
 

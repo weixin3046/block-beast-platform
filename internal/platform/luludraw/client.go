@@ -42,6 +42,7 @@ type Client struct {
 	enc, mac   []byte
 	games      []string
 	onError    func(game, operation string, err error)
+	sendMu     sync.Mutex
 }
 
 func NewClient(token, uid, protocolKey string, games []string) (*Client, error) {
@@ -140,7 +141,18 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 					}
 					for _, event := range parseMessagesWithRound(game, plain, lastRound) {
 						if event.Round != "" && event.Kind != "2007" && event.Kind != "2011" {
+							previousRound := lastRound
 							lastRound = event.Round
+							if event.Kind == "2001" && previousRound != "" && previousRound != event.Round {
+								// Refresh the upstream history immediately after a round
+								// changes, covering a missed result push.
+								switch game {
+								case "xdy":
+									client.reportError(game, "round change 2007", client.writeEvent(ctx, connection, "2007", nil))
+								case "lh":
+									client.reportError(game, "round change 2011", client.writeEvent(ctx, connection, "2011", map[string]int{"round_id": 0}))
+								}
+							}
 						}
 						handle(event)
 					}
@@ -245,6 +257,8 @@ func (client *Client) writeEvent(ctx context.Context, connection *websocket.Conn
 	if err != nil {
 		return err
 	}
+	client.sendMu.Lock()
+	defer client.sendMu.Unlock()
 	return connection.Write(ctx, websocket.MessageText, []byte(client.encryptFrame(plain)))
 }
 
@@ -407,6 +421,12 @@ func parseMessageWithRound(game string, raw []byte, fallbackRound string) (Event
 			data = snapshot
 		}
 	}
+	if game == "race" && message.Event == "2001" {
+		var snapshot map[string]json.RawMessage
+		if value, ok := data["round"]; ok && json.Unmarshal(value, &snapshot) == nil {
+			data = snapshot
+		}
+	}
 	round := rawRound(data)
 	if round == "" {
 		round = fallbackRound
@@ -463,7 +483,7 @@ func parseMessageWithRound(game string, raw []byte, fallbackRound string) (Event
 			}
 		}
 	}
-	if event.CloseAt != nil {
+	if event.CloseAt != nil || (message.Event == "2001" && round != "") {
 		return event, true
 	}
 	return Event{}, false
