@@ -40,6 +40,7 @@ type Room struct {
 type RoomQuery struct {
 	ServiceType string
 	Search      string
+	HasMessages bool
 	Limit       int
 }
 
@@ -142,9 +143,10 @@ func (service *Service) ListRooms(ctx context.Context, userID string, staff bool
 		WHERE (r.room_type IN ('global','game') OR m.user_id IS NOT NULL OR ($2 AND r.room_type='customer_service'))
 		AND ($3='' OR (r.room_type='customer_service' AND r.service_type=$3))
 		AND ($4='' OR (r.room_type='customer_service' AND (
-			u.public_id::text=$4 OR u.invitation_code::text=$4 OR u.login_name ILIKE '%' || $4 || '%' OR u.display_name ILIKE '%' || $4 || '%'
-		)))
-		ORDER BY COALESCE(last_message.last_message_at,r.created_at) DESC,r.id DESC LIMIT $5`, userID, staff, query.ServiceType, query.Search, query.Limit)
+    u.public_id::text=$4 OR u.invitation_code::text=$4 OR u.login_name ILIKE '%' || $4 || '%' OR u.display_name ILIKE '%' || $4 || '%'
+)))
+AND (NOT $5 OR last_message.last_message_at IS NOT NULL)
+ORDER BY COALESCE(last_message.last_message_at,r.created_at) DESC,r.id DESC LIMIT $6`, userID, staff, query.ServiceType, query.Search, query.HasMessages, query.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -277,8 +279,8 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 	item.Sender = newMessageSender(senderPublicID, senderDisplayName, senderAvatarURL, senderIsStaff)
 	created := item.ID == messageID
 	if created {
-		var roomType string
-		if err := tx.QueryRow(ctx, `SELECT room_type FROM chat_rooms WHERE id=$1`, roomID).Scan(&roomType); err != nil {
+		var roomType, serviceType string
+		if err := tx.QueryRow(ctx, `SELECT room_type,COALESCE(service_type,'') FROM chat_rooms WHERE id=$1`, roomID).Scan(&roomType, &serviceType); err != nil {
 			return Message{}, false, err
 		}
 		userIDs := []string{}
@@ -309,8 +311,11 @@ func (service *Service) SendMessage(ctx context.Context, roomID, senderUserID, c
 			rows.Close()
 		}
 		payload, _ := json.Marshal(map[string]any{
-			"room_id": roomID, "message": item, "user_ids": userIDs,
-			"broadcast": roomType == "global" || roomType == "game",
+			"room_id":      roomID,
+			"service_type": serviceType,
+			"message":      item,
+			"user_ids":     userIDs,
+			"broadcast":    roomType == "global" || roomType == "game",
 		})
 		_, err = tx.Exec(ctx, `
 			INSERT INTO outbox_events (id,aggregate_type,aggregate_id,event_type,payload,occurred_at)

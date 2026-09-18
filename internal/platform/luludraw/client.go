@@ -101,7 +101,7 @@ func (client *Client) Run(ctx context.Context, handle func(Event)) error {
 }
 
 func (client *Client) runGame(ctx context.Context, game string, handle func(Event)) {
-	backoff := time.Second
+	const reconnectInterval = 5 * time.Second
 	for ctx.Err() == nil {
 		u := url.URL{Scheme: "wss", Host: game + ".lululu.com.cn", Path: "/ws"}
 		q := u.Query()
@@ -111,7 +111,6 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 		connection, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{})
 		if err == nil {
 			connection.SetReadLimit(luluReadLimit)
-			backoff = time.Second
 			client.subscribe(ctx, connection, game)
 			pollCtx, stopPoll := context.WithCancel(ctx)
 			go client.poll(pollCtx, connection, game)
@@ -152,10 +151,9 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 		} else if ctx.Err() == nil {
 			client.reportError(game, "connect", err)
 		}
-		if !wait(ctx, backoff) {
+		if !wait(ctx, reconnectInterval) {
 			return
 		}
-		backoff = min(backoff*2, 20*time.Second)
 	}
 }
 

@@ -96,7 +96,7 @@ func TestOrdersAtomicityConcurrencyAndRecovery(t *testing.T) {
 	if _, err = s.Review(ctx, dep.ID, op, "reject", "deposit cannot be reviewed"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("deposit review: %v", err)
 	}
-	if dep.ExpiresAt.Sub(dep.CreatedAt) != 3*time.Minute {
+	if dep.ExpiresAt.Sub(dep.CreatedAt) != 6*time.Minute {
 		t.Fatalf("unexpected deadline: %v", dep.ExpiresAt.Sub(dep.CreatedAt))
 	}
 	if dep.Currency != "ORIGIN_STONE" || dep.Amount != "100" {

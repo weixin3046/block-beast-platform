@@ -149,29 +149,31 @@ type PlayerStatistic struct {
 	BalanceMinor int64           `json:"-"`
 }
 type CurrencyStatistic struct {
-	BetLoss        string `json:"bet_loss"`
-	BetLossMinor   int64  `json:"-"`
-	Decimals       int    `json:"decimals"`
-	Stake          string `json:"stake"`
-	Payout         string `json:"payout"`
-	Deposit        string `json:"deposit"`
-	Credit         string `json:"credit"`
-	Rebate         string `json:"rebate"`
-	Clearance      string `json:"clearance"`
-	Gift           string `json:"gift"`
-	Penalty        string `json:"penalty"`
-	Balance        string `json:"balance"`
-	ClearanceMinor int64  `json:"clearance_minor"`
-	GiftMinor      int64  `json:"gift_minor"`
-	PenaltyMinor   int64  `json:"penalty_minor"`
-	Currency       string `json:"currency"`
-	BetCount       int64  `json:"bet_count"`
-	StakeMinor     int64  `json:"stake_minor"`
-	PayoutMinor    int64  `json:"payout_minor"`
-	DepositMinor   int64  `json:"deposit_minor"`
-	CreditMinor    int64  `json:"credit_minor"`
-	RebateMinor    int64  `json:"-"`
-	BalanceMinor   int64  `json:"balance_minor"`
+	BetLoss           string `json:"bet_loss"`
+	BetLossMinor      int64  `json:"-"`
+	Decimals          int    `json:"decimals"`
+	Stake             string `json:"stake"`
+	Payout            string `json:"payout"`
+	Deposit           string `json:"deposit"`
+	TotalDeposit      string `json:"total_deposit"`
+	Credit            string `json:"credit"`
+	Rebate            string `json:"rebate"`
+	Clearance         string `json:"clearance"`
+	Gift              string `json:"gift"`
+	Penalty           string `json:"penalty"`
+	Balance           string `json:"balance"`
+	ClearanceMinor    int64  `json:"clearance_minor"`
+	GiftMinor         int64  `json:"gift_minor"`
+	PenaltyMinor      int64  `json:"penalty_minor"`
+	Currency          string `json:"currency"`
+	BetCount          int64  `json:"bet_count"`
+	StakeMinor        int64  `json:"stake_minor"`
+	PayoutMinor       int64  `json:"payout_minor"`
+	DepositMinor      int64  `json:"deposit_minor"`
+	TotalDepositMinor int64  `json:"-"`
+	CreditMinor       int64  `json:"credit_minor"`
+	RebateMinor       int64  `json:"-"`
+	BalanceMinor      int64  `json:"balance_minor"`
 }
 type Dashboard struct {
 	ServerTime time.Time           `json:"server_time"`

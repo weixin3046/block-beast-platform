@@ -62,7 +62,7 @@ func (s *Service) RecordReceipt(ctx context.Context, r Receipt) error {
 	// The user-approved policy credits actual receipts matching an order within its transfer window.
 	// UID is a routing claim, not proof of account ownership. Late receipts can complete expired orders.
 	var id string
-	err = tx.QueryRow(ctx, `SELECT id FROM lulu_orders WHERE kind='deposit' AND status IN ('requested','expired') AND receiver_uid=$1 AND lulu_uid=$2 AND amount=$3 AND created_at-interval '3 minutes'<=$4 AND expires_at>=$4 ORDER BY created_at LIMIT 1 FOR UPDATE`, r.ReceiverUID, r.SenderUID, r.Amount, r.OccurredAt).Scan(&id)
+	err = tx.QueryRow(ctx, `SELECT id FROM lulu_orders WHERE kind='deposit' AND status IN ('requested','expired') AND receiver_uid=$1 AND lulu_uid=$2 AND amount=$3 AND created_at-interval '6 minutes'<=$4 AND expires_at>=$4 ORDER BY created_at LIMIT 1 FOR UPDATE`, r.ReceiverUID, r.SenderUID, r.Amount, r.OccurredAt).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tx.Commit(ctx)
 	}
@@ -158,7 +158,7 @@ func (s *Service) RecoverSending(ctx context.Context) error {
 
 // ReconcileStored revisits eligible receipts independently of the upstream scan watermark.
 func (s *Service) ReconcileStored(ctx context.Context) error {
-	rows, err := s.pool.Query(ctx, `SELECT r.id,r.receiver_uid,r.sender_uid,r.amount,r.occurred_at FROM lulu_receipts r WHERE r.receiver_uid=$1 AND r.order_id IS NULL AND EXISTS(SELECT 1 FROM lulu_orders o WHERE o.kind='deposit' AND o.status IN ('requested','expired') AND o.receiver_uid=r.receiver_uid AND o.lulu_uid=r.sender_uid AND o.amount=r.amount AND r.occurred_at>=o.created_at-interval '3 minutes' AND r.occurred_at<=o.expires_at) ORDER BY r.occurred_at,r.id LIMIT 100`, s.Receiver)
+	rows, err := s.pool.Query(ctx, `SELECT r.id,r.receiver_uid,r.sender_uid,r.amount,r.occurred_at FROM lulu_receipts r WHERE r.receiver_uid=$1 AND r.order_id IS NULL AND EXISTS(SELECT 1 FROM lulu_orders o WHERE o.kind='deposit' AND o.status IN ('requested','expired') AND o.receiver_uid=r.receiver_uid AND o.lulu_uid=r.sender_uid AND o.amount=r.amount AND r.occurred_at>=o.created_at-interval '6 minutes' AND r.occurred_at<=o.expires_at) ORDER BY r.occurred_at,r.id LIMIT 100`, s.Receiver)
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/block-beast/platform/internal/application/chat"
 	"github.com/block-beast/platform/internal/domain/identity"
@@ -40,9 +41,21 @@ func (server *Server) chatRooms(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	claims, _ := ClaimsFromContext(request.Context())
+	hasMessages := false
+	if raw := request.URL.Query().Get("has_messages"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{
+				"error": "invalid chat room query",
+			})
+			return
+		}
+		hasMessages = parsed
+	}
 	items, err := server.chat.ListRooms(request.Context(), claims.Subject, isStaff(claims), chat.RoomQuery{
 		ServiceType: request.URL.Query().Get("service_type"),
 		Search:      request.URL.Query().Get("q"),
+		HasMessages: hasMessages,
 		Limit:       queryLimit(request, 50),
 	})
 	if errors.Is(err, chat.ErrInvalidRoomQuery) {

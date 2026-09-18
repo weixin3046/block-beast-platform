@@ -116,13 +116,13 @@ func TestLuluConfigAuthorizationAndPassword(t *testing.T) {
 		passwordErr      error
 		status, calls    int
 	}{
-		{"admin", "admin", `{"enabled":true,"version":1,"second_password":"test-secret"}`, nil, 200, 1},
-		{"operator", "operator", `{"enabled":true,"version":1,"second_password":"test-secret"}`, nil, 200, 1},
-		{"player", "player", `{"enabled":true,"version":1,"second_password":"test-secret"}`, nil, 403, 0},
-		{"wrong password", "admin", `{"enabled":true,"version":1,"second_password":"test-secret"}`, adminsecurity.ErrIncorrect, 401, 0},
-		{"missing enabled", "admin", `{"version":1,"second_password":"test-secret"}`, nil, 400, 0},
-		{"receiver uid rejected", "admin", `{"receiver_uid":"1234567","enabled":true,"version":1,"second_password":"test-secret"}`, nil, 400, 0},
-		{"unknown field", "admin", `{"enabled":true,"version":1,"second_password":"test-secret","token":"forbidden"}`, nil, 400, 0},
+		{"admin", "admin", `{"enabled":true,"version":1,"first_password":"test-secret"}`, nil, 200, 1},
+		{"operator", "operator", `{"enabled":true,"version":1,"first_password":"test-secret"}`, nil, 200, 1},
+		{"player", "player", `{"enabled":true,"version":1,"first_password":"test-secret"}`, nil, 403, 0},
+		{"wrong password", "admin", `{"enabled":true,"version":1,"first_password":"test-secret"}`, adminsecurity.ErrIncorrect, 401, 0},
+		{"missing enabled", "admin", `{"version":1,"first_password":"test-secret"}`, nil, 400, 0},
+		{"receiver uid rejected", "admin", `{"receiver_uid":"1234567","enabled":true,"version":1,"first_password":"test-secret"}`, nil, 400, 0},
+		{"unknown field", "admin", `{"enabled":true,"version":1,"first_password":"test-secret","token":"forbidden"}`, nil, 400, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &luluStub{}
@@ -135,7 +135,7 @@ func TestLuluConfigAuthorizationAndPassword(t *testing.T) {
 			if w.Code != tc.status || stub.calls != tc.calls {
 				t.Fatalf("%d calls=%d %s", w.Code, stub.calls, w.Body.String())
 			}
-			if stub.calls > 0 && (pw.level != "second" || stub.actor != "admin-user") {
+			if stub.calls > 0 && (pw.level != "first" || stub.actor != "admin-user") {
 				t.Fatal("wrong authentication context")
 			}
 			if strings.Contains(w.Body.String(), "test-secret") {
@@ -160,22 +160,22 @@ func (s *luluStub) PhoneLogin(context.Context, string, string, string, int64) (l
 	s.calls++
 	return lulu.Config{ReceiverUID: "1234567", TokenConfigured: true, Version: 2}, nil
 }
-func TestLuluSMSRoutesRequireAdminAndSecondPassword(t *testing.T) {
+func TestLuluSMSRoutesRequireAdminAndFirstPassword(t *testing.T) {
 	for _, path := range []string{"/v1/admin/lulu/send-code", "/v1/admin/lulu/login"} {
 		for _, role := range []string{"player", "operator", "admin"} {
 			stub := &luluStub{}
 			pw := &luluConfigPasswordStub{}
 			s := newAmountTestServer(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithAuth(NewAuthenticator(testSecret)), WithLulu(stub), WithAdminSecurity(pw))
-			body := `{"phone":"13800000000","version":1,"second_password":"test-secret"}`
+			body := `{"phone":"13800000000","version":1,"first_password":"test-secret"}`
 			if strings.HasSuffix(path, "/login") {
-				body = `{"phone":"13800000000","code":"123456","version":1,"second_password":"test-secret"}`
+				body = `{"phone":"13800000000","code":"123456","version":1,"first_password":"test-secret"}`
 			}
 			req := httptest.NewRequest("POST", path, strings.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+issueTestToken(t, "admin-user", []string{role}))
 			w := httptest.NewRecorder()
 			s.Handler().ServeHTTP(w, req)
 			if role == "admin" || role == "operator" {
-				if w.Code != 200 || stub.calls != 1 || pw.level != "second" {
+				if w.Code != 200 || stub.calls != 1 || pw.level != "first" {
 					t.Fatalf("admin %s: %d %s", path, w.Code, w.Body.String())
 				}
 			} else if w.Code != 403 || stub.calls != 0 {

@@ -145,3 +145,44 @@ func (s *Server) secondPassword(next http.HandlerFunc) http.HandlerFunc {
 		next(w, request)
 	}
 }
+
+func (s *Server) firstPassword(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if !decodeSecurity(w, r, &body) {
+			return
+		}
+
+		var password string
+		if err := json.Unmarshal(body["first_password"], &password); err != nil {
+			writeJSON(w, 400, map[string]string{
+				"error": "请在请求体最外层提交字符串 first_password（一级操作密码）",
+			})
+			return
+		}
+
+		if password == "" {
+			writeJSON(w, 400, map[string]string{
+				"error": "请填写后台全局一级操作密码 first_password",
+			})
+			return
+		}
+
+		if !s.verifyAdminSecurity(w, r, "first", password) {
+			return
+		}
+
+		delete(body, "first_password")
+
+		data, err := json.Marshal(body)
+		if err != nil {
+			securityError(w, err)
+			return
+		}
+
+		request := r.Clone(r.Context())
+		request.Body = io.NopCloser(bytes.NewReader(data))
+		request.ContentLength = int64(len(data))
+		next(w, request)
+	}
+}

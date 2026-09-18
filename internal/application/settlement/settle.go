@@ -160,6 +160,14 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 			if b.payoutMultiplier != nil && b.payoutDivisor != nil {
 				m, d = *b.payoutMultiplier, *b.payoutDivisor
 			}
+			if primeM, primeD, ok := luluPrimeTimeDodgeOdds(
+				rules,
+				b.playMode,
+				b.placedAt,
+				outcome,
+			); ok {
+				m, d = primeM, primeD
+			}
 			if m <= 0 || d <= 0 || b.stake > math.MaxInt64/m {
 				return SettlementResult{}, ErrPayoutOverflow
 			}
@@ -245,6 +253,15 @@ func (service *Service) SettleRound(ctx context.Context, roundID string, outcome
 		if bet.payoutMultiplier != nil && bet.payoutDivisor != nil {
 			payoutMultiplier, payoutDivisor = *bet.payoutMultiplier, *bet.payoutDivisor
 		}
+		if primeM, primeD, ok := luluPrimeTimeDodgeOdds(
+			rules,
+			bet.playMode,
+			bet.placedAt,
+			outcome,
+		); ok {
+			payoutMultiplier, payoutDivisor = primeM, primeD
+		}
+
 		if payoutMultiplier <= 0 || payoutDivisor <= 0 || bet.stake > math.MaxInt64/payoutMultiplier {
 			return SettlementResult{}, ErrPayoutOverflow
 		}
@@ -414,6 +431,33 @@ func luluPrimeTimeOddEven(rules game.Rules, mode string, placedAt time.Time) boo
 		return false
 	}
 	return placedAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Hour() == 20
+}
+
+// luluPrimeTimeDodgeOdds 使用本期被淘汰房间数量决定星海逃杀八点档躲避赔率。
+// 赔率按淘汰房间数量分档：1.12、1.30、1.50、1.60、2.45、3.80、7.50。
+func luluPrimeTimeDodgeOdds(
+	rules game.Rules,
+	mode string,
+	placedAt time.Time,
+	outcome []string,
+) (int64, int64, bool) {
+	if mode != "dodge" {
+		return 0, 0, false
+	}
+
+	// 复用星海逃杀八点档判断，同时确认游戏是 xdy。
+	if !luluPrimeTimeOddEven(rules, "odd_even", placedAt) {
+		return 0, 0, false
+	}
+
+	killedRooms := len(outcome)
+	if killedRooms < 1 || killedRooms > 7 {
+		return 0, 0, false
+	}
+
+	// 赔率按淘汰房间数量分档：1.12、1.30、1.50、1.60、2.45、3.80、7.50。
+	multipliers := [...]int64{0, 112, 130, 150, 160, 245, 380, 750}
+	return multipliers[killedRooms], 100, true
 }
 
 func settledResult(ctx context.Context, tx pgx.Tx, roundID string, rawOutcome json.RawMessage, settledAt *time.Time) (SettlementResult, error) {

@@ -66,7 +66,7 @@
 
 - 该时段**仅允许** `odd_even`（单双）和 `dodge`（躲避）投注；`direct`（直选）、`up_down`（上下）和 `left_right`（左右）下单均返回 409。
 - 八点档的 `odd_even` 猜的是淘汰房间数量的单双：淘汰 1、3、5、7 个房间为单，淘汰 2、4、6、8 个房间为双；它不再按房间编号的单双结算。
-- 时段内若配置了八点档赔率，则**整体替代**日常赔率和投注限额，下单快照锁定八点档数值；未配置的玩法、房间、币种组合继续使用日常配置。
+- 时段内若配置了八点档赔率，则**整体替代**日常赔率和投注限额，下单快照锁定八点档数值；未配置或已停用八点档赔率的玩法、房间、币种组合会暂停星海投注，不回退日常配置。
 - `lulu-lh` 与 `lulu-race` 不受八点档影响。
 
 八点档赔率按“游戏 + 房间 + 玩法 + 币种”独立保存，粒度与日常 `room-play-configs` 一致，但存储独立、互不影响。后台接口：
@@ -963,7 +963,7 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 ## 聊天与客服
 
 - `POST /v1/chat/customer-service`：幂等获取或创建玩家自己的两间独立客服房间。响应中的 `deposit` 是上分（充值）客服，`withdrawal` 是下分（提现）客服；前端首次进入客服页调用一次并分别保存两个 `id`。
-- `GET /v1/chat/rooms`：玩家查询全局聊天室和自己的两间客服房间；后台角色可查询全部客服房间。后台客服队列可传 `service_type=deposit|withdrawal` 筛选上分/下分，传 `q` 按玩家公开ID、登录账号、昵称或邀请码搜索；结果按 `last_message_at` 倒序。客服房间会返回 `service_type`：`deposit` 为上分客服，`withdrawal` 为下分客服，并包含 `customer_login_name`。
+- `GET /v1/chat/rooms`：玩家查询全局聊天室和自己的两间客服房间；后台角色可查询全部客服房间。后台客服队列可传 `service_type=deposit|withdrawal` 筛选上分/下分，传 `q` 按玩家公开ID、登录账号、昵称或邀请码搜索；传 has_messages=true 时只返回存在可见聊天记录的房间，省略或传 false 时保持原有行为；结果按 `last_message_at` 倒序。客服房间会返回 `service_type`：`deposit` 为上分客服，`withdrawal` 为下分客服，并包含 `customer_login_name`。
 - `GET /v1/chat/rooms/{roomID}/messages`：查询可访问房间的最近消息。
 - 发送消息：使用 WebSocket `chat.send` 命令，不能再调用 HTTP `POST /v1/chat/rooms/{roomID}/messages`。
 
@@ -1045,9 +1045,9 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 | GET /v1/admin/lulu/orders | 后台订单，同样筛选和分页 |
 | POST /v1/admin/lulu/orders/{orderID}/review | `{action,evidence,first_password}` 审核或对账，路径 UUID |
 | GET /v1/admin/lulu/config | 读取配置，admin/operator |
-| PUT /v1/admin/lulu/config | 保存配置，admin/operator，需二级密码及最新 version |
-| POST /v1/admin/lulu/send-code | 发送验证码，admin/operator，需二级密码 |
-| POST /v1/admin/lulu/login | 短信登录并保存 UID、Token，admin/operator，需二级密码 |
+| PUT /v1/admin/lulu/config | 保存配置，admin/operator，需一级密码及最新 version |
+| POST /v1/admin/lulu/send-code | 发送验证码，admin/operator，需一级密码 |
+| POST /v1/admin/lulu/login | 短信登录并保存 UID、Token，admin/operator，需一级密码 |
 | GET /v1/admin/lulu/health | 最近完整采集成功时间及去敏错误状态 |
 
 ### 玩家流程
@@ -1108,7 +1108,7 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 
 ### LULU 后台收付设置
 
-admin/operator 可调用 `GET /v1/admin/lulu/config` 和 `PUT /v1/admin/lulu/config`。PUT 完整提交 `{enabled,version,second_password}`，验证后台全局二级密码。读取后携带最新 version 保存，成功返回新版本；过期版本、未暂停的账号切换或存在在途订单返回 409。玩家 `/v1/lulu/config` 与专用进程使用同一数据库配置，不再读取环境变量中的开关/收付号。协议密钥可通过 PUT 写入，Token 只通过短信登录获取，读取只返回配置状态，不返回凭据。
+admin/operator 可调用 `GET /v1/admin/lulu/config` 和 `PUT /v1/admin/lulu/config`。PUT 完整提交 `{enabled,version,first_password}`，验证后台全局一级密码。读取后携带最新 version 保存，成功返回新版本；过期版本、未暂停的账号切换或存在在途订单返回 409。玩家 `/v1/lulu/config` 与专用进程使用同一数据库配置，不再读取环境变量中的开关/收付号。协议密钥可通过 PUT 写入，Token 只通过短信登录获取，读取只返回配置状态，不返回凭据。
 
 Swagger 测试 LULU 接口时，在 Authorize 的 bearerAuth 中填写管理员登录返回的 access_token 原文（不加 `Bearer ` 前缀），请求应包含 `Authorization: Bearer <access_token>`。文档更新后刷新页面重新授权；账号再次登录会使旧会话失效。
 
@@ -1135,11 +1135,11 @@ GET 和 PUT 成功返回 receiver_uid、enabled、version、updated_at、api_url
 日常流程与原采集器一致，不需要手工复制Token：
 
 1. 先保持通道关闭，用配置接口保存 api_url、protocol_key、scan_start_at；receiver_uid 由后端维护，禁止提交 receiver_uid 或 token 字段。
-2. GET 配置获取 version，POST `/v1/admin/lulu/send-code` 提交 `{phone,version,second_password}`。
-3. 收到短信后 POST `/v1/admin/lulu/login` 提交 `{phone,code,version,second_password}`。
+2. GET 配置获取 version，POST `/v1/admin/lulu/send-code` 提交 `{phone,version,first_password}`。
+3. 收到短信后 POST `/v1/admin/lulu/login` 提交 `{phone,code,version,first_password}`。
 4. 登录成功自动取得UID、加密保存Token，返回配置和新version；首次登录仍保持关闭，确认配置后用新version启用。已有同UID的启用通道登录成功后继续运行。
 
-两个接口admin/operator可用，使用平台管理员Token和全局二级密码。无需旧噜噜Token即可登录；手机号为11位数字，验证码为4–8位数字。验证码、Token和协议密钥不写入审计或响应。保存过程复核版本和账号切换规则；返回不同UID时须先暂停并处理旧在途单。版本冲突后重新读取配置，必要时重新获取短信验证码。
+两个接口admin/operator可用，使用平台管理员Token和全局一级密码。无需旧噜噜Token即可登录；手机号为11位数字，验证码为4–8位数字。验证码、Token和协议密钥不写入审计或响应。保存过程复核版本和账号切换规则；返回不同UID时须先暂停并处理旧在途单。版本冲突后重新读取配置，必要时重新获取短信验证码。
 
 发码整个通道60秒一次，登录5秒一次，失败也占用限流窗口；不自动重试短信。上游必须返回成功码，HTTP 200的业务失败不视为成功。接口失败不替换现有Token。Token失效后仍需人工输入短信验证码，未实现免验证码自动续期。手动Token配置入口已删除，提交 token 字段（包括空字符串）返回400；无Token文件读取兼容逻辑。发码成功返回 {"status":"sent"}；登录成功返回配置对象及新 version。
 

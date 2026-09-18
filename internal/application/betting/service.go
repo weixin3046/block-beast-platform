@@ -622,13 +622,19 @@ func (service *Service) placeBetTx(ctx context.Context, tx pgx.Tx, request Place
 				WHERE r.id=$1 AND gr.id=$2`, request.RoundID, request.GameRoomID, request.Currency, request.PlayMode).
 				Scan(&multiplier, &divisor, &min, &max, &enabled)
 			switch {
+
 			case errors.Is(err, pgx.ErrNoRows):
-				// No prime-time override configured; keep the daily values.
+				// 八点档没有配置赔率，星海整场暂停，不回退日常赔率。
+				return PlacedBet{}, ErrLuluXDYBettingClosed
 			case err != nil:
 				return PlacedBet{}, err
+			case !enabled:
+				// 八点档配置被关闭，星海整场暂停。
+				return PlacedBet{}, ErrLuluXDYBettingClosed
 			case enabled:
-				// Prime-time configuration replaces the daily one.
-				payoutMultiplier, payoutDivisor, minStake, maxStake = multiplier, divisor, min, max
+				// 使用八点档配置的赔率和投注上下限。
+				payoutMultiplier, payoutDivisor, minStake, maxStake =
+					multiplier, divisor, min, max
 			}
 		}
 		if json.Unmarshal(outcomes, &play.Outcomes) != nil || json.Unmarshal(resultMap, &play.ResultMap) != nil || !play.SelectionAllowed(request.Selection) {

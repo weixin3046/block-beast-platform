@@ -126,6 +126,8 @@ var messages = map[string]string{
 	"用户管理服务不可用": "用户管理服务不可用",
 	"请在请求体最外层提交字符串 second_password（二级操作密码）": "请在请求体最外层提交字符串 second_password（二级操作密码）",
 	"请填写后台全局二级操作密码 second_password":         "请填写后台全局二级操作密码 second_password",
+	"请在请求体最外层提交字符串 first_password（一级操作密码）":  "请在请求体最外层提交字符串 first_password（一级操作密码）",
+	"请填写后台全局一级操作密码 first_password":          "请填写后台全局一级操作密码 first_password",
 	"话术参数无效，请检查标题、内容、分类、排序和编号":              "话术参数无效，请检查标题、内容、分类、排序和编号",
 	"话术不存在":   "话术不存在",
 	"无话术配置权限": "无话术配置权限",

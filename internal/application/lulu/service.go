@@ -232,7 +232,7 @@ func (s *Service) Create(ctx context.Context, user, kind string, in Input) (Orde
 	}
 	if kind == "deposit" {
 		var receiptID string
-		err = tx.QueryRow(ctx, `SELECT id FROM lulu_receipts WHERE receiver_uid=$1 AND sender_uid=$2 AND amount=$3 AND order_id IS NULL AND occurred_at >= $4::timestamptz-interval '3 minutes' AND occurred_at <= $5 ORDER BY occurred_at,id LIMIT 1 FOR UPDATE`, out.ReceiverUID, out.LuluUID, n, out.CreatedAt, out.ExpiresAt).Scan(&receiptID)
+		err = tx.QueryRow(ctx, `SELECT id FROM lulu_receipts WHERE receiver_uid=$1 AND sender_uid=$2 AND amount=$3 AND order_id IS NULL AND occurred_at >= $4::timestamptz-interval '6 minutes' AND occurred_at <= $5 ORDER BY occurred_at,id LIMIT 1 FOR UPDATE`, out.ReceiverUID, out.LuluUID, n, out.CreatedAt, out.ExpiresAt).Scan(&receiptID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return out, err
 		}

@@ -66,8 +66,12 @@ func TestChatRoomsPassesCustomerServiceFilters(t *testing.T) {
 	service := &roomQueryStub{}
 	server := New(config.Config{}, slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, readinessChecker{}, nil, nil, nil, nil, WithChat(service))
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/chat/rooms?service_type=deposit&q=10110&limit=20", nil))
-	if response.Code != http.StatusOK || service.query.ServiceType != chat.ServiceTypeDeposit || service.query.Search != "10110" || service.query.Limit != 20 {
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/chat/rooms?service_type=deposit&q=10110&has_messages=true&limit=20", nil))
+	if response.Code != http.StatusOK ||
+		service.query.ServiceType != chat.ServiceTypeDeposit ||
+		service.query.Search != "10110" ||
+		!service.query.HasMessages ||
+		service.query.Limit != 20 {
 		t.Fatalf("status=%d query=%+v", response.Code, service.query)
 	}
 }

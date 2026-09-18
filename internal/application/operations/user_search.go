@@ -3,9 +3,10 @@ package operations
 import (
 	"context"
 	"encoding/json"
-	"github.com/block-beast/platform/internal/domain/wallet"
 	"regexp"
 	"strings"
+
+	"github.com/block-beast/platform/internal/domain/wallet"
 )
 
 type UserBalance struct {
@@ -31,7 +32,7 @@ func (s *Service) SearchUsers(ctx context.Context, f UserSearch) ([]User, error)
 	if (f.Minimum != "" && !balanceFilterPattern.MatchString(f.Minimum)) || (f.Maximum != "" && !balanceFilterPattern.MatchString(f.Maximum)) || f.Offset < 0 {
 		return nil, ErrUserControlInvalid
 	}
-	if f.Limit <= 0 || f.Limit > 100 {
+	if f.Limit <= 0 || f.Limit > 500 {
 		f.Limit = 50
 	}
 	for i := range f.Currencies {
