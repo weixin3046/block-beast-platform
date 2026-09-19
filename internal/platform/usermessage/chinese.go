@@ -410,6 +410,7 @@ var messages = map[string]string{
 	"unable to create deposit address":                                        "创建充值地址失败",
 	"unable to create round":                                                  "创建轮次失败",
 	"unable to create virtual account":                                        "创建虚拟账号失败",
+	"unable to delete user":                                                   "删除用户失败",
 	"unable to credit deposit":                                                "充值入账失败",
 	"unable to grant commission":                                              "发放佣金失败",
 	"unable to list announcements":                                            "查询公告列表失败",

@@ -178,4 +178,9 @@ func TestListDirectPlayersReturnsMembersAndPeriodIncome(t *testing.T) {
 			t.Fatalf("unknown access: %v", err)
 		}
 	})
+	exec(`UPDATE users SET status='disabled' WHERE id=$1`, realID)
+	withoutDeleted, err := NewService(p).ListDirectPlayers(ctx, agentID, DirectPlayerQuery{})
+	if err != nil || withoutDeleted.Total != 1 || len(withoutDeleted.Items) != 1 || withoutDeleted.Items[0].LoginName != "virtual-direct" {
+		t.Fatalf("disabled player must be hidden: %+v %v", withoutDeleted, err)
+	}
 }

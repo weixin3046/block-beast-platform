@@ -4896,6 +4896,35 @@ paths:
                 type: array
                 items:
                   "$ref": "#/components/schemas/AdminUser"
+  "/v1/admin/users/{userID}":
+    delete:
+      tags: [Admin]
+      summary: 删除玩家账号登录能力
+      description: 需要后台二级密码。不会物理删除用户、投注、钱包、账本、聊天或审计数据；仅禁用账号、删除密码登录凭证并撤销现有会话。admin/operator 后台账号禁止删除。
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: userID
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 10001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [second_password]
+              additionalProperties: false
+              properties:
+                second_password: {type: string, writeOnly: true}
+      responses:
+        '204': {description: 删除成功，账号不可再登录}
+        '409': {description: 后台账号禁止删除}
+        '404': {description: 用户不存在}
   "/v1/admin/users/{userID}/agent-level":
     put:
       tags:

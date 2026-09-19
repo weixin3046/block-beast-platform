@@ -16,6 +16,7 @@ var ErrInvalidUserStatus = errors.New("user status must be active, disabled, or 
 var ErrUserNotFound = errors.New("user not found")
 var ErrCannotDisableOwnAdmin = errors.New("administrator cannot disable own account")
 var ErrCannotDisableLastAdmin = errors.New("cannot disable the platform's last active admin")
+var ErrCannotDeleteStaff = errors.New("后台账号不能删除")
 var ErrInvalidAgentLevel = errors.New("agent level must be between 0 and 6")
 var ErrInvalidProfile = errors.New("display_name is required and profile fields are too long")
 var ErrRestrictedDisplayName = errors.New("昵称包含不允许使用的敏感词")
@@ -230,6 +231,48 @@ func (service *Service) SetUserStatus(ctx context.Context, actorUserID, userID, 
 		if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, userID); err != nil {
 			return err
 		}
+	}
+	return tx.Commit(ctx)
+}
+
+// DeleteUser disables a player and removes login credentials while preserving
+// all business history referenced by the user row.
+func (service *Service) DeleteUser(ctx context.Context, actorUserID, userID string) error {
+	publicID, err := strconv.ParseInt(userID, 10, 64)
+	if err != nil || publicID < 10001 {
+		return ErrUserNotFound
+	}
+	tx, err := service.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var targetID string
+	var staff bool
+	err = tx.QueryRow(ctx, `
+		SELECT u.id::text, EXISTS(
+			SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+			WHERE ur.user_id=u.id AND r.code IN ('admin','operator')
+		)
+		FROM users u WHERE u.public_id=$1 FOR UPDATE`, publicID).Scan(&targetID, &staff)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrUserNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if staff {
+		return ErrCannotDeleteStaff
+	}
+	if _, err = tx.Exec(ctx, `UPDATE users SET status='disabled',updated_at=now() WHERE id=$1`, targetID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, targetID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM auth_identities WHERE user_id=$1`, targetID); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

@@ -76,7 +76,7 @@ roles 是全量替换，不是追加。此接口当前不接收 second_password�
 
 ## 查询与 ID
 
-用户查询：`GET /v1/admin/users?user_type=real` 或 `user_type=virtual`，省略查全部玩家；接口不返回 admin/operator 后台账号；q 可按公开 ID、登录名、昵称搜索。
+用户查询：`GET /v1/admin/users?user_type=real` 或 `user_type=virtual`，省略查全部玩家；接口不返回 admin/operator 后台账号；q 可按公开 ID、登录名、昵称搜索。删除玩家账号使用 `DELETE /v1/admin/users/{userID}`，请求体为 `{"second_password":"后台二级操作密码"}`；该操作保留投注、钱包、账本、聊天和审计历史，仅禁用账号、删除密码凭证并撤销会话，原账号不能再次登录。后台账号不能删除。
 
 按币种查询并按可用余额从高到低排序：`GET /v1/admin/users?currency=USDT&limit=50&offset=0`。多币种如 `currency=USDT,JADE` 以第一个币种 USDT 排序，不跨币种相加；缺少排序币种钱包的用户排最后。同额按创建时间、公开 ID 降序，排序在分页前完成。未传币种时保留创建时间、公开 ID 降序。
 

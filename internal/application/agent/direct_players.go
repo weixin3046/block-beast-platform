@@ -100,7 +100,7 @@ func (s *Service) ListDirectPlayers(ctx context.Context, parent string, q Direct
 	if err = tx.QueryRow(ctx, `SELECT public_id FROM users WHERE id=$1`, target).Scan(&out.ParentUserID); err != nil {
 		return out, err
 	}
-	const members = ` FROM agent_relations d JOIN users u ON u.id=d.user_id WHERE d.parent_user_id=$1 AND d.user_id<>$1 AND ($2 IN ('','all') OR ($2='real' AND NOT u.is_virtual) OR ($2='virtual' AND u.is_virtual))`
+	const members = ` FROM agent_relations d JOIN users u ON u.id=d.user_id WHERE d.parent_user_id=$1 AND d.user_id<>$1 AND u.status='active' AND ($2 IN ('','all') OR ($2='real' AND NOT u.is_virtual) OR ($2='virtual' AND u.is_virtual))`
 	if err = tx.QueryRow(ctx, `SELECT count(*)`+members, target, q.PlayerType).Scan(&out.Total); err != nil {
 		return out, err
 	}

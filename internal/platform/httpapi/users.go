@@ -15,6 +15,7 @@ import (
 
 type UserAdminService interface {
 	ListUsers(ctx context.Context, status, query string, limit int) ([]operations.User, error)
+	DeleteUser(ctx context.Context, actorUserID, userID string) error
 	SetUserStatus(ctx context.Context, actorUserID, userID, status string) error
 	ListRoles(ctx context.Context) ([]operations.Role, error)
 	SetUserRoles(ctx context.Context, actorUserID, userID string, roles []string) (operations.RoleAssignment, error)
@@ -298,5 +299,21 @@ func (server *Server) setUserStatus(writer http.ResponseWriter, request *http.Re
 	default:
 		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "user.status.update", TargetType: "user", TargetID: request.PathValue("userID"), Payload: map[string]any{"status": input.Status}})
 		writeJSON(writer, http.StatusOK, map[string]string{"status": input.Status})
+	}
+}
+
+func (server *Server) deleteUser(writer http.ResponseWriter, request *http.Request) {
+	claims, _ := ClaimsFromContext(request.Context())
+	err := server.userAdmin.DeleteUser(request.Context(), claims.Subject, request.PathValue("userID"))
+	switch {
+	case errors.Is(err, operations.ErrUserNotFound):
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, operations.ErrCannotDeleteStaff):
+		writeJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "unable to delete user"})
+	default:
+		server.recordAudit(request.Context(), audit.Entry{ActorUserID: claims.Subject, Action: "user.delete", TargetType: "user", TargetID: request.PathValue("userID")})
+		writeJSON(writer, http.StatusNoContent, nil)
 	}
 }

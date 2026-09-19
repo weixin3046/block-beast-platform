@@ -285,6 +285,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/secondary-password", server.protectRoles(server.secondPassword(server.resetUserPassword), identity.RoleAdmin))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/mute", server.protectRoles(server.setUserMuted, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/users", server.protectRoles(server.adminUsers, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("DELETE /v1/admin/users/{userID}", server.protectRoles(server.secondPassword(server.deleteUser), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/status", server.protectRoles(server.setUserStatus, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("PUT /v1/admin/users/{userID}/agent-level", server.protectRoles(server.setAgentLevel, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/roles", server.protectRoles(server.adminRoles, identity.RoleAdmin))
