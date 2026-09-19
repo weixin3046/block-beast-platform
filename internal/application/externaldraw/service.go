@@ -255,9 +255,13 @@ func isAuthoritativeStarSeaMultiKill(saved json.RawMessage, event luludraw.Event
 // Persist only result metadata, never credentials or raw provider messages.
 // The draw row is already locked, so identical retries cannot duplicate audits.
 func auditDrawResult(ctx context.Context, tx pgx.Tx, action string, event luludraw.Event, sequence int64, saved json.RawMessage) error {
+	transport := "websocket"
+	if event.Kind == "luluall_history" {
+		transport = "luluall_http"
+	}
 	payload, err := json.Marshal(map[string]any{
 		"game": event.Game, "external_round": sequence,
-		"transport": "websocket", "event_type": event.Kind, "result_field": event.ResultField,
+		"transport": transport, "event_type": event.Kind, "result_field": event.ResultField,
 		"incoming_outcome": event.Result, "saved_outcome": saved,
 	})
 	if err != nil {

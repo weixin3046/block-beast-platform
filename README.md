@@ -130,6 +130,9 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 
 ### Lulu 三游戏直连开奖
 
+可选启用独立 LuluAll HTTP 历史补期，见 [补期配置](docs/lulu-integration.md#luluall-http-历史补期)。
+默认关闭；仅补已有到期且缺结果的轮次，实时订阅与幂等派奖保持原流程。
+
 Worker 默认订阅怒翎破阵（`lh`）、星海逃杀（`xdy`）和绿茵疾冲（`race`）的 Lulu 实时轮次与开奖结果；最终是否运行由后台 Lulu 配置中的启用状态决定。它复用后台加密保存的登录令牌、UID 与协议密钥；凭据不会写入日志或数据库。`LULU_DRAW_ENABLED=false` 可作为紧急停止订阅的环境级开关。`LULU_DRAW_GAMES` 控制订阅游戏，`LULU_DRAW_CLOSE_BEFORE_SECONDS` 控制平台提前封盘秒数，默认 10 秒。
 
 平台自身仍是投注、赔率、资金、账本与派奖的唯一权威。后台通过 `GET`、`POST /v1/admin/game-types` 与 `PUT /v1/admin/game-types/{gameTypeID}` 维护 `source:"lulu_ws"` 的 `extras.external_game` 和 `extras.result_map`；写入要求 admin/operator 与二级操作密码。配置修改仅影响后续投注，已下注订单沿用赔率快照。

@@ -2665,7 +2665,7 @@ paths:
       tags:
       - Rounds
       operationId: getExternalDrawHistory
-      summary: 查询官方 Lulu 实时采集的开奖历史
+      summary: 查询平台已确认的 Lulu 开奖历史（含可选历史补期）
       description: 支持星海逃杀 `star_sea`、怒翎破阵 `angry_feather` 与绿茵疾冲 `green_sprint`。Worker 负责接收、解密、校验并落库官方实时帧；API 只读取已确认记录，不访问上游地址。
       security:
       - bearerAuth: []

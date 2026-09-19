@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/block-beast/platform/internal/platform/luluall"
 	"strings"
 )
 
@@ -32,6 +33,11 @@ func (config Config) ValidateRealtime() error {
 }
 
 func (config Config) ValidateWorker() error {
+	if config.LuluBackfillEnabled {
+		if _, err := luluall.NewClient(config.LuluBackfillURL); err != nil {
+			return fmt.Errorf("LULU_BACKFILL_URL: %w", err)
+		}
+	}
 	if strings.TrimSpace(config.PostgresDSN) == "" {
 		return errors.New("POSTGRES_DSN is required")
 	}

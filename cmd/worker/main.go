@@ -28,6 +28,7 @@ import (
 	"github.com/block-beast/platform/internal/config"
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
+	"github.com/block-beast/platform/internal/platform/luluall"
 	"github.com/block-beast/platform/internal/platform/luludraw"
 	"github.com/block-beast/platform/internal/platform/natsjs"
 	"github.com/block-beast/platform/internal/platform/pqpa"
@@ -97,6 +98,35 @@ func main() {
 	defer resultSource.Close()
 	drawCancel, drawDone := startLuluDraw(ctx, logger, pool, cfg)
 	defer func() { drawCancel(); <-drawDone }()
+	if cfg.LuluBackfillEnabled && cfg.LuluDrawEnabled {
+		client, err := luluall.NewClient(cfg.LuluBackfillURL)
+		if err != nil {
+			logger.Error("invalid LuluAll configuration", "error", err)
+			return
+		}
+		backfillCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			service := externaldraw.NewService(pool, cfg.LuluDrawCloseBeforeSec)
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				attempt, stop := context.WithTimeout(backfillCtx, 30*time.Second)
+				err := service.Backfill(attempt, client)
+				stop()
+				if err != nil && backfillCtx.Err() == nil {
+					logger.Warn("LuluAll backfill failed", "error", err)
+				}
+				select {
+				case <-backfillCtx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+		defer func() { cancel(); <-done }()
+	}
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
 	defer ticker.Stop()
 	settlementTicker := time.NewTicker(cfg.SettlementPollInterval)

@@ -8,6 +8,8 @@ import (
 )
 
 type Config struct {
+	LuluBackfillEnabled    bool
+	LuluBackfillURL        string
 	LuluEncryptionKey      string
 	LuluDrawEnabled        bool
 	LuluDrawGames          []string
@@ -56,7 +58,9 @@ type Config struct {
 func Load() Config {
 	environment := valueOrDefault("APP_ENV", "development")
 	return Config{
-		LuluEncryptionKey: os.Getenv("LULU_CONFIG_ENCRYPTION_KEY"),
+		LuluBackfillEnabled: boolOrDefault("LULU_BACKFILL_ENABLED", false),
+		LuluBackfillURL:     strings.TrimSpace(os.Getenv("LULU_BACKFILL_URL")),
+		LuluEncryptionKey:   os.Getenv("LULU_CONFIG_ENCRYPTION_KEY"),
 		// RuntimeConfig.Enabled is the authoritative database-backed switch. Keep
 		// subscription enabled by default so older production env files that
 		// predate this optional override do not silently stop every Lulu round.
