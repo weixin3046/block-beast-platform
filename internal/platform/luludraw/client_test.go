@@ -1,9 +1,74 @@
 package luludraw
 
 import (
+	"context"
+	"github.com/coder/websocket"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestChaseCancellationKeepsConnectionUsable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	received := make(chan []byte, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			_, b, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			received <- b
+		}
+	}))
+	defer server.Close()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	client := &Client{enc: make([]byte, 32), mac: make([]byte, 32)}
+	chaseCtx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); client.chaseHistory(chaseCtx, ctx, conn, "xdy") }()
+	select {
+	case frame := <-received:
+		if plain := client.decryptFrame(frame); len(plain) != 1 || !strings.Contains(string(plain[0]), "2007") {
+			t.Fatal("missing history request")
+		}
+	case <-ctx.Done():
+		t.Fatal("no history request")
+	}
+	stop()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("chase did not stop")
+	}
+	if err = client.writeEvent(ctx, conn, "2001", nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-ctx.Done():
+		t.Fatal("connection unusable after chase")
+	}
+}
+
+func TestInvalidRoomDoesNotBecomePartialResult(t *testing.T) {
+	events := parseMessagesWithRound("xdy", []byte(`{"e":"2007","d":{"result":{"list":[{"round":42,"fail":[3,"bad"]},{"round":41,"fail":[6]}]}}}`), "")
+	if len(events) != 2 || events[0].Round != "42" || !reflect.DeepEqual(events[0].Result, []string{"3"}) {
+		t.Fatalf("LuluAll-compatible filtering failed: %+v", events)
+	}
+}
 
 func TestReadLimitAllowsLuluSnapshots(t *testing.T) {
 	if luluReadLimit <= 32769 {
@@ -94,5 +159,23 @@ func TestParseRaceWinnerUsesCachedRound(t *testing.T) {
 	event, ok := parseMessageWithRound("race", []byte(`{"e":"3005","d":{"race_rank_info":[{"item_id":6,"rank":1}]}}`), "42")
 	if !ok || event.Round != "42" || !reflect.DeepEqual(event.Result, []string{"6"}) {
 		t.Fatalf("event=%#v ok=%v", event, ok)
+	}
+}
+
+func TestRaceExplicitWinnerAndRoundTracking(t *testing.T) {
+	event, ok := parseMessageWithRound("race", []byte(`{"e":"3005","d":{"round_id":15621,"win_item_id":6,"race_rank_info":[]}}`), "15620")
+	if !ok || event.Round != "15621" || !reflect.DeepEqual(event.Result, []string{"6"}) {
+		t.Fatalf("winner lost: %+v %v", event, ok)
+	}
+	event, ok = parseMessage("race", []byte(`{"e":"3006","d":{"round_id":15622,"countdown":0}}`))
+	if !ok || event.Round != "15622" || len(event.Result) != 0 {
+		t.Fatalf("round tracking lost: %+v %v", event, ok)
+	}
+}
+
+func TestStarSeaHistoryMalformedRowDoesNotDiscardOtherRounds(t *testing.T) {
+	events := parseMessagesWithRound("xdy", []byte(`{"e":"2007","d":{"result":{"list":[{"round":42,"fail":[3]},{"round":"bad","fail":null},{"round":"41","fail":["6"]}]}}}`), "")
+	if len(events) != 2 || events[0].Round != "42" || events[1].Round != "41" || !reflect.DeepEqual(events[1].Result, []string{"6"}) {
+		t.Fatalf("history lost: %+v", events)
 	}
 }

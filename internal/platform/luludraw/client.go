@@ -103,20 +103,37 @@ func (client *Client) Run(ctx context.Context, handle func(Event)) error {
 
 func (client *Client) runGame(ctx context.Context, game string, handle func(Event)) {
 	const reconnectInterval = 5 * time.Second
+	// 入库与读帧分离，短暂数据库延迟不会阻塞 Pong 读取。队列跨重连保留。
+	events := make(chan Event, 256)
+	delivered := make(chan struct{})
+	go func() {
+		defer close(delivered)
+		for event := range events {
+			if ctx.Err() != nil {
+				return
+			}
+			handle(event)
+		}
+	}()
+	defer func() { close(events); <-delivered }()
 	for ctx.Err() == nil {
 		u := url.URL{Scheme: "wss", Host: game + ".lululu.com.cn", Path: "/ws"}
 		q := u.Query()
 		q.Set("token", client.token)
 		q.Set("userid", client.uid)
 		u.RawQuery = q.Encode()
-		connection, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{})
+		dialCtx, cancelDial := context.WithTimeout(ctx, 20*time.Second)
+		connection, _, err := websocket.Dial(dialCtx, u.String(), &websocket.DialOptions{})
+		cancelDial()
 		if err == nil {
 			connection.SetReadLimit(luluReadLimit)
 			client.subscribe(ctx, connection, game)
 			pollCtx, stopPoll := context.WithCancel(ctx)
 			go client.poll(pollCtx, connection, game)
-			go client.heartbeat(pollCtx, connection)
+			go client.heartbeat(pollCtx, connection, game)
 			lastRound := ""
+			chaseRound := ""
+			chaseCtx, stopChase := context.WithCancel(pollCtx)
 			for ctx.Err() == nil {
 				_, message, readErr := connection.Read(ctx)
 				if readErr != nil {
@@ -144,26 +161,54 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 							previousRound := lastRound
 							lastRound = event.Round
 							if event.Kind == "2001" && previousRound != "" && previousRound != event.Round {
-								// Refresh the upstream history immediately after a round
-								// changes, covering a missed result push.
-								switch game {
-								case "xdy":
-									client.reportError(game, "round change 2007", client.writeEvent(ctx, connection, "2007", nil))
-								case "lh":
-									client.reportError(game, "round change 2011", client.writeEvent(ctx, connection, "2011", map[string]int{"round_id": 0}))
+								if game == "xdy" || game == "lh" {
+									stopChase()
+									chaseCtx, stopChase = context.WithCancel(pollCtx)
+									id, _ := strconv.ParseInt(event.Round, 10, 64)
+									chaseRound = strconv.FormatInt(id-1, 10)
+									go client.chaseHistory(chaseCtx, pollCtx, connection, game)
 								}
 							}
 						}
-						handle(event)
+						if event.Round == chaseRound && len(event.Result) > 0 {
+							stopChase()
+						}
+						select {
+						case events <- event:
+						case <-ctx.Done():
+						}
 					}
 				}
 			}
+			stopChase()
 			stopPoll()
 			_ = connection.Close(websocket.StatusNormalClosure, "worker stopped")
 		} else if ctx.Err() == nil {
 			client.reportError(game, "connect", err)
 		}
 		if !wait(ctx, reconnectInterval) {
+			return
+		}
+	}
+}
+
+// 换期后追查上期结果，最多 24 秒；收到对应结果或连接结束时取消。
+func (client *Client) chaseHistory(ctx, connectionCtx context.Context, connection *websocket.Conn, game string) {
+	for i := 0; i < 12 && ctx.Err() == nil; i++ {
+		event := "2007"
+		var data any
+		if game == "lh" {
+			event = "2011"
+			data = map[string]int{"round_id": 0}
+		}
+		// 停止追期不能取消正在进行的 WebSocket 写入，否则库会关闭整个连接。
+		if err := client.writeEvent(connectionCtx, connection, event, data); err != nil {
+			if ctx.Err() == nil {
+				client.reportError(game, "chase "+event, err)
+			}
+			return
+		}
+		if !wait(ctx, 2*time.Second) {
 			return
 		}
 	}
@@ -193,7 +238,7 @@ func (client *Client) subscribe(ctx context.Context, connection *websocket.Conn,
 	}
 }
 
-func (client *Client) heartbeat(ctx context.Context, connection *websocket.Conn) {
+func (client *Client) heartbeat(ctx context.Context, connection *websocket.Conn, game string) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -205,6 +250,9 @@ func (client *Client) heartbeat(ctx context.Context, connection *websocket.Conn)
 			err := connection.Ping(pingCtx)
 			cancel()
 			if err != nil {
+				if ctx.Err() == nil {
+					client.reportError(game, "heartbeat", err)
+				}
 				_ = connection.CloseNow()
 				return
 			}
@@ -371,10 +419,7 @@ func parseMessagesWithRound(game string, raw []byte, fallbackRound string) []Eve
 	}
 	var data struct {
 		Result struct {
-			List []struct {
-				Round int64   `json:"round"`
-				Fail  []int64 `json:"fail"`
-			} `json:"list"`
+			List []json.RawMessage `json:"list"`
 		} `json:"result"`
 	}
 	if json.Unmarshal(message.Data, &data) != nil {
@@ -382,11 +427,24 @@ func parseMessagesWithRound(game string, raw []byte, fallbackRound string) []Eve
 	}
 	events := make([]Event, 0, len(data.Result.List))
 	for _, item := range data.Result.List {
-		if item.Round < 1 {
+		var row map[string]json.RawMessage
+		if json.Unmarshal(item, &row) != nil {
 			continue
 		}
-		event := Event{Game: game, Kind: message.Event, ResultField: "result.list[].fail", Round: strconv.FormatInt(item.Round, 10)}
-		for _, room := range item.Fail {
+		round, ok := rawInt(row, "round")
+		if !ok || round < 1 {
+			continue
+		}
+		event := Event{Game: game, Kind: message.Event, ResultField: "result.list[].fail", Round: strconv.FormatInt(round, 10)}
+		var rooms []json.RawMessage
+		if json.Unmarshal(row["fail"], &rooms) != nil {
+			continue
+		}
+		for _, raw := range rooms {
+			room, ok := rawInt(map[string]json.RawMessage{"room": raw}, "room")
+			if !ok || room < 1 || room > 8 {
+				continue
+			}
 			if room >= 1 && room <= 8 {
 				event.Result = append(event.Result, strconv.FormatInt(room, 10))
 			}
@@ -468,6 +526,14 @@ func parseMessageWithRound(game string, raw []byte, fallbackRound string) (Event
 			}
 		}
 	case "race":
+		// 官方明确冠军优先；部分推送的排名数组尚未填充。
+		if message.Event == "3005" && round != "" {
+			if winner, ok := rawInt(data, "win_item_id"); ok && winner >= 1 && winner <= 6 {
+				event.ResultField = "win_item_id"
+				event.Result = []string{strconv.FormatInt(winner, 10)}
+				return event, true
+			}
+		}
 		if (message.Event == "3005" || message.Event == "3006") && round != "" {
 			var ranks []struct {
 				ItemID int64 `json:"item_id"`
@@ -483,7 +549,7 @@ func parseMessageWithRound(game string, raw []byte, fallbackRound string) (Event
 			}
 		}
 	}
-	if event.CloseAt != nil || (message.Event == "2001" && round != "") {
+	if event.CloseAt != nil || ((message.Event == "2001" || (game == "race" && message.Event == "3006")) && round != "") {
 		return event, true
 	}
 	return Event{}, false

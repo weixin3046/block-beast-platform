@@ -12,9 +12,6 @@ type Config struct {
 	LuluDrawEnabled        bool
 	LuluDrawGames          []string
 	LuluDrawCloseBeforeSec int
-	LuluTrendEnabled       bool
-	LuluTrendURL           string
-	LuluTrendInterval      time.Duration
 	Environment            string
 	APIAddress             string
 	APIAllowedOrigins      []string
@@ -66,9 +63,6 @@ func Load() Config {
 		LuluDrawEnabled:        boolOrDefault("LULU_DRAW_ENABLED", true),
 		LuluDrawGames:          splitOrDefault("LULU_DRAW_GAMES", []string{"lh", "xdy", "race"}),
 		LuluDrawCloseBeforeSec: intOrDefault("LULU_DRAW_CLOSE_BEFORE_SECONDS", 10),
-		LuluTrendEnabled:       boolOrDefault("LULU_TREND_ENABLED", false),
-		LuluTrendURL:           strings.TrimSpace(os.Getenv("LULU_TREND_URL")),
-		LuluTrendInterval:      durationOrDefault("LULU_TREND_INTERVAL", time.Minute),
 		Environment:            environment,
 		APIAddress:             valueOrDefault("API_ADDRESS", ":8080"),
 		APIAllowedOrigins:      splitOrDefault("API_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),

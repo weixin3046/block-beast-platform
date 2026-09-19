@@ -15,7 +15,7 @@
 | 环境 | WebSocket 地址 | 健康检查 |
 | --- | --- | --- |
 | 本地开发 | `ws://localhost:8081/v1/ws` | `http://localhost:8081/healthz` |
-| 当前服务器 | `ws://58.87.64.208/v1/ws` | 由反向代理暴露的 `/healthz` |
+| 当前服务器 | `ws://120.26.41.254/v1/ws` | 由反向代理暴露的 `/healthz` |
 | 配置 HTTPS 后 | `wss://<实时域名>/v1/ws` | `https://<实时域名>/healthz` |
 
 生产页面使用 HTTPS 时必须连接 `wss://`，否则浏览器会阻止混合内容。WebSocket 网关是独立的 `realtime` 进程，不是 API 进程。
@@ -26,7 +26,7 @@
 
 ```ts
 const socket = new WebSocket(
-  "ws://58.87.64.208/v1/ws",
+  "ws://120.26.41.254/v1/ws",
   [`bearer.${accessToken}`],
 );
 ```
@@ -798,7 +798,7 @@ export class RealtimeClient {
 
 ```ts
 const realtime = new RealtimeClient({
-  url: "ws://58.87.64.208/v1/ws",
+  url: "ws://120.26.41.254/v1/ws",
   getAccessToken: async () => authStore.accessToken,
   onEvent: (message) => {
     if (message.type !== "event") return;

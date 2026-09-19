@@ -29,7 +29,6 @@ import (
 	"github.com/block-beast/platform/internal/domain/events"
 	"github.com/block-beast/platform/internal/domain/game"
 	"github.com/block-beast/platform/internal/platform/luludraw"
-	"github.com/block-beast/platform/internal/platform/lulutrend"
 	"github.com/block-beast/platform/internal/platform/natsjs"
 	"github.com/block-beast/platform/internal/platform/pqpa"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -98,13 +97,6 @@ func main() {
 	defer resultSource.Close()
 	drawCancel, drawDone := startLuluDraw(ctx, logger, pool, cfg)
 	defer func() { drawCancel(); <-drawDone }()
-	trendClient := startLuluTrend(logger, cfg)
-	var trendTicker *time.Ticker
-	if trendClient != nil {
-		trendTicker = time.NewTicker(cfg.LuluTrendInterval)
-		defer trendTicker.Stop()
-		syncLuluTrend(ctx, logger, externaldraw.NewService(pool, cfg.LuluDrawCloseBeforeSec), trendClient)
-	}
 	ticker := time.NewTicker(cfg.WorkerPollInterval)
 	defer ticker.Stop()
 	settlementTicker := time.NewTicker(cfg.SettlementPollInterval)
@@ -149,49 +141,8 @@ func main() {
 			}
 		case <-assetTick(assetTicker):
 			syncPQPAAssets(ctx, logger, assetSync)
-		case <-trendTick(trendTicker):
-			syncLuluTrend(ctx, logger, externaldraw.NewService(pool, cfg.LuluDrawCloseBeforeSec), trendClient)
 		case <-leaderboardTicker.C:
 			refreshLeaderboards(ctx, logger, leaderboardService)
-		}
-	}
-}
-
-func trendTick(ticker *time.Ticker) <-chan time.Time {
-	if ticker == nil {
-		return nil
-	}
-	return ticker.C
-}
-
-func startLuluTrend(logger *slog.Logger, cfg config.Config) *lulutrend.Client {
-	if !cfg.LuluTrendEnabled {
-		return nil
-	}
-	client, err := lulutrend.NewClient(cfg.LuluTrendURL, nil)
-	if err != nil {
-		logger.Warn("Lulu trend backfill is not configured", "error", err)
-		return nil
-	}
-	logger.Info("Lulu trend backfill enabled", "interval", cfg.LuluTrendInterval)
-	return client
-}
-
-func syncLuluTrend(ctx context.Context, logger *slog.Logger, service *externaldraw.Service, client *lulutrend.Client) {
-	if client == nil {
-		return
-	}
-	for _, game := range []string{"lh", "xdy", "race"} {
-		records, err := client.History(ctx, game)
-		if err != nil {
-			logger.Warn("Lulu trend backfill failed", "game", game, "error", err)
-			continue
-		}
-		for _, record := range records {
-			closedAt := record.ClosedAt
-			if err := service.Handle(ctx, luludraw.Event{Game: game, Kind: "trend_backfill", ResultField: "list[].k", Round: record.Round, CloseAt: &closedAt, Result: record.Result}); err != nil {
-				logger.Error("Lulu trend record sync failed", "game", game, "round", record.Round, "error", err)
-			}
 		}
 	}
 }
@@ -223,9 +174,13 @@ func startLuluDraw(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool,
 				})
 				logger.Info("Lulu draw subscription started", "games", cfg.LuluDrawGames, "config_version", runtime.Version)
 				_ = client.Run(subscriptionCtx, func(event luludraw.Event) {
-					if err := syncService.Handle(subscriptionCtx, event); err != nil && subscriptionCtx.Err() == nil {
-						logger.Error("Lulu draw event sync failed", "game", event.Game, "event", event.Kind, "round", event.Round, "error", err)
-					}
+					retryLuluEvent(subscriptionCtx, time.Second, func() error {
+						attemptCtx, cancel := context.WithTimeout(subscriptionCtx, 10*time.Second)
+						defer cancel()
+						return syncService.Handle(attemptCtx, event)
+					}, func(err error) {
+						logger.Error("Lulu draw event sync failed; retrying", "game", event.Game, "event", event.Kind, "round", event.Round, "error", err)
+					})
 				})
 			}, nil
 		}, logger)

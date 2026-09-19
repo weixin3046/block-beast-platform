@@ -132,10 +132,6 @@ exec /opt/block-beast/current/bin/bootstrap-admin \
 
 Worker 默认订阅怒翎破阵（`lh`）、星海逃杀（`xdy`）和绿茵疾冲（`race`）的 Lulu 实时轮次与开奖结果；最终是否运行由后台 Lulu 配置中的启用状态决定。它复用后台加密保存的登录令牌、UID 与协议密钥；凭据不会写入日志或数据库。`LULU_DRAW_ENABLED=false` 可作为紧急停止订阅的环境级开关。`LULU_DRAW_GAMES` 控制订阅游戏，`LULU_DRAW_CLOSE_BEFORE_SECONDS` 控制平台提前封盘秒数，默认 10 秒。
 
-当实时订阅漏期时，可显式开启 `LULU_TREND_ENABLED=true`，并设置经授权的
-`LULU_TREND_URL` 与 `LULU_TREND_INTERVAL`。Worker 每轮最多只读取三游戏各 60 条
-历史记录；记录会走现有幂等写入与冲突保护，不能覆盖已确认或已结算结果。
-
 平台自身仍是投注、赔率、资金、账本与派奖的唯一权威。后台通过 `GET`、`POST /v1/admin/game-types` 与 `PUT /v1/admin/game-types/{gameTypeID}` 维护 `source:"lulu_ws"` 的 `extras.external_game` 和 `extras.result_map`；写入要求 admin/operator 与二级操作密码。配置修改仅影响后续投注，已下注订单沿用赔率快照。
 | `GET/PUT /v1/admin/hash/config` | 通过版本号原子查询或更新哈希房间名称、顺序、状态、倍率和累计投注上限。仅 operator/admin。 |
 | `GET /v1/admin/game-rooms` | 查询固定六个哈希房间。仅 operator/admin。 |
@@ -219,21 +215,6 @@ docker compose down --volumes
 5. ~~实时 WebSocket 协议、订阅和通知。~~（已完成：v1 协议握手、全局游戏/指定轮次订阅、用户定向资金通知、心跳和慢连接背压保护）
 
 不在仓库中保存私钥、数据库密码、第三方 API 密钥或生产环境配置。
-
-
-cd /Users/chasinga/Documents/yongxin/block-beast-platform
-
-rsync -az \
-  --exclude '.git/' \
-  --exclude '.env.production' \
-  --exclude '.DS_Store' \
-  ./ root@58.87.64.208:/opt/block-beast/
-
-ssh root@58.87.64.208 '
-  cd /opt/block-beast &&
-  ./scripts/deploy-production.sh .env.production
-'
-
 ## LULU 彩石通道
 
 生产配置和 `scripts/deploy-production.sh` 默认启动 `lulu-worker`，无需额外 profile。`cmd/lulu-worker` 独立执行噜噜到账采集和审核后的转赠。平台 ORIGIN_STONE 与彩石 1:1，转赠为整数数量；玩家按单填写噜噜 UID，无长期绑定。通道默认关闭，原 Lulu 项目保持原样。玩家端及管理端接口见 [前端接入文档](docs/frontend-api.md#lulu-彩石充提)；协议实现与部署见 [LULU 后端说明](docs/lulu-integration.md)。
@@ -256,6 +237,15 @@ DEPLOY_HOST=root@121.43.230.83 ./scripts/deploy-baota.sh
 `/opt/block-beast/current/bin/<进程名>` 保持一致。远程脚本在停止服务前检查
 这些文件及迁移脚本是否存在、可执行；目录不匹配时直接拒绝发布。
 
-### 新的部署命令
+### 统一部署命令
+
+测试与正式环境均使用宝塔、Supervisor 和本地 Linux 二进制发布，不再通过
+Docker Compose 发布 staging。首次准备记录见 [测试环境](docs/staging-environment.md)。
+
+```sh
 ./scripts/deploy.sh staging
 ./scripts/deploy.sh production
+```
+
+统一入口分别读取 `.env.staging` 与 `.env.production`，上传所选配置并更新
+远端 `/etc/block-beast/block-beast.env`；旧配置保留时间戳备份。

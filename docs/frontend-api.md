@@ -940,7 +940,7 @@ API 通过 `API_ALLOWED_ORIGINS` 配置玩家端和管理后台的跨域白名�
 完整的连接认证、消息结构、事件 payload、错误处理、断线恢复和 TypeScript 客户端见
 [WebSocket v1 前端接口手册](realtime-api.md)。本节仅保留快速接入摘要。
 
-浏览器通过子协议连接：`new WebSocket("ws://58.87.64.208/v1/ws", ["bearer." + accessToken])`。如果之后配置 HTTPS，请改为 `wss://`；并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。连接建立后服务端发送版本化握手：
+浏览器通过子协议连接：`new WebSocket("ws://120.26.41.254/v1/ws", ["bearer." + accessToken])`。如果之后配置 HTTPS，请改为 `wss://`；并通过 `REALTIME_ALLOWED_ORIGINS` 限制前端来源。连接建立后服务端发送版本化握手：
 
 ```json
 {"v":1,"type":"hello","topics":["game"],"occurred_at":"2026-07-26T12:00:00Z"}

@@ -19,7 +19,7 @@ func (tx *auditTx) Exec(_ context.Context, _ string, args ...any) (pgconn.Comman
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
 func TestAuditDrawResultRecordsSourceWithoutRawMessage(t *testing.T) {
-	for _, tc := range []struct{ kind, field, transport string }{{"3004", "failedRoomId", "websocket"}, {"3005", "killedRooms", "websocket"}, {"2007", "result.list[].fail", "websocket"}, {"trend_backfill", "list[].k", "http_trend"}} {
+	for _, tc := range []struct{ kind, field, transport string }{{"3004", "failedRoomId", "websocket"}, {"3005", "killedRooms", "websocket"}, {"2007", "result.list[].fail", "websocket"}} {
 		tx := &auditTx{}
 		event := luludraw.Event{Game: "xdy", Kind: tc.kind, ResultField: tc.field, Result: []string{"5"}}
 		if err := auditDrawResult(context.Background(), tx, "lulu_draw.result_conflict", event, 8891, json.RawMessage(`["5","7","8"]`)); err != nil {
