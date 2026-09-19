@@ -138,6 +138,7 @@ func main() {
 	}
 	options = append(options, httpapi.WithDepositHistory(chainService))
 	options = append(options, httpapi.WithExternalDrawHistory(externaldraw.NewHistoryReader(pool)))
+	options = append(options, httpapi.WithLuluManualResults(externaldraw.NewService(pool, cfg.LuluDrawCloseBeforeSec)))
 	options = append(options, httpapi.WithAgents(agent.NewService(pool)))
 	options = append(options, httpapi.WithDepositAddresses(chainService))
 	options = append(options, httpapi.WithAdminSecurity(adminsecurity.NewService(pool)), httpapi.WithCredits(creditService), httpapi.WithLulu(lulu.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey).WithBalanceFactory(func(base, uid, token, key string) (lulu.BalanceReader, error) {

@@ -51,6 +51,52 @@ tags:
 - name: RedPackets
   description: 聊天室红包创建、领取和查询。
 paths:
+  /v1/admin/lulu/draw-results:
+    post:
+      summary: 人工补录 Lulu 缺失开奖结果
+      description: 管理员或操作员校验一级密码后补录。仅支持已存在且到开奖时间的未结算期。相同结果重复提交幂等；不同结果、冲突或已取消期拒绝覆盖。成功仅代表结果确认，Worker 异步完成订单结算。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [first_password, game, issue, result, reason]
+              properties:
+                first_password: {type: string, writeOnly: true}
+                game: {type: string, enum: [green_sprint, angry_feather, star_sea]}
+                issue: {type: string, pattern: '^[1-9][0-9]*$', example: '15693'}
+                result:
+                  type: array
+                  minItems: 1
+                  maxItems: 7
+                  uniqueItems: true
+                  items: {type: integer, minimum: 1, maximum: 8}
+                  description: 绿茵冠军1–6或怒羽胜方1–2，均只填一个；星海填全部淘汰房间1–8，最多7个。
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200':
+          description: 结果已确认，等待Worker结算；already_confirmed表示相同结果已存在。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  game: {type: string}
+                  issue: {type: string}
+                  result: {type: array, items: {type: integer}}
+                  status: {type: string, const: confirmed}
+                  already_confirmed: {type: boolean}
+        '400': {description: 参数无效}
+        '401': {description: 未登录}
+        '403': {description: 无权限}
+        '404': {description: 期号不存在}
+        '409': {description: 结果或轮次状态不允许补录}
+        '500': {description: 保存失败，事务已回滚}
+        '503': {description: 服务未配置}
   /v1/admin/bets/{betID}/void:
     post:
       tags: [Operations]

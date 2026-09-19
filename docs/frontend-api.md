@@ -6,6 +6,18 @@
 
 升级执行 `0088_lulu_false_conflicts.sql`，只恢复 JSONB 结果完全相同的误冲突记录，真正冲突保持隔离。历史期由正常结算流程处理，不伪造缺失开奖结果。
 
+## 后台人工补录 Lulu 开奖结果
+
+`POST /v1/admin/lulu/draw-results`，需后台访问令牌与全局一级操作密码。
+
+```json
+{"first_password":"一级操作密码","game":"green_sprint","issue":"15693","result":[5],"reason":"已核实上游开奖结果，补录断线缺失期"}
+```
+
+`game`：`green_sprint` 绿茵疾冲（一个冠军1–6）；`angry_feather` 怒羽（一个胜方1–2）；`star_sea` 星海逃杀（全部淘汰房间1–8，最多7个，不得重复）。`issue` 为字符串，`reason` 必填。星海多杀示例：`"result":[2,5,7]`。
+
+成功返回 `{"game":"green_sprint","issue":"15693","result":[5],"status":"confirmed","already_confirmed":false}`。这表示结果已入库，订单由 Worker 异步正常结算，不代表响应时派彩已完成。相同结果重复提交返回 `already_confirmed:true`，不重复派彩。不同结果或冲突、取消期、未到开奖时间返回409；期号不存在返回404。接口只补已有缺失结果，不创建任意期号或改写已结算结果。审计记录操作者、原因和结果，不记录一级密码。
+
 ## 外部开奖历史
 
 `GET /v1/external-draws/{game}/history?count=100` 查询 Worker 从 Lulu 官方实时接口接收、确认并落库的开奖记录；必须携带玩家访问令牌。`game` 支持 `star_sea`（星海逃杀，房间号 1–8）、`angry_feather`（怒翎破阵，胜方 1–2）和 `green_sprint`（绿茵疾冲，冠军 1–6）。`count` 可选，范围 1–100，默认 100。

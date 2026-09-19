@@ -22,6 +22,7 @@ import (
 )
 
 type Server struct {
+	luluManual          LuluManualService
 	lulu                LuluService
 	adminBetVoids       AdminBetVoidService
 	adminPlayerCreator  AdminPlayerCreator
@@ -330,6 +331,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/admin/hash/config", server.protectRoles(server.secondPassword(server.updateHashConfig), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/game-rooms", server.protectRoles(server.adminGameRooms, identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/rounds", server.protectRoles(server.adminRounds, identity.RoleAdmin, identity.RoleOperator))
+	mux.HandleFunc("POST /v1/admin/lulu/draw-results", server.protectRoles(server.firstPassword(server.confirmLuluManual), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/lulu/send-code", server.protectRoles(server.firstPassword(server.luluSMSLogin(true)), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("POST /v1/admin/lulu/login", server.protectRoles(server.firstPassword(server.luluSMSLogin(false)), identity.RoleAdmin, identity.RoleOperator))
 	mux.HandleFunc("GET /v1/admin/lulu/config", server.protectRoles(server.adminLuluConfig, identity.RoleAdmin, identity.RoleOperator))
