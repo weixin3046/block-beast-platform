@@ -138,6 +138,9 @@ func TestBetReportsIncludeRoundRoomOddsAndCancellationRefunds(t *testing.T) {
 					if fund.BetLossMinor != tc.want || fund.BetLoss == "" {
 						t.Fatalf("global loss: %+v", fund)
 					}
+					if tc.want == 0 && (fund.BetCount != 0 || fund.StakeMinor != 0 || fund.PayoutMinor != 0) {
+						t.Fatalf("unsettled bet included in global totals: %+v", fund)
+					}
 				}
 			}
 			if !tc.virtual {
@@ -147,6 +150,9 @@ func TestBetReportsIncludeRoundRoomOddsAndCancellationRefunds(t *testing.T) {
 				fund := board.Players[0].Funds[0]
 				if fund.BetLossMinor != tc.want || (tc.want == 900 && fund.BetLoss != "0.900") {
 					t.Fatalf("player loss: %+v", fund)
+				}
+				if tc.want == 0 && (fund.BetCount != 0 || fund.StakeMinor != 0 || fund.PayoutMinor != 0) {
+					t.Fatalf("unsettled bet included in player totals: %+v", fund)
 				}
 			} else if len(board.Players) != 0 {
 				t.Fatal("virtual player included")

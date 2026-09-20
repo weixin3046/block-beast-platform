@@ -16,13 +16,13 @@ import (
 
 type LuluService interface {
 	AccountBalance(context.Context, string) (lulu.AccountBalance, error)
-	Transfers(context.Context, string, string, int, int) (lulu.TransferPage, error)
+	Transfers(context.Context, string, string, *time.Time, *time.Time, int, int) (lulu.TransferPage, error)
 	SendLoginCode(context.Context, string, string, int64) error
 	PhoneLogin(context.Context, string, string, string, int64) (lulu.Config, error)
 	Config(context.Context) (lulu.Config, error)
 	UpdateConfig(context.Context, string, lulu.ConfigUpdate) (lulu.Config, error)
 	Create(context.Context, string, string, lulu.Input) (lulu.Order, error)
-	List(context.Context, string, string, string, string, int, int) ([]lulu.Order, error)
+	List(context.Context, string, string, string, string, *time.Time, *time.Time, int, int) ([]lulu.Order, error)
 	Review(context.Context, string, string, string, string) (lulu.Order, error)
 	Health(context.Context, string) (lulu.Health, error)
 }
@@ -132,11 +132,43 @@ func (s *Server) listLuluOrders(admin bool) http.HandlerFunc {
 			user, reviewer = "", actor
 		}
 		limit, offset := parsePagination(r)
-		out, err := s.lulu.List(r.Context(), user, reviewer, r.URL.Query().Get("kind"), r.URL.Query().Get("status"), limit, offset)
+		from, to, ok := parseLuluOrderTimeRange(w, r)
+		if !ok {
+			return
+		}
+		out, err := s.lulu.List(r.Context(), user, reviewer, r.URL.Query().Get("kind"), r.URL.Query().Get("status"), from, to, limit, offset)
 		if !luluError(w, err) {
 			s.writePublicJSON(w, r, 200, map[string]any{"items": out})
 		}
 	}
+}
+
+func parseLuluOrderTimeRange(w http.ResponseWriter, r *http.Request) (*time.Time, *time.Time, bool) {
+	parse := func(key string) (*time.Time, bool) {
+		value := r.URL.Query().Get(key)
+		if value == "" {
+			return nil, true
+		}
+		at, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": key + " 必须是 RFC3339 时间"})
+			return nil, false
+		}
+		return &at, true
+	}
+	from, ok := parse("start_time")
+	if !ok {
+		return nil, nil, false
+	}
+	to, ok := parse("end_time")
+	if !ok {
+		return nil, nil, false
+	}
+	if from != nil && to != nil && !from.Before(*to) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "start_time 必须早于 end_time"})
+		return nil, nil, false
+	}
+	return from, to, true
 }
 func (s *Server) reviewLuluOrder(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.luluActor(w, r)
@@ -266,7 +298,11 @@ func (s *Server) luluTransfers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	out, e := s.lulu.Transfers(r.Context(), actor, direction, page, size)
+	from, to, valid := parseLuluOrderTimeRange(w, r)
+	if !valid {
+		return
+	}
+	out, e := s.lulu.Transfers(r.Context(), actor, direction, from, to, page, size)
 	if !luluError(w, e) {
 		writeJSON(w, 200, out)
 	}

@@ -36,7 +36,7 @@ type TransferReader interface {
 type TransferFactory func(string, string, string, string) (TransferReader, error)
 
 func (s *Service) WithTransferFactory(f TransferFactory) *Service { s.transferFactory = f; return s }
-func (s *Service) Transfers(ctx context.Context, actor, direction string, page, size int) (TransferPage, error) {
+func (s *Service) Transfers(ctx context.Context, actor, direction string, startTime, endTime *time.Time, page, size int) (TransferPage, error) {
 	var out TransferPage
 	if (direction != "received" && direction != "sent") || page < 1 || page > 1000 || size < 1 || size > 100 {
 		return out, ErrInvalid
@@ -88,6 +88,19 @@ func (s *Service) Transfers(ctx context.Context, actor, direction string, page, 
 			r.LinkMethod = "receipt_id"
 			r.LinkReason = ""
 		}
+	}
+	if startTime != nil || endTime != nil {
+		filtered := out.Items[:0]
+		for _, record := range out.Items {
+			if startTime != nil && record.OccurredAt.Before(*startTime) {
+				continue
+			}
+			if endTime != nil && !record.OccurredAt.Before(*endTime) {
+				continue
+			}
+			filtered = append(filtered, record)
+		}
+		out.Items = filtered
 	}
 	// Two upstream rows must not display the same inferred order association.
 	counts := map[string]int{}

@@ -236,6 +236,7 @@ var messages = map[string]string{
 	"count must be between 1 and 100":                                          "数量必须在 1 至 100 之间",
 	"display_name is required and profile fields are too long":                 "昵称不能为空，且资料字段不能超过长度限制",
 	"from and to must be RFC3339 and to must be after from":                    "起止时间必须符合 RFC3339 格式，且结束时间晚于开始时间",
+	"start_time 必须早于 end_time":                                                 "开始时间必须早于结束时间",
 	"game code already exists":                                                 "玩法代码已存在",
 	"game name, mode and valid rules are required":                             "请填写游戏名称、模式和有效规则",
 	"game room code already exists":                                            "房间代码已存在",

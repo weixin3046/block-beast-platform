@@ -34,7 +34,7 @@ func (s *Service) dashboardFunds(ctx context.Context, result *Dashboard, from, t
 	}
 	result.Global = []CurrencyStatistic{}
 	rows, err := s.pool.Query(ctx, `
- WITH b AS(SELECT wallet_id,count(*) AS n,sum(stake_minor) AS stake,sum(payout_minor) AS payout,sum(stake_minor) FILTER (WHERE status='lost' AND NOT is_simulated) AS bet_loss FROM bets WHERE created_at >= $1 AND created_at < $2 GROUP BY wallet_id),
+ WITH b AS(SELECT wallet_id,count(*) AS n,sum(stake_minor) AS stake,sum(payout_minor) AS payout,sum(stake_minor) FILTER (WHERE status='lost') AS bet_loss FROM bets WHERE created_at >= $1 AND created_at < $2 AND status IN ('won','lost') AND NOT is_simulated GROUP BY wallet_id),
  l AS(SELECT wallet_id,
  sum(amount_minor) FILTER(WHERE business_type IN ('deposit','lulu_deposit')) AS deposit,
  sum(amount_minor) FILTER(WHERE business_type='admin_credit') AS credit,

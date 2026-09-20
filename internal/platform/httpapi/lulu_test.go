@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/block-beast/platform/internal/application/adminsecurity"
 	"github.com/block-beast/platform/internal/application/lulu"
@@ -228,7 +229,7 @@ func TestPendingDepositDisplaysUIDAndCountdown(t *testing.T) {
 	}
 }
 
-func (s *luluStub) Transfers(context.Context, string, string, int, int) (lulu.TransferPage, error) {
+func (s *luluStub) Transfers(context.Context, string, string, *time.Time, *time.Time, int, int) (lulu.TransferPage, error) {
 	s.calls++
 	return lulu.TransferPage{Items: []lulu.TransferRecord{}}, nil
 }

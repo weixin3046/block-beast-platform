@@ -258,7 +258,7 @@ func (s *Service) Create(ctx context.Context, user, kind string, in Input) (Orde
 	return out, tx.Commit(ctx)
 }
 
-func (s *Service) List(ctx context.Context, user, actor, kind, status string, limit, offset int) ([]Order, error) {
+func (s *Service) List(ctx context.Context, user, actor, kind, status string, startTime, endTime *time.Time, limit, offset int) ([]Order, error) {
 	switch status {
 	case "", "requested", "approved", "sending", "unknown", "confirmed", "rejected", "failed", "expired":
 	default:
@@ -283,7 +283,7 @@ func (s *Service) List(ctx context.Context, user, actor, kind, status string, li
 	if _, err = tx.Exec(ctx, `UPDATE lulu_orders SET status='expired',updated_at=now() WHERE kind='deposit' AND status='requested' AND expires_at<now() AND ($1='' OR user_id::text=$1)`, user); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT `+columns+` FROM lulu_orders WHERE ($1='' OR user_id::text=$1) AND ($2='' OR kind=$2) AND ($3='' OR status=$3) ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`, user, kind, status, limit, offset)
+	rows, err := tx.Query(ctx, `SELECT `+columns+` FROM lulu_orders WHERE ($1='' OR user_id::text=$1) AND ($2='' OR kind=$2) AND ($3='' OR status=$3) AND ($4::timestamptz IS NULL OR created_at >= $4) AND ($5::timestamptz IS NULL OR created_at < $5) ORDER BY created_at DESC,id DESC LIMIT $6 OFFSET $7`, user, kind, status, startTime, endTime, limit, offset)
 	if err != nil {
 		return nil, err
 	}

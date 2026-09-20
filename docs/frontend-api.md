@@ -1057,7 +1057,7 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 | POST /v1/lulu/deposits | `{request_id,lulu_uid,amount}` 创建上分订单，随后转赠；实际到账自动匹配入账 |
 | POST /v1/lulu/withdrawals | 同样字段创建下分订单并冻结 ORIGIN_STONE |
 | GET /v1/lulu/orders | 本人订单，可选 kind/status/limit/offset，返回 items |
-| GET /v1/admin/lulu/orders | 后台订单，同样筛选和分页 |
+| GET /v1/admin/lulu/orders | 后台订单，支持 `kind`、`status`、`start_time`、`end_time`（RFC3339）筛选和分页 |
 | POST /v1/admin/lulu/orders/{orderID}/review | `{action,evidence,first_password}` 审核或对账，路径 UUID |
 | GET /v1/admin/lulu/config | 读取配置，admin/operator |
 | PUT /v1/admin/lulu/config | 保存配置，admin/operator，需一级密码及最新 version |
@@ -1097,6 +1097,7 @@ Worker 默认每分钟刷新今天和本周；结束周期内没有 `accepted` �
 用户公开 ID 与现有接口一致，噜噜 UID 始终是字符串。
 
 - `GET /v1/admin/lulu/orders?kind=withdrawal&status=requested&limit=50&offset=0`
+- 时间筛选示例：`GET /v1/admin/lulu/orders?start_time=2026-09-20T00:00:00%2B08:00&end_time=2026-09-21T00:00:00%2B08:00`
 - `POST /v1/admin/lulu/orders/{orderID}/review`
 
   ```json
@@ -1211,7 +1212,7 @@ image_url 指向 GET /v1/uploads/{uploadID}/content，需要携带平台 Bearer 
 
 ### 噜噜上游转赠流水
 
-GET /v1/admin/lulu/transfers?direction=received&page=1&size=50，direction=sent 查询转出。仅 admin/operator 携平台 Token 调用，后端使用当前配置的噜噜凭据；无需传 UID 或噜噜 Token。通道须开启。page 为 1–1000，size 为 1–100，默认 1/50。收到和转出分别分页，total 是上游返回总数，不代表无限历史覆盖。
+GET /v1/admin/lulu/transfers?direction=received&page=1&size=50，direction=sent 查询转出。支持 `start_time`、`end_time`（RFC3339）按转账发生时间筛选。仅 admin/operator 携平台 Token 调用，后端使用当前配置的噜噜凭据；无需传 UID 或噜噜 Token。通道须开启。page 为 1–1000，size 为 1–100，默认 1/50。时间筛选在当前上游分页结果上执行，`total` 仍是上游返回总数。
 
 响应包含 receiver_uid、page、size、total、items。每条记录返回 id（观测指纹，不是上游交易号）、direction、counterparty_uid、nickname、item_id、amount（收到为正、转出为负的整数字符串）、occurred_at、linked。item_id=102201 是彩石，其他物品也原样展示。
 

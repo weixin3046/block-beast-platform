@@ -231,7 +231,7 @@ func TestOrdersAtomicityConcurrencyAndRecovery(t *testing.T) {
 	if _, err = s.Create(ctx, user, "withdrawal", Input{RequestID: uuid.NewString(), LuluUID: "7654321", Amount: "21"}); !errors.Is(err, wallet.ErrInsufficientFunds) {
 		t.Fatalf("overdraw %v", err)
 	}
-	if list, e := s.List(ctx, other, "", "", "", 100, 0); e != nil || len(list) != 0 {
+	if list, e := s.List(ctx, other, "", "", "", nil, nil, 100, 0); e != nil || len(list) != 0 {
 		t.Fatalf("other user's orders: %+v %v", list, e)
 	}
 	// Late polling after claim expiration still honors actual transfer time.
@@ -418,7 +418,7 @@ func (p *loginStub) PhoneLogin(context.Context, string, string) (string, string,
 func TestListRejectsInvalidStatusBeforeQuery(t *testing.T) {
 	s := NewService(nil, "")
 	for _, status := range []string{"matched", "typo", "CONFIRMED"} {
-		if _, err := s.List(context.Background(), "", "", "", status, 50, 0); !errors.Is(err, ErrInvalid) {
+		if _, err := s.List(context.Background(), "", "", "", status, nil, nil, 50, 0); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("status %q: %v", status, err)
 		}
 	}
