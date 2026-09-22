@@ -1,5 +1,10 @@
 # 架构与迁移范围
 
+登录默认开启 `AUTH_PERMANENT_TOKENS`：JWT 不含 exp，响应 expires_in=0；
+sessions.expires_at 使用 PostgreSQL infinity，保留现有非空列和时间查询，无需迁移。
+永久令牌必须绑定可撤销会话，HTTP/Realtime 均继续查询账号状态与 revoked_at。
+仅影响新登录/注册/刷新；已有有限期限令牌仍按原期限校验，不复活失效会话。
+
 ## 部署模型
 
 0067 单登录会话：身份仓储在用户行锁内撤销旧 sessions 并创建新会话，部分唯一索引保证每用户最多一条未撤销会话。JWT sid 绑定稳定 sessions.id，刷新只轮换凭据；HTTP 与 Realtime 共用身份领域会话校验，数据库异常拒绝放行。Realtime 在握手、命令以及每秒检测中校验；不依赖单进程内存完成跨实例踢出。升级撤销历史会话，API/Realtime 必须协调更新。
@@ -141,3 +146,11 @@ Token 获取路径仅为短信登录；公开 ConfigUpdate 与 HTTP 请求不再
 钱包账本 outbox 插入触发事务内 NOTIFY，提交后才向 Worker 投递唤醒。独立发布循环使用专属 LISTEN 连接，与结算、外部请求和维护任务解耦；启动、重连和轮询都扫描持久化 outbox，通知不承担消息持久化职责。批次满 100 条继续排空；发布失败保留既有失败计数策略。数据库迁移须先于新版 Worker 启动。
 
 代理下级列表按层加载：parent_user_id 默认本人；指定节点时沿祖先链向上验证属于登录人团队，以访问路径防止环路，不扫描全部后代。当前层按公开ID游标分页（兼容offset），多取1行判断has_more，只对本页人员统计收益。total只计算当前层筛选后人数，has_children用EXISTS查询，不递归返回children。0084新增parent_user_id/user_id索引。成员、权限、分页和收益共享只读可重复读事务。收益只统计本人投注给登录收款人产生的paid返水，展开不改变收款人；今日及历史累计按币种分组，不对子树汇总。
+
+### Lulu 采集隔离
+
+实时采集通过独立的文件存储 JetStream 流 `BLOCK_BEAST_DRAW_INBOX` 交付规范化
+事件给 Worker 的每游戏耐用消费者，消费成功后才 ACK。失败延迟重试，单条失败
+不无限阻塞接收或后续入库；超过容量拒绝新增并记录错误，不淘汰未处理结果。
+业务事务和派奖幂等性仍由 externaldraw/settlement 负责。连接分别检测轮次和
+结果的业务进展，自动重连恢复静默连接；监控、停机及故障边界见 Lulu 集成文档。

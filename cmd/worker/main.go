@@ -96,7 +96,11 @@ func main() {
 	resultSource := settlement.NewCompositeResultSourceWithWebSocket(cfg.TronGridAPIKey, cfg.TronGridGRPCEndpoint, cfg.OkxRESTURL, cfg.OkxWebSocketURL)
 	resultSource.WithLulu(pool)
 	defer resultSource.Close()
-	drawCancel, drawDone := startLuluDraw(ctx, logger, pool, cfg)
+	drawCancel, drawDone, err := startLuluDraw(ctx, logger, pool, cfg)
+	if err != nil {
+		logger.Error("worker failed to initialize Lulu draw inbox", "error", err)
+		return
+	}
 	defer func() { drawCancel(); <-drawDone }()
 	if cfg.LuluBackfillEnabled && cfg.LuluDrawEnabled {
 		client, err := luluall.NewClient(cfg.LuluBackfillURL)
@@ -177,18 +181,27 @@ func main() {
 	}
 }
 
-func startLuluDraw(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (context.CancelFunc, <-chan struct{}) {
+func startLuluDraw(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (context.CancelFunc, <-chan struct{}, error) {
 	drawCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	close(done)
 	if !cfg.LuluDrawEnabled {
-		return cancel, done
+		return cancel, done, nil
+	}
+	inbox, err := natsjs.NewDrawInbox(cfg.NATSURL, logger)
+	if err != nil {
+		cancel()
+		return nil, nil, err
 	}
 	settings := luluapp.NewService(pool, "").WithEncryptionKey(cfg.LuluEncryptionKey)
 	syncService := externaldraw.NewService(pool, cfg.LuluDrawCloseBeforeSec)
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
+		defer inbox.Close()
+		consumerDone := make(chan struct{})
+		go func() { defer close(consumerDone); inbox.Run(drawCtx, syncService.Handle) }()
+		defer func() { <-consumerDone }()
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		runLuluDrawReload(drawCtx, ticker.C, settings.RuntimeConfig, func(runtime luluapp.RuntimeConfig) (func(context.Context), error) {
@@ -197,6 +210,8 @@ func startLuluDraw(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool,
 				return nil, err
 			}
 			return func(subscriptionCtx context.Context) {
+				publishCtx, stopPublishing := luluPublishContext(subscriptionCtx, 10*time.Second)
+				defer stopPublishing()
 				client.WithErrorHandler(func(game, operation string, err error) {
 					if subscriptionCtx.Err() == nil {
 						logger.Warn("Lulu draw transport failed", "game", game, "operation", operation, "error", err)
@@ -204,18 +219,21 @@ func startLuluDraw(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool,
 				})
 				logger.Info("Lulu draw subscription started", "games", cfg.LuluDrawGames, "config_version", runtime.Version)
 				_ = client.Run(subscriptionCtx, func(event luludraw.Event) {
-					retryLuluEvent(subscriptionCtx, time.Second, func() error {
-						attemptCtx, cancel := context.WithTimeout(subscriptionCtx, 10*time.Second)
+					saved := retryLuluEvent(publishCtx, time.Second, func() error {
+						attemptCtx, cancel := context.WithTimeout(publishCtx, 3*time.Second)
 						defer cancel()
-						return syncService.Handle(attemptCtx, event)
+						return inbox.Put(attemptCtx, event)
 					}, func(err error) {
-						logger.Error("Lulu draw event sync failed; retrying", "game", event.Game, "event", event.Kind, "round", event.Round, "error", err)
+						logger.Error("Lulu draw inbox publish failed; retrying", "game", event.Game, "event", event.Kind, "round", event.Round, "error", err)
 					})
+					if !saved {
+						logger.Error("Lulu draw event not persisted before shutdown deadline", "game", event.Game, "round", event.Round)
+					}
 				})
 			}, nil
 		}, logger)
 	}()
-	return cancel, done
+	return cancel, done, nil
 }
 
 func runVirtualAccounts(ctx context.Context, logger *slog.Logger, service *virtualbot.Service) {

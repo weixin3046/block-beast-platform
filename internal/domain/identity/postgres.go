@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,6 +18,14 @@ var ErrLoginNameTaken = errors.New("login name is already taken")
 var ErrInvitationCodeNotFound = errors.New("invitation code is invalid")
 
 const MinimumInvitationCode int64 = 10001
+
+// Zero represents no time-based expiry, while revoked_at remains authoritative.
+func sessionExpiration(at time.Time) pgtype.Timestamptz {
+	if at.IsZero() {
+		return pgtype.Timestamptz{Valid: true, InfinityModifier: pgtype.Infinity}
+	}
+	return pgtype.Timestamptz{Time: at, Valid: true}
+}
 
 var ErrAdminAlreadyExists = errors.New("an administrator already exists")
 
@@ -42,7 +51,7 @@ func (repository *PostgresRepository) CreateSession(ctx context.Context, userID 
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO sessions (id, user_id, token_hash, audience, expires_at)
-		VALUES ($1, $2, $3, $4, $5)`, uuid.NewString(), userID, tokenHash, audience, expiresAt)
+		VALUES ($1, $2, $3, $4, $5)`, uuid.NewString(), userID, tokenHash, audience, sessionExpiration(expiresAt))
 	if err != nil {
 		return err
 	}
@@ -86,7 +95,7 @@ func (repository *PostgresRepository) RotateSession(ctx context.Context, oldToke
 			  SELECT 1 FROM users
 			  WHERE users.id = sessions.user_id AND users.status = 'active'
 		  )
-		RETURNING user_id`, oldTokenHash, newTokenHash, expiresAt, audience).Scan(&userID)
+		RETURNING user_id`, oldTokenHash, newTokenHash, sessionExpiration(expiresAt), audience).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrIdentityNotFound
 	}

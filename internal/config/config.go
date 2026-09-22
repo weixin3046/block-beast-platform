@@ -26,6 +26,7 @@ type Config struct {
 	NATSURL                string
 	AuthTokenSecret        string
 	AuthStrictPassword     bool
+	AuthPermanentTokens    bool
 	LoginMaxFailures       int
 	LoginFailureWindow     time.Duration
 	LoginLockoutDuration   time.Duration
@@ -80,6 +81,7 @@ func Load() Config {
 		NATSURL:                os.Getenv("NATS_URL"),
 		AuthTokenSecret:        os.Getenv("AUTH_TOKEN_SECRET"),
 		AuthStrictPassword:     boolOrDefault("AUTH_STRICT_PASSWORD_POLICY", false),
+		AuthPermanentTokens:    boolOrDefault("AUTH_PERMANENT_TOKENS", true),
 		LoginMaxFailures:       intOrDefault("LOGIN_MAX_FAILURES", 5),
 		LoginFailureWindow:     durationOrDefault("LOGIN_FAILURE_WINDOW", 15*time.Minute),
 		LoginLockoutDuration:   durationOrDefault("LOGIN_LOCKOUT_DURATION", 15*time.Minute),

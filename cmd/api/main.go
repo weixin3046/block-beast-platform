@@ -91,6 +91,7 @@ func main() {
 			WithStrictPasswordPolicy(cfg.AuthStrictPassword).
 			WithRegistrar(identityRepository).
 			WithSessions(identityRepository, cfg.RefreshTokenTTL).
+			WithPermanentTokens(cfg.AuthPermanentTokens).
 			WithLoginProtection(identityRepository, loginPolicy)
 		options = append(options, httpapi.WithAuth(httpapi.NewAuthenticator(cfg.AuthTokenSecret).WithSessionValidator(identityRepository)), httpapi.WithLogin(authService), httpapi.WithRegister(authService), httpapi.WithSessions(authService), httpapi.WithPasswordChange(authService), httpapi.WithSecondaryPasswords(authService))
 	}

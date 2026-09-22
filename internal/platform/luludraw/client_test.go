@@ -179,3 +179,21 @@ func TestStarSeaHistoryMalformedRowDoesNotDiscardOtherRounds(t *testing.T) {
 		t.Fatalf("history lost: %+v", events)
 	}
 }
+
+func TestWriteEventCancellationDoesNotWaitForAnotherGame(t *testing.T) {
+	// A canceled write must terminate without waiting for a different socket.
+	client := &Client{enc: make([]byte, 32), mac: make([]byte, 32)}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- client.writeEvent(ctx, nil, "2001", nil) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("canceled write succeeded")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("canceled write blocked on another game's shared lock")
+	}
+}

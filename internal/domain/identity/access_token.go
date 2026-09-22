@@ -18,13 +18,13 @@ type AccessTokenClaims struct {
 	Subject   string   `json:"sub"`
 	Roles     []string `json:"roles"`
 	IssuedAt  int64    `json:"iat"`
-	ExpiresAt int64    `json:"exp"`
+	ExpiresAt int64    `json:"exp,omitempty"`
 }
 
-// IssueAccessToken creates a signed, short-lived JWT for authenticated API calls.
+// IssueAccessToken creates a signed JWT. Zero lifetime requires a revocable session.
 // The signing key must contain at least 32 bytes of secret material.
 func IssueAccessToken(secret []byte, subject string, roles []string, issuedAt time.Time, lifetime time.Duration, sessionIDs ...string) (string, error) {
-	if len(secret) < 32 || subject == "" || lifetime <= 0 {
+	if len(secret) < 32 || subject == "" || lifetime < 0 {
 		return "", ErrInvalidAccessToken
 	}
 	header, err := encodeTokenPart(map[string]string{"alg": "HS256", "typ": "JWT"})
@@ -35,12 +35,19 @@ func IssueAccessToken(secret []byte, subject string, roles []string, issuedAt ti
 	if len(sessionIDs) > 0 {
 		sessionID = sessionIDs[0]
 	}
+	if lifetime == 0 && sessionID == "" {
+		return "", ErrInvalidAccessToken
+	}
+	var expiresAt int64
+	if lifetime > 0 {
+		expiresAt = issuedAt.UTC().Add(lifetime).Unix()
+	}
 	claims, err := encodeTokenPart(AccessTokenClaims{
 		SessionID: sessionID,
 		Subject:   subject,
 		Roles:     append([]string(nil), roles...),
 		IssuedAt:  issuedAt.UTC().Unix(),
-		ExpiresAt: issuedAt.UTC().Add(lifetime).Unix(),
+		ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		return "", err
@@ -70,7 +77,7 @@ func VerifyAccessToken(secret []byte, token string, now time.Time) (AccessTokenC
 		return AccessTokenClaims{}, ErrInvalidAccessToken
 	}
 	var claims AccessTokenClaims
-	if err := decodeTokenPart(parts[1], &claims); err != nil || claims.Subject == "" || claims.ExpiresAt <= now.UTC().Unix() || claims.IssuedAt > now.UTC().Unix() {
+	if err := decodeTokenPart(parts[1], &claims); err != nil || claims.Subject == "" || claims.ExpiresAt < 0 || (claims.ExpiresAt > 0 && claims.ExpiresAt <= now.UTC().Unix()) || (claims.ExpiresAt == 0 && claims.SessionID == "") || claims.IssuedAt > now.UTC().Unix() {
 		return AccessTokenClaims{}, ErrInvalidAccessToken
 	}
 	return claims, nil

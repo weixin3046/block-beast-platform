@@ -12,7 +12,7 @@ info:
     对外 error 提示统一为简体中文；HTTP 状态码及机器可读字段、枚举保持不变。未知内部错误统一返回“操作失败，请稍后重试”，不透传数据库或第三方错误详情。
     所有前端请求金额由后端转换；平台精度读取GET /v1/currencies，链上资产精度不用于前端钱包换算。
 
-    除健康检查、平台信息和认证接口外的业务接口均需携带 `Authorization: Bearer <access_token>` 访问令牌；登录或注册返回默认有效期 15 分钟的访问令牌和可轮换的刷新令牌。投注、钱包等账号级资源仅本人或具备 operator/admin 角色的账号可访问；轮次取消仅限 operator/admin。
+    除健康检查、平台信息和认证接口外的业务接口均需携带 `Authorization: Bearer <access_token>` 访问令牌；登录或注册默认返回永久访问令牌（expires_in=0，无exp）和可轮换的永久刷新令牌。退出、封号、改密和重新登录仍撤销会话，旧有限期限令牌保留原期限。投注、钱包等账号级资源仅本人或具备 operator/admin 角色的账号可访问；轮次取消仅限 operator/admin。
   license:
     name: UNLICENSED
 security: []
@@ -7293,8 +7293,8 @@ components:
         expires_in:
           type: integer
           format: int64
-          description: 令牌有效期（秒）。
-          example: 900
+          description: 令牌有效期（秒），0 表示不按时间过期。默认永久模式；仍受会话撤销、账号停用和重新登录约束。
+          example: 0
         user_id:
           type: integer
           format: int64

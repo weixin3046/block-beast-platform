@@ -51,21 +51,51 @@ type SessionStore interface {
 }
 
 type Service struct {
-	credentials   CredentialsReader
-	registrar     UserRegistrar
-	secret        []byte
-	ttl           time.Duration
-	now           func() time.Time
-	sessions      SessionStore
-	refreshTTL    time.Duration
-	loginAttempts LoginAttemptStore
-	loginPolicy   LoginProtectionPolicy
+	credentials     CredentialsReader
+	registrar       UserRegistrar
+	secret          []byte
+	ttl             time.Duration
+	now             func() time.Time
+	sessions        SessionStore
+	refreshTTL      time.Duration
+	permanentTokens bool
+	loginAttempts   LoginAttemptStore
+	loginPolicy     LoginProtectionPolicy
 }
 
 func (service *Service) WithSessions(sessions SessionStore, ttl time.Duration) *Service {
 	service.sessions = sessions
 	service.refreshTTL = ttl
 	return service
+}
+
+func (service *Service) WithPermanentTokens(enabled bool) *Service {
+	service.permanentTokens = enabled
+	return service
+}
+
+func (service *Service) sessionExpiresAt() time.Time {
+	if service.permanentTokens {
+		return time.Time{}
+	}
+	return service.now().UTC().Add(service.refreshTTL)
+}
+
+func (service *Service) accessLifetime() time.Duration {
+	if service.permanentTokens {
+		return 0
+	}
+	return service.ttl
+}
+
+func (service *Service) permanentSessionConfigured() bool {
+	if !service.permanentTokens {
+		return true
+	}
+	_, ok := service.sessions.(interface {
+		SessionID(context.Context, string) (string, error)
+	})
+	return ok
 }
 
 func NewService(credentials CredentialsReader, secret string, ttl time.Duration) *Service {
@@ -100,7 +130,7 @@ type LoginResult struct {
 	Roles        []string `json:"roles"`
 }
 
-// Login 校验登录名与密码，为激活账号签发携带角色的短期访问令牌。
+// Login 校验登录名与密码，为激活账号签发携带角色的访问令牌。
 // 玩家入口拒绝任何同时具有后台角色的账号，避免同一身份跨端登录。
 // 登录名不存在时同样执行一次哈希校验，避免通过响应时间探测账号是否存在。
 func (service *Service) Login(ctx context.Context, loginName string, password string) (LoginResult, error) {
@@ -113,7 +143,7 @@ func (service *Service) LoginAdmin(ctx context.Context, loginName string, passwo
 }
 
 func (service *Service) login(ctx context.Context, loginName string, password string, audience SessionAudience) (LoginResult, error) {
-	if len(service.secret) < 32 || service.ttl <= 0 {
+	if len(service.secret) < 32 || service.ttl <= 0 || !service.permanentSessionConfigured() {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
 	loginName = strings.TrimSpace(loginName)
@@ -229,7 +259,7 @@ func adminLoginAllowed(roles []string) bool {
 // Register 创建新玩家账号（用户、密码凭证、player 角色、默认货币零余额钱包）
 // 并直接签发访问令牌，注册完成即可调用业务接口。
 func (service *Service) Register(ctx context.Context, loginName string, displayName string, password string, invitationCode string) (LoginResult, error) {
-	if service.registrar == nil || len(service.secret) < 32 || service.ttl <= 0 {
+	if service.registrar == nil || len(service.secret) < 32 || service.ttl <= 0 || !service.permanentSessionConfigured() {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
 	if !loginNamePattern.MatchString(loginName) {
@@ -286,14 +316,14 @@ func (service *Service) RefreshAdmin(ctx context.Context, refreshToken string) (
 }
 
 func (service *Service) refresh(ctx context.Context, refreshToken string, audience SessionAudience) (LoginResult, error) {
-	if service.sessions == nil || service.refreshTTL <= 0 || len(service.secret) < 32 {
+	if service.sessions == nil || service.refreshTTL <= 0 || len(service.secret) < 32 || !service.permanentSessionConfigured() {
 		return LoginResult{}, ErrAuthNotConfigured
 	}
 	newToken, err := randomRefreshToken()
 	if err != nil {
 		return LoginResult{}, err
 	}
-	expiresAt := service.now().UTC().Add(service.refreshTTL)
+	expiresAt := service.sessionExpiresAt()
 	newTokenHash := hashRefreshToken(newToken)
 	userID, err := service.sessions.RotateSession(ctx, hashRefreshToken(refreshToken), newTokenHash, audience, expiresAt)
 	if err != nil {
@@ -319,7 +349,7 @@ func (service *Service) refresh(ctx context.Context, refreshToken string, audien
 		AccessToken:  accessToken,
 		RefreshToken: newToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    int64(service.ttl / time.Second),
+		ExpiresIn:    int64(service.accessLifetime() / time.Second),
 		UserID:       userID,
 		PublicUserID: publicUserID,
 		Roles:        roles,
@@ -411,10 +441,11 @@ func (service *Service) attachRefreshToken(ctx context.Context, result LoginResu
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if err := service.sessions.CreateSession(ctx, result.UserID, hashRefreshToken(token), audience, service.now().UTC().Add(service.refreshTTL)); err != nil {
+	if err := service.sessions.CreateSession(ctx, result.UserID, hashRefreshToken(token), audience, service.sessionExpiresAt()); err != nil {
 		return LoginResult{}, err
 	}
 	result.RefreshToken = token
+	result.ExpiresIn = int64(service.accessLifetime() / time.Second)
 	result.AccessToken, err = service.sessionAccessToken(ctx, result.UserID, result.Roles, hashRefreshToken(token))
 	if err != nil {
 		return LoginResult{}, err
@@ -433,7 +464,7 @@ func (service *Service) sessionAccessToken(ctx context.Context, userID string, r
 			return "", err
 		}
 	}
-	return identity.IssueAccessToken(service.secret, userID, roles, service.now().UTC(), service.ttl, sid)
+	return identity.IssueAccessToken(service.secret, userID, roles, service.now().UTC(), service.accessLifetime(), sid)
 }
 
 func randomRefreshToken() (string, error) {

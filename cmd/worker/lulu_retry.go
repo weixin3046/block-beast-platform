@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// 同一事件提交成功后才处理后续事件，避免暂时的数据库故障丢失开奖结果。
-// Handle 使用幂等事务；即使提交成功但响应丢失，重试也不会重复派彩。
+// 采集事件持久化到 inbox 后才继续；数据库重试由独立消费者执行。
+// 发布确认丢失时重试沿用消息 ID，消费入库仍由幂等事务兜底。
 func retryLuluEvent(ctx context.Context, interval time.Duration, apply func() error, report func(error)) bool {
 	for ctx.Err() == nil {
 		if err := apply(); err == nil {
@@ -23,4 +23,24 @@ func retryLuluEvent(ctx context.Context, interval time.Duration, apply func() er
 		}
 	}
 	return false
+}
+
+// Give already received events a bounded persistence window on reload/shutdown.
+func luluPublishContext(parent context.Context, grace time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-parent.Done():
+		}
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+			cancel()
+		}
+	}()
+	return ctx, cancel
 }

@@ -17,6 +17,39 @@ import (
 
 const testSecret = "0123456789abcdef0123456789abcdef"
 
+type permanentSessionValidator struct{ revoked bool }
+
+func (v *permanentSessionValidator) ValidateSession(context.Context, identity.AccessTokenClaims) error {
+	if v.revoked {
+		return identity.ErrInvalidAccessToken
+	}
+	return nil
+}
+
+func TestPermanentHTTPTokenRequiresActiveSession(t *testing.T) {
+	token, err := identity.IssueAccessToken([]byte(testSecret), "user", []string{"player"}, time.Now().AddDate(-50, 0, 0), 0, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator := NewAuthenticator(testSecret)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	check := func(want int) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		authenticator.Authenticate(okHandler)(response, request)
+		if response.Code != want {
+			t.Fatalf("status=%d want=%d", response.Code, want)
+		}
+	}
+	check(http.StatusUnauthorized)
+	validator := &permanentSessionValidator{}
+	authenticator.WithSessionValidator(validator)
+	check(http.StatusNoContent)
+	validator.revoked = true
+	check(http.StatusUnauthorized)
+}
+
 func issueTestToken(t *testing.T, subject string, roles []string) string {
 	t.Helper()
 	token, err := identity.IssueAccessToken([]byte(testSecret), subject, roles, time.Now().UTC(), time.Minute)

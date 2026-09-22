@@ -42,7 +42,6 @@ type Client struct {
 	enc, mac   []byte
 	games      []string
 	onError    func(game, operation string, err error)
-	sendMu     sync.Mutex
 }
 
 func NewClient(token, uid, protocolKey string, games []string) (*Client, error) {
@@ -103,15 +102,12 @@ func (client *Client) Run(ctx context.Context, handle func(Event)) error {
 
 func (client *Client) runGame(ctx context.Context, game string, handle func(Event)) {
 	const reconnectInterval = 5 * time.Second
-	// 入库与读帧分离，短暂数据库延迟不会阻塞 Pong 读取。队列跨重连保留。
+	// 持久化与读帧分离；队列跨重连保留，停止后交付已解析的事件。
 	events := make(chan Event, 256)
 	delivered := make(chan struct{})
 	go func() {
 		defer close(delivered)
 		for event := range events {
-			if ctx.Err() != nil {
-				return
-			}
 			handle(event)
 		}
 	}()
@@ -127,8 +123,10 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 		cancelDial()
 		if err == nil {
 			connection.SetReadLimit(luluReadLimit)
-			client.subscribe(ctx, connection, game)
 			pollCtx, stopPoll := context.WithCancel(ctx)
+			progress := newDrawProgress(time.Now())
+			go client.watchProgress(pollCtx, connection, game, progress, 5*time.Second, 3*time.Minute)
+			client.subscribe(pollCtx, connection, game)
 			go client.poll(pollCtx, connection, game)
 			go client.heartbeat(pollCtx, connection, game)
 			lastRound := ""
@@ -157,6 +155,7 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 						}
 					}
 					for _, event := range parseMessagesWithRound(game, plain, lastRound) {
+						progress.observe(event, time.Now())
 						if event.Round != "" && event.Kind != "2007" && event.Kind != "2011" {
 							previousRound := lastRound
 							lastRound = event.Round
@@ -173,10 +172,7 @@ func (client *Client) runGame(ctx context.Context, game string, handle func(Even
 						if event.Round == chaseRound && len(event.Result) > 0 {
 							stopChase()
 						}
-						select {
-						case events <- event:
-						case <-ctx.Done():
-						}
+						events <- event
 					}
 				}
 			}
@@ -298,6 +294,9 @@ func (client *Client) poll(ctx context.Context, connection *websocket.Conn, game
 }
 
 func (client *Client) writeEvent(ctx context.Context, connection *websocket.Conn, event string, data any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -305,9 +304,10 @@ func (client *Client) writeEvent(ctx context.Context, connection *websocket.Conn
 	if err != nil {
 		return err
 	}
-	client.sendMu.Lock()
-	defer client.sendMu.Unlock()
-	return connection.Write(ctx, websocket.MessageText, []byte(client.encryptFrame(plain)))
+	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	// websocket.Conn serializes writes per connection; never lock unrelated games.
+	return connection.Write(writeCtx, websocket.MessageText, []byte(client.encryptFrame(plain)))
 }
 
 func (client *Client) encryptFrame(plain []byte) string {

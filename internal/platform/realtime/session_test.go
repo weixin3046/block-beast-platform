@@ -14,6 +14,20 @@ import (
 
 type switchSessionValidator struct{ revoked atomic.Bool }
 
+func TestPermanentSessionStillChecksRevocation(t *testing.T) {
+	validator := &switchSessionValidator{}
+	hub := NewHub("0123456789abcdef0123456789abcdef", nil).WithSessionValidator(validator)
+	defer hub.Close()
+	claims := identity.AccessTokenClaims{Subject: "user", SessionID: "session"}
+	if !hub.validSession(context.Background(), claims) {
+		t.Fatal("permanent session rejected")
+	}
+	validator.revoked.Store(true)
+	if hub.validSession(context.Background(), claims) {
+		t.Fatal("revoked permanent session accepted")
+	}
+}
+
 func (s *switchSessionValidator) ValidateSession(context.Context, identity.AccessTokenClaims) error {
 	if s.revoked.Load() {
 		return identity.ErrInvalidAccessToken
@@ -22,13 +36,21 @@ func (s *switchSessionValidator) ValidateSession(context.Context, identity.Acces
 }
 
 func TestRevokedSessionClosesSocketAndRejectsReconnect(t *testing.T) {
+	testRevokedSessionSocket(t, time.Minute)
+}
+
+func TestPermanentRevokedSessionClosesSocketAndRejectsReconnect(t *testing.T) {
+	testRevokedSessionSocket(t, 0)
+}
+
+func testRevokedSessionSocket(t *testing.T, lifetime time.Duration) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	validator := &switchSessionValidator{}
 	hub := NewHub(secret, []string{"*"}).WithSessionValidator(validator)
 	server := httptest.NewServer(hub)
 	defer server.Close()
 	defer hub.Close()
-	token, err := identity.IssueAccessToken([]byte(secret), "user", []string{"player"}, time.Now(), time.Minute, "session")
+	token, err := identity.IssueAccessToken([]byte(secret), "user", []string{"player"}, time.Now(), lifetime, "session")
 	if err != nil {
 		t.Fatal(err)
 	}

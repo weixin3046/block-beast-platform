@@ -25,3 +25,18 @@ func TestRetryLuluEvent(t *testing.T) {
 		t.Fatal("canceled retry succeeded")
 	}
 }
+
+func TestLuluPublishContextDrainsAfterSubscriptionStops(t *testing.T) {
+	parent, stop := context.WithCancel(context.Background())
+	ctx, cancel := luluPublishContext(parent, 50*time.Millisecond)
+	defer cancel()
+	stop()
+	if ctx.Err() != nil {
+		t.Fatal("cancelled before drain")
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("shutdown unbounded")
+	}
+}

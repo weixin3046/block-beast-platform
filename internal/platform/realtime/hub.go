@@ -34,7 +34,7 @@ func (hub *Hub) WithSessionValidator(validator identity.SessionValidator) *Hub {
 }
 
 func (hub *Hub) validSession(ctx context.Context, claims identity.AccessTokenClaims) bool {
-	if claims.ExpiresAt <= time.Now().Unix() {
+	if claims.ExpiresAt < 0 || (claims.ExpiresAt > 0 && claims.ExpiresAt <= time.Now().Unix()) || (claims.ExpiresAt == 0 && (hub.sessions == nil || claims.SessionID == "")) {
 		return false
 	}
 	if hub.sessions == nil {

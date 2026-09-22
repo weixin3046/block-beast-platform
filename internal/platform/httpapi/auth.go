@@ -64,7 +64,7 @@ func (authenticator *Authenticator) verify(request *http.Request) (identity.Acce
 		return identity.AccessTokenClaims{}, false
 	}
 	claims, err := identity.VerifyAccessToken(authenticator.secret, token, authenticator.now())
-	if err != nil {
+	if err != nil || (claims.ExpiresAt == 0 && authenticator.sessions == nil) {
 		return identity.AccessTokenClaims{}, false
 	}
 	if authenticator.sessions != nil && authenticator.sessions.ValidateSession(request.Context(), claims) != nil {
