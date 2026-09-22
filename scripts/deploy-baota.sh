@@ -18,17 +18,19 @@ if [ "${SKIP_TEST:-0}" != "1" ]; then
 fi
 
 mkdir -p "${WORK_DIR}/release/bin" "${WORK_DIR}/release/scripts" "${WORK_DIR}/release/migrations"
-for binary in api worker realtime lulu-worker bootstrap-admin; do
+for binary in api worker realtime lulu-worker bootstrap-admin domainctl; do
   case "${binary}" in
     api) package=./cmd/api ;;
     worker) package=./cmd/worker ;;
     realtime) package=./cmd/realtime ;;
     lulu-worker) package=./cmd/lulu-worker ;;
     bootstrap-admin) package=./cmd/bootstrap-admin ;;
+    domainctl) package=./cmd/domainctl ;;
   esac
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "${WORK_DIR}/release/bin/${binary}" "${package}"
 done
 
+printf '1\n' > "${WORK_DIR}/release/domain-management-v1"
 cp migrations/*.sql "${WORK_DIR}/release/migrations/"
 cp scripts/migrate.sh scripts/deploy-baota-remote.sh "${WORK_DIR}/release/scripts/"
 # 统一入口显式提供生产配置；旧调用方式仍沿用服务器已有配置。

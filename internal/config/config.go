@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	ManagedOriginsFile     string
 	LuluBackfillEnabled    bool
 	LuluBackfillURL        string
 	LuluEncryptionKey      string
@@ -58,6 +59,7 @@ type Config struct {
 func Load() Config {
 	environment := valueOrDefault("APP_ENV", "development")
 	return Config{
+		ManagedOriginsFile:  strings.TrimSpace(os.Getenv("MANAGED_ORIGINS_FILE")),
 		LuluBackfillEnabled: boolOrDefault("LULU_BACKFILL_ENABLED", false),
 		LuluBackfillURL:     strings.TrimSpace(os.Getenv("LULU_BACKFILL_URL")),
 		LuluEncryptionKey:   os.Getenv("LULU_CONFIG_ENCRYPTION_KEY"),

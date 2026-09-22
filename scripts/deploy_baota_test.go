@@ -3,6 +3,7 @@ package scripts
 import (
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -126,6 +127,61 @@ func TestBaotaRejectsInvalidReleaseBeforeStoppingServices(t *testing.T) {
 			}
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
 				t.Fatal("invalid release touched running services")
+			}
+		})
+	}
+}
+
+func TestBaotaPreservesManagedOriginsAndRollsBackUnhealthyRelease(t *testing.T) {
+	for _, unhealthy := range []bool{false, true} {
+		t.Run(fmt.Sprint(unhealthy), func(t *testing.T) {
+			root := t.TempDir()
+			release := filepath.Join(root, "releases", "new")
+			old := filepath.Join(root, "releases", "old")
+			os.MkdirAll(old, 0755)
+			os.Symlink(old, filepath.Join(root, "current"))
+			for _, name := range []string{"api", "worker", "realtime", "lulu-worker", "bootstrap-admin", "domainctl"} {
+				writeFixture(t, filepath.Join(release, "bin", name), "#!/bin/sh\nexit 0\n", 0755)
+			}
+			writeFixture(t, filepath.Join(release, "scripts", "migrate.sh"), "#!/bin/sh\nexit 0\n", 0755)
+			os.MkdirAll(filepath.Join(release, "migrations"), 0755)
+			env := filepath.Join(root, "config.env")
+			writeFixture(t, env, "APP_ENV=production\nBASE=old\n", 0640)
+			writeFixture(t, filepath.Join(release, ".env.production"), "APP_ENV=production\nBASE=new\nMANAGED_ORIGINS_FILE=\n", 0600)
+			managed := filepath.Join(root, "origins.json")
+			writeFixture(t, managed, `{"version":1,"origins":["https://web.example.com"]}`, 0640)
+			calls := filepath.Join(root, "calls")
+			supervisor := filepath.Join(root, "supervisorctl")
+			writeFixture(t, supervisor, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_CALLS\"\n", 0755)
+			tools := filepath.Join(root, "tools")
+			writeFixture(t, filepath.Join(tools, "flock"), "#!/bin/sh\nexit 0\n", 0755)
+			writeFixture(t, filepath.Join(tools, "mv"), "#!/usr/bin/env python3\nimport os,sys\nos.replace(sys.argv[-2],sys.argv[-1])\n", 0755)
+			curl := "#!/bin/sh\nexit 0\n"
+			if unhealthy {
+				curl = "#!/bin/sh\nexit 1\n"
+			}
+			writeFixture(t, filepath.Join(tools, "curl"), curl, 0755)
+			c := exec.Command("bash", "deploy-baota-remote.sh", release)
+			c.Env = append(os.Environ(), "APP_DIR="+root, "ENV_FILE="+env, "SUPERVISORCTL="+supervisor, "PATH="+tools+":"+os.Getenv("PATH"), "TEST_CALLS="+calls, "BLOCK_BEAST_LOCK_FILE="+filepath.Join(root, "lock"), "MANAGED_ORIGINS_PATH="+managed)
+			b, err := c.CombinedOutput()
+			data, _ := os.ReadFile(env)
+			link, _ := filepath.EvalSymlinks(filepath.Join(root, "current"))
+			oldCanonical, _ := filepath.EvalSymlinks(old)
+			releaseCanonical, _ := filepath.EvalSymlinks(release)
+			if unhealthy {
+				if err == nil {
+					t.Fatalf("unhealthy release accepted %s", b)
+				}
+				if !strings.Contains(string(data), "BASE=old") || link != oldCanonical {
+					t.Fatalf("not rolled back: %s %s %s", data, link, b)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("%v %s", err, b)
+				}
+				if !strings.Contains(string(data), "MANAGED_ORIGINS_FILE="+managed) || link != releaseCanonical {
+					t.Fatalf("lost managed config: %s %s", data, link)
+				}
 			}
 		})
 	}

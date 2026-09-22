@@ -54,6 +54,10 @@ func main() {
 	}
 	cfg := config.Load()                                    // 加载配置文件
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)) // 创建JSON日志记录器
+	if err := cfg.LoadManagedOrigins(); err != nil {
+		logger.Error("invalid managed origins configuration", "error", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateAPI(); err != nil {
 		logger.Error("invalid API configuration", "error", err)
 		return

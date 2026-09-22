@@ -7,7 +7,7 @@
 1. 停止 lulu-worker，停止 API 后按顺序应用迁移至 0074，再更新 API 和专用进程。0071 会暂停通道。0073 移除 matched 状态；如果存在历史 matched 订单会报错停止，须先在旧版本核对处理，迁移不会自动修改余额或删除订单。
 2. 在服务器配置 LULU_CONFIG_ENCRYPTION_KEY：32 随机字节的 Base64，可用 openssl rand -base64 32 生成，禁止写入仓库。API 和 lulu-worker 使用同一主密钥，备份数据库时须安全备份主密钥。
 3. 管理员按前端文档完成基础配置、短信登录、启用通道。
-4. 运行 scripts/deploy-production.sh，默认构建并启动 API、worker、realtime、lulu-worker。lulu-worker 已并入 compose.production.yaml，不需要额外 overlay 或 profile；手动部署也可使用 docker compose --env-file .env.production -f compose.production.yaml up -d lulu-worker。通道未启用时常驻待命，已启用时会自动处理已审核付款。
+4. 运行 `./scripts/deploy.sh staging` 或 `./scripts/deploy.sh production`，构建 API、worker、realtime、lulu-worker，通过宝塔 Supervisor 发布。统一脚本负责停止进程、执行迁移和重新启动，操作步骤见 [服务器部署](deployment.md)。通道未启用时 lulu-worker 常驻待命，已启用时会自动处理已审核付款。
 
 运行配置和凭据存于数据库，不读取旧 Token 文件和旧收付环境变量。Token 由短信登录获取；Token 和协议密钥采用 AES-256-GCM 分用途加密。审计仅记录公开配置和凭据变更标志。
 

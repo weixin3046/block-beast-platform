@@ -21,6 +21,10 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := cfg.LoadManagedOrigins(); err != nil {
+		logger.Error("invalid managed origins configuration", "error", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateRealtime(); err != nil {
 		logger.Error("invalid realtime configuration", "error", err)
 		return

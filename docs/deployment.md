@@ -1,168 +1,103 @@
-# 生产环境 Docker 部署
+# 服务器部署（宝塔 / Supervisor）
 
-生产环境使用 `compose.production.yaml`，不要使用本地开发的 `compose.yaml` 或
-`scripts/dev-up.sh`。生产配置具有以下约束：
+测试与正式环境使用宝塔 Nginx、Supervisor 和本地 Linux 二进制，统一入口为
+`scripts/deploy.sh`。本文件替代旧生产 Docker 部署说明。
 
-- PostgreSQL 和 NATS 只加入 Docker 内部网络，不映射宿主机端口。
-- API 与 Realtime 只绑定宿主机 `127.0.0.1`，由宿主机上的 Nginx、Caddy
-  或云负载均衡提供 HTTPS/WSS。
-- PostgreSQL 与 NATS JetStream 使用独立持久化卷。
-- 本地上传文件保存在独立 `uploads-data` 持久卷。
-- 应用容器以非 root、只读文件系统运行，并限制日志文件大小。
-- 每次发布先执行带版本记录的增量数据库迁移，再更新应用容器。
+`compose.yaml`、`Dockerfile` 和 Docker 迁移回退流程仍供本地开发使用。
+仓库保留的 `compose.production.yaml`、`scripts/deploy-production.sh` 属于旧方案，
+不用于当前测试或正式服务器发布。
 
-## 1. 服务器准备
+## 环境与配置
 
-安装 Docker Engine、Docker Compose v2、Git，并只向公网开放 SSH、HTTP 和
-HTTPS 端口。不要向公网开放 5432、4222、8222、8080 或 8081。
+- 环境目标由 `scripts/deploy.sh staging|production` 固定选择；只操作
+  [AGENTS.md](../AGENTS.md) 授权的服务器。
+- 本地分别准备 `.env.staging`、`.env.production`，其中 `APP_ENV` 必须与环境一致。
+  配置包含数据库、NATS、认证及第三方凭据，不得提交版本库。
+- 服务器应用配置为 `/etc/block-beast/block-beast.env`。
+- 发布目录为 `/opt/block-beast/releases/<version>`，`/opt/block-beast/current`
+  指向当前版本，二进制位于发布目录的 `bin/`。
+- Supervisor 管理 `block-beast-api`、`block-beast-worker`、
+  `block-beast-realtime`、`block-beast-lulu-worker`。
+- API 与 Realtime 的本机端口分别为 8080、8081；通过 Nginx 提供对外入口，
+  数据库和 NATS 不应直接暴露到公网。
 
-PostgreSQL 的 `5432` 仅绑定宿主机 `127.0.0.1`，供 Navicat 等工具经 SSH 隧道访问。
-Navicat 常规页填写主机 `127.0.0.1`、端口 `5432`，数据库名、用户和密码分别使用
-生产环境的 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`；SSH 页配置服务器登录信息。
-不要把映射改为 `0.0.0.0`。首次增加此映射会重建数据库容器并短暂中断连接，须保留原命名数据卷。
+环境差异与测试服务器准备见 [测试环境](staging-environment.md)。
+现有发布脚本面向已完成基础设施和 Supervisor 配置的服务器，不负责首次安装。
 
-## 2. 创建生产配置
+## 发布
 
-在仓库根目录执行：
-
-```bash
-cp .env.production.example .env.production
-chmod 600 .env.production
-```
-
-编辑 `.env.production`，至少替换：
-
-- `POSTGRES_PASSWORD` 和对应的 `POSTGRES_DSN`
-- `NATS_PASSWORD` 和对应的 `NATS_URL`
-- `AUTH_TOKEN_SECRET`
-- 玩家端、管理后台的 Origin
-- PQPA 与 TronGrid API Key
-
-如果服务器访问 Go 官方模块代理较慢，可将 `BUILD_GOPROXY` 改为部署区域可用
-的可信代理；中国大陆常用 `https://goproxy.cn,direct`。
-
-`AUTH_STRICT_PASSWORD_POLICY` 是密码严格规范的唯一开关，不受 `APP_ENV`
-影响。正式环境是否开启由部署配置明确决定。
-
-如果数据库密码包含 `@`、`:`、`/` 等 URL 特殊字符，写入
-`POSTGRES_DSN` 时必须进行百分号编码。生产 `.env.production` 已被
-`.gitignore` 和 `.dockerignore` 排除，不得提交。
-
-## 3. 首次部署与更新
-
-执行：
-
-```bash
-./scripts/deploy-production.sh
-```
-
-也可以传入其他环境文件：
-
-```bash
-./scripts/deploy-production.sh /secure/path/block-beast.env
-```
-
-脚本依次校验 Compose、构建镜像、启动 PostgreSQL/NATS、执行所有尚未应用的
-迁移，然后更新 API、Worker 和 Realtime。迁移失败时脚本立即停止，不会更新
-应用进程。
-
-发布固定版本时，建议先检出 Git 标签或提交，并将 `APP_IMAGE_TAG` 设置为相同
-版本：
-
-```bash
-git checkout v1.0.0
-./scripts/deploy-production.sh
-```
-
-## 4. HTTPS 与 WebSocket
-
-反向代理应将 API 域名转发至 `127.0.0.1:8080`，将实时域名的 `/v1/ws`
-转发至 `127.0.0.1:8081`，并为 WebSocket 转发 `Upgrade` 与
-`Connection` 请求头。PQPA Webhook 使用公开的 HTTPS API 域名。
-
-完整配置见 `deploy/nginx/block-beast.conf.example`，公共代理参数见
-`deploy/nginx/block-beast-proxy.conf`。替换其中的 API 域名、Realtime 域名及
-证书路径。首次签发两个域名的证书时，可先确保 80 端口未被占用，然后执行：
-
-```bash
-sudo certbot certonly --standalone -d api.example.com
-sudo certbot certonly --standalone -d ws.example.com
-```
-
-随后安装配置：
-
-```bash
-sudo install -d /etc/nginx/snippets
-sudo install -m 0644 deploy/nginx/block-beast-proxy.conf \
-  /etc/nginx/snippets/block-beast-proxy.conf
-sudo install -m 0644 deploy/nginx/block-beast.conf.example \
-  /etc/nginx/conf.d/block-beast.conf
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-Certbot 自动续期后应重新加载 Nginx。可以创建部署钩子：
-
-```bash
-sudo sh -c 'printf "%s\n" "#!/bin/sh" "systemctl reload nginx" \
-  > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx'
-sudo chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
-sudo certbot renew --dry-run
-```
-
-配置默认将登录接口限制为每个 IP 每分钟 10 次，并允许短时突发 5 次。玩家大量
-共享同一公网出口时，应根据实际流量调整该值。若 Nginx 前方还有 CDN 或负载
-均衡，必须只信任其固定出口地址并配置 `set_real_ip_from` 与
-`real_ip_header`，否则限流与审计日志无法获得真实客户端 IP。
-
-## 5. 验证与运维
-
-部署后检查：
-
-```bash
-curl --fail http://127.0.0.1:8080/healthz
-curl --fail http://127.0.0.1:8080/readyz
-curl --fail http://127.0.0.1:8081/healthz
-docker compose --env-file .env.production -f compose.production.yaml ps
-docker compose --env-file .env.production -f compose.production.yaml logs --tail=200 api worker realtime
-```
-
-停止应用但保留数据：
-
-```bash
-docker compose --env-file .env.production -f compose.production.yaml down
-```
-
-不要在生产环境使用 `down --volumes`。上线前必须建立 PostgreSQL 和
-`uploads-data` 的定时异地备份，
-并实际验证恢复流程；同时监控容器健康、磁盘空间、Worker 错误、NATS
-JetStream 积压以及 PQPA/OKX/TronGrid 调用失败。
-
-本地上传卷可以在不停机只读归档，但要获得与数据库引用完全一致的恢复点，
-建议短暂停止 API 后与数据库备份成组执行。例如：
-
-```bash
-docker compose --env-file .env.production -f compose.production.yaml stop api
-docker run --rm \
-  -v block-beast-production_uploads-data:/source:ro \
-  -v /srv/block-beast-backups:/backup \
-  alpine:3.22 \
-  tar -C /source -czf /backup/uploads-$(date +%Y%m%d-%H%M%S).tar.gz .
-docker compose --env-file .env.production -f compose.production.yaml start api
-```
-
-备份文件必须复制到另一台服务器或云存储，不能只保存在原服务器。单机本地卷
-不支持跨主机 API 横向扩容；未来需要多台 API 时，应切换到 S3/COS/MinIO
-共享对象存储。
-# 0080 单期投注升级
-
-0081 五位用户ID升级同样需要停写：先停止 api、worker、realtime，再执行部署脚本（自动运行0081）。同步新版API/Worker/Realtime，前端重新读取用户ID和邀请码。迁移保留内部UUID及余额，历史公开ID映射保存在 user_public_id_history；历史审计中的旧ID可据此查询。五位编号容量为89999个账号，超过容量迁移会回滚；后续序列耗尽也不会循环复用ID。
-
-同步新版代码后，在部署目录执行以下命令。旧 Worker 会创建多期 open，必须先停止旧 API/Worker，再执行迁移；这次升级会短暂停止下注和结算。部署脚本本身不会提前停止这些进程。
+在开发机仓库根目录执行所需环境命令：
 
 ```sh
-docker compose --env-file .env.production -f compose.production.yaml stop api worker
-./scripts/deploy-production.sh .env.production
+./scripts/deploy.sh staging
+# 正式环境发布时使用：
+./scripts/deploy.sh production
 ```
 
-日志应包含 `0080_scheduled_rounds.sql` 的执行记录。该迁移将历史提前开放的后续轮次转为 scheduled，不删除投注、不修改钱包。新版 Worker 等前一期结算或取消后开放下一期；已过封盘时间的待开放轮次直接封盘后正常结算。新版 API 拒绝待开放期和存在更早未完成期的下注请求。迁移失败时先排查错误，不启动旧 Worker 继续写入。
+统一入口运行 `go test ./...`，构建 Linux amd64 二进制并上传发布包。
+远端先检查发布内容，再停止四个业务进程、备份并更新环境配置、执行缺失迁移、
+切换 `current` 链接、启动进程并检查 API 和 Realtime 健康状态。
+这是有停机窗口的发布，实时连接会断开并需要重连，不是滚动发布。
+
+上传的环境文件会覆盖服务器配置，因此发布前必须核对服务器上手动调整的配置，
+尤其是域名白名单，避免旧的本地配置覆盖线上修改。通过域名工具维护的来源独立保存，部署会校验并保留其引用，见 [域名管理](domain-management.md)。
+
+底层 `scripts/deploy-baota.sh` 也支持显式 `DEPLOY_HOST`，目标必须符合
+AGENTS.md；未提供 `DEPLOY_ENV_FILE` 时沿用服务器配置。日常优先使用统一入口。
+
+## Nginx 与证书
+
+宝塔站点配置位于 `/www/server/panel/vhost/nginx/`。修改时先查看目标环境现有
+站点，不直接覆盖其他站点或把仓库示例当成当前线上配置。
+
+- API 反向代理至 `127.0.0.1:8080`。
+- `/v1/ws` 转发至 `127.0.0.1:8081`，配置 WebSocket Upgrade/Connection 头和长连接超时。
+- 转发正确的 Host、客户端地址和请求协议。
+- HTTPS 使用覆盖实际域名的有效证书和匹配私钥；新增 server_name 不会自动扩展证书。
+- API 的 `API_ALLOWED_ORIGINS` 填写完整浏览器 Origin；Realtime 的
+  `REALTIME_ALLOWED_ORIGINS` 使用当前实现支持的主机及端口模式。
+  后端域名和浏览器页面来源不是同一概念。
+
+在服务器检查并加载 Nginx 配置：
+
+```sh
+/www/server/nginx/sbin/nginx -t -c /www/server/nginx/conf/nginx.conf
+# 只有检查成功后才执行：
+/www/server/nginx/sbin/nginx -s reload -c /www/server/nginx/conf/nginx.conf
+```
+
+证书私钥限制读取权限，不写入日志或版本库。证书续期后检查并重载 Nginx。
+
+## 验证与故障恢复
+
+在目标服务器执行：
+
+```sh
+/www/server/panel/pyenv/bin/supervisorctl status
+curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/healthz
+curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/readyz
+curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8081/healthz
+```
+
+本机健康检查通过后，还应检查 Nginx 入口及经过鉴权的 WebSocket 连接。
+日志位置以当前 Supervisor 配置为准，不在排障输出中泄露凭据。
+
+迁移等启动前步骤失败时，远端脚本会尝试恢复旧环境配置、旧发布链接并启动服务。
+启动后的健康检查失败也会尝试恢复旧配置及发布链接，并重新启动旧服务。
+失败时必须检查实际进程、环境配置、发布链接和数据库状态，不能把命令结束视为服务正常。
+数据库已经提交的迁移也不会因切换旧二进制自动撤销；回退前必须核实版本兼容性。
+
+定期备份 PostgreSQL、实际上传目录及必要的加密主密钥，并验证恢复流程。
+上传目录以 `LOCAL_UPLOAD_ROOT` 为准，不沿用旧 Docker 命名卷备份命令。
+备份目标同样必须遵守仓库远程服务器限制。
+
+## 0080 单期投注升级
+
+0080 将未来轮次预创建为 `scheduled`，只开放最早未完成轮次。旧 Worker 会创建
+多期 open，因此必须先停旧 API/Worker，再应用迁移及新版进程。
+当前宝塔统一发布脚本已在迁移前停止四个业务进程，使用上述统一发布入口即可。
+迁移保留投注和钱包数据；失败时排查原因，不启动旧 Worker 继续写入。
+
+0081 五位用户 ID 升级同样需要停写并协调更新 API、Worker、Realtime。
+迁移保留内部 UUID、余额和历史公开 ID 映射；发布后客户端需重新读取用户 ID
+与邀请码。遵循对应迁移的兼容约束，不通过删除数据库或数据卷完成升级。

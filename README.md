@@ -53,17 +53,17 @@ Copy-Item .env.example .env
 
 0080 单期投注升级：未来轮次预创建为 `scheduled`，仅最早未完成轮次开放。此次升级必须先停止旧 API/Worker，再执行部署脚本；操作步骤见 [单期投注升级](docs/deployment.md#0080-单期投注升级)。
 
-服务器使用独立的 `compose.production.yaml` 和 `.env.production`：
+测试与正式环境均使用宝塔 Nginx、Supervisor 和 Linux 二进制发布：
 
-```bash
-cp .env.production.example .env.production
-# 填写生产数据库、NATS、JWT、PQPA、TronGrid 及域名配置
-./scripts/deploy-production.sh
+```sh
+./scripts/deploy.sh staging
+./scripts/deploy.sh production
 ```
 
-该脚本会先执行增量迁移，再更新 API、Worker 和 Realtime。完整的网络隔离、
-HTTPS/WebSocket 代理、验证和运维说明见
-[生产环境 Docker 部署](docs/deployment.md)。
+分别读取本地 `.env.staging`、`.env.production`，校验环境后运行测试、构建、
+上传配置和发布包，再停止应用、执行增量迁移并启动四个业务进程。
+配置文件包含凭据，不得提交。完整步骤见 [服务器部署](docs/deployment.md)。
+本地开发继续使用 Docker Compose，不使用它发布测试或正式环境。
 
 API 健康检查：`http://localhost:8080/healthz`。
 
@@ -220,7 +220,7 @@ docker compose down --volumes
 不在仓库中保存私钥、数据库密码、第三方 API 密钥或生产环境配置。
 ## LULU 彩石通道
 
-生产配置和 `scripts/deploy-production.sh` 默认启动 `lulu-worker`，无需额外 profile。`cmd/lulu-worker` 独立执行噜噜到账采集和审核后的转赠。平台 ORIGIN_STONE 与彩石 1:1，转赠为整数数量；玩家按单填写噜噜 UID，无长期绑定。通道默认关闭，原 Lulu 项目保持原样。玩家端及管理端接口见 [前端接入文档](docs/frontend-api.md#lulu-彩石充提)；协议实现与部署见 [LULU 后端说明](docs/lulu-integration.md)。
+统一部署入口 `scripts/deploy.sh` 会构建并通过 Supervisor 启动 `lulu-worker`。`cmd/lulu-worker` 独立执行噜噜到账采集和审核后的转赠。平台 ORIGIN_STONE 与彩石 1:1，转赠为整数数量；玩家按单填写噜噜 UID，无长期绑定。通道默认关闭，原 Lulu 项目保持原样。玩家端及管理端接口见 [前端接入文档](docs/frontend-api.md#lulu-彩石充提)；协议实现与部署见 [LULU 后端说明](docs/lulu-integration.md)。
 
 ### 宝塔服务器发布
 
@@ -252,3 +252,8 @@ Docker Compose 发布 staging。首次准备记录见 [测试环境](docs/stagin
 
 统一入口分别读取 `.env.staging` 与 `.env.production`，上传所选配置并更新
 远端 `/etc/block-beast/block-beast.env`；旧配置保留时间戳备份。
+
+### 后端域名管理
+
+通过 `scripts/domains.sh staging|production` 管理后端 API/WS 域名和可选证书，
+用法及恢复说明见 [后端域名管理](docs/domain-management.md)。现有发布命令保持不变。
