@@ -71,10 +71,13 @@ func (service *Service) GetHashConfig(ctx context.Context, enabledOnly bool) (Ha
 		}
 		item := HashRoomConfig{ID: room.ID, Code: room.Code, Name: room.Name, Enabled: room.Enabled, SortOrder: room.SortOrder, GameTypes: room.GameTypes, CurrencyConfigs: make([]HashCurrencyConfig, 0)}
 		rows, err := service.pool.Query(ctx, `
-			SELECT currency,guess_multiplier,guess_divisor,dodge_multiplier,dodge_divisor,
-				road_multiplier,road_divisor,guess_max_stake_minor,dodge_max_stake_minor,
-				road_max_stake_minor,min_stake_minor
-			FROM hash_room_currency_configs WHERE room_id=$1 ORDER BY currency`, room.ID)
+			SELECT c.code,COALESCE(h.guess_multiplier,0),COALESCE(h.guess_divisor,1),
+				COALESCE(h.dodge_multiplier,0),COALESCE(h.dodge_divisor,1),
+				COALESCE(h.road_multiplier,0),COALESCE(h.road_divisor,1),
+				COALESCE(h.guess_max_stake_minor,0),COALESCE(h.dodge_max_stake_minor,0),
+				COALESCE(h.road_max_stake_minor,0),COALESCE(h.min_stake_minor,0)
+			FROM currencies c LEFT JOIN hash_room_currency_configs h ON h.currency=c.code AND h.room_id=$1
+			WHERE c.category <> 'stamina' AND (NOT $2 OR h.currency IS NOT NULL) ORDER BY c.code`, room.ID, enabledOnly)
 		if err != nil {
 			return HashConfig{}, err
 		}
@@ -128,6 +131,17 @@ func (service *Service) UpdateHashConfig(ctx context.Context, input HashConfigUp
 			return HashConfig{}, err
 		}
 		for _, config := range room.CurrencyConfigs {
+			// An unconfigured currency has no betting configuration row.
+			if zeroHashCurrencyConfig(config) {
+				var exists bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM currencies WHERE code=$1)`, strings.ToUpper(strings.TrimSpace(config.Currency))).Scan(&exists); err != nil {
+					return HashConfig{}, err
+				}
+				if !exists {
+					return HashConfig{}, ErrInvalidHashConfig
+				}
+				continue
+			}
 			_, err := tx.Exec(ctx, `INSERT INTO hash_room_currency_configs(
 				room_id,currency,guess_multiplier,guess_divisor,dodge_multiplier,dodge_divisor,
 				road_multiplier,road_divisor,guess_max_stake_minor,dodge_max_stake_minor,
@@ -151,6 +165,12 @@ func (service *Service) UpdateHashConfig(ctx context.Context, input HashConfigUp
 	return service.GetHashConfig(ctx, false)
 }
 
+func zeroHashCurrencyConfig(c HashCurrencyConfig) bool {
+	return c.GuessMultiplier == 0 && c.DodgeMultiplier == 0 && c.RoadMultiplier == 0 &&
+		c.GuessDivisor == 1 && c.DodgeDivisor == 1 && c.RoadDivisor == 1 &&
+		c.GuessMaxStakeMinor == 0 && c.DodgeMaxStakeMinor == 0 && c.RoadMaxStakeMinor == 0 && c.MinStakeMinor == 0
+}
+
 func validateHashConfigUpdate(input HashConfigUpdate) error {
 	if input.ExpectedVersion <= 0 || len(input.Rooms) != 6 {
 		return ErrInvalidHashConfig
@@ -170,13 +190,16 @@ func validateHashConfigUpdate(input HashConfigUpdate) error {
 		seenCurrencies := make(map[string]struct{}, len(room.CurrencyConfigs))
 		for _, config := range room.CurrencyConfigs {
 			currency := strings.ToUpper(strings.TrimSpace(config.Currency))
-			if currency == "" || config.GuessMultiplier <= 0 || config.GuessDivisor <= 0 ||
+			if currency == "" {
+				return ErrInvalidHashConfig
+			}
+			if !zeroHashCurrencyConfig(config) && (config.GuessMultiplier <= 0 || config.GuessDivisor <= 0 ||
 				config.DodgeMultiplier <= 0 || config.DodgeDivisor <= 0 || config.RoadMultiplier <= 0 ||
 				config.RoadDivisor <= 0 || config.GuessMaxStakeMinor <= 0 || config.DodgeMaxStakeMinor <= 0 ||
 				config.RoadMaxStakeMinor <= 0 || config.MinStakeMinor <= 0 ||
 				config.MinStakeMinor > config.GuessMaxStakeMinor ||
 				config.MinStakeMinor > config.DodgeMaxStakeMinor ||
-				config.MinStakeMinor > config.RoadMaxStakeMinor {
+				config.MinStakeMinor > config.RoadMaxStakeMinor) {
 				return ErrInvalidHashConfig
 			}
 			if _, exists := seenCurrencies[currency]; exists {

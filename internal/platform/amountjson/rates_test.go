@@ -33,7 +33,7 @@ func TestHashRatesActualDecimalsRoundTrip(t *testing.T) {
 	if m["road_rate"] != "1.985" {
 		t.Fatal(m)
 	}
-	for _, raw := range []string{`{"guess_rate":0}`, `{"guess_rate":-1}`, `{"guess_rate":1e3}`, `{"guess_rate":null}`, `{"guess_multiplier":9350}`, `{"guess_divisor":1000}`, `{"road_rate":"1.0000000000000000001"}`} {
+	for _, raw := range []string{`{"guess_rate":-1}`, `{"guess_rate":1e3}`, `{"guess_rate":null}`, `{"guess_multiplier":9350}`, `{"guess_divisor":1000}`, `{"road_rate":"1.0000000000000000001"}`} {
 		x, _ := ReadJSON(strings.NewReader(raw))
 		if e = c.Convert(x, "", true, false); e == nil {
 			t.Fatalf("accepted %s", raw)
@@ -42,5 +42,24 @@ func TestHashRatesActualDecimalsRoundTrip(t *testing.T) {
 	x, _ := ReadJSON(strings.NewReader(`{"road_rate":1.985}`))
 	if e = c.Convert(x, "", true, false); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestHashZeroRatesRoundTrip(t *testing.T) {
+	v, err := ReadJSON(strings.NewReader(`{"guess_rate":0,"dodge_rate":"0","road_rate":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(context.Background(), nil)
+	if err := c.Convert(v, "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Convert(v, "", false, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"guess_rate", "dodge_rate", "road_rate"} {
+		if v.(map[string]any)[key] != "0" {
+			t.Fatalf("%s: %v", key, v)
+		}
 	}
 }

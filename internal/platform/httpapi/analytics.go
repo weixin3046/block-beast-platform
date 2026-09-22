@@ -27,6 +27,7 @@ type AnalyticsService interface {
 	CreateVirtualAccounts(ctx context.Context, input operations.VirtualAccountInput) ([]operations.VirtualAccount, error)
 	SetVirtualAutomation(ctx context.Context, publicID int64, input operations.VirtualAutomationInput) (operations.VirtualAccount, error)
 	ListAdminBets(ctx context.Context, query operations.BetQuery) ([]operations.AdminBet, error)
+	CountAdminBets(ctx context.Context, query operations.BetQuery) (int64, error)
 	ListAdminLedger(ctx context.Context, query operations.LedgerQuery) ([]operations.LedgerRecord, error)
 	ListRefundClearances(ctx context.Context, user, status string, from, to time.Time, limit, offset int) ([]operations.RefundClearanceRecord, error)
 }
@@ -86,12 +87,34 @@ func (server *Server) adminBets(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := server.analytics.ListAdminBets(r.Context(), operations.BetQuery{PlayerType: playerType, User: r.URL.Query().Get("user"), GameType: r.URL.Query().Get("game_type"), Currency: r.URL.Query().Get("currency"), Status: r.URL.Query().Get("status"), From: from, To: to, Limit: queryLimit(r, 50), Offset: queryOffset(r)})
+	limit, offset := queryLimit(r, 50), queryOffset(r)
+	if limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := operations.BetQuery{PlayerType: playerType, User: r.URL.Query().Get("user"), GameType: r.URL.Query().Get("game_type"), Currency: r.URL.Query().Get("currency"), Status: r.URL.Query().Get("status"), From: from, To: to, Limit: limit, Offset: offset}
+	total, err := server.analytics.CountAdminBets(r.Context(), query)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to list bets"})
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	items, err := server.analytics.ListAdminBets(r.Context(), query)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to list bets"})
+		return
+	}
+	hasMore := int64(offset)+int64(len(items)) < total && len(items) > 0
+	if items == nil {
+		items = []operations.AdminBet{}
+	}
+	var nextOffset *int
+	if hasMore {
+		next := offset + len(items)
+		nextOffset = &next
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset, "has_more": hasMore, "next_offset": nextOffset})
 }
 func (server *Server) adminLedger(w http.ResponseWriter, r *http.Request) {
 	from, to, ok := reportTimes(w, r)

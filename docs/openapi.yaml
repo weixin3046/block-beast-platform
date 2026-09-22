@@ -1538,13 +1538,22 @@ paths:
           default: 0
       responses:
         '200':
-          description: 投注明细列表
+          description: 投注明细分页；has_more判断下一页，末页next_offset为null。limit超出200时使用50。
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  "$ref": "#/components/schemas/AdminBet"
+                type: object
+                required: [items, total, limit, offset, has_more, next_offset]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      "$ref": "#/components/schemas/AdminBet"
+                  limit: {type: integer}
+                  offset: {type: integer}
+                  has_more: {type: boolean}
+                  next_offset: {type: [integer, 'null']}
+                  total: {type: integer, format: int64, description: 符合当前全部筛选条件的订单总数，不受limit和offset影响}
   "/v1/admin/ledger":
     get:
       tags:
@@ -3677,7 +3686,7 @@ paths:
       - Wallets
       operationId: getAllBalances
       summary: 查询账号全部币种余额
-      description: 返回用户持有的全部钱包，含禁用币种。新增后端格式化 available/frozen 字符串和平台 decimals，仅本人或
+      description: 返回全部已启用币种及用户已有钱包（含禁用币种）；已启用币种未创建钱包时返回零余额，查询不会创建钱包。包含后端格式化 available/frozen 字符串和平台 decimals，仅本人或
         operator/admin 可查。
       security:
       - bearerAuth: []
@@ -7477,6 +7486,7 @@ components:
             type: string
             format: date-time
     HashCurrencyConfig:
+      description: 后台返回除category=stamina（体力）之外的全部币种。未配置币种的三个倍率及四个限额均为0；保存支持全部为0表示不开放投注，部分为0无效。零占位不进入玩家菜单。
       type: object
       additionalProperties: false
       required:

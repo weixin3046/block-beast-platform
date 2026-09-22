@@ -30,7 +30,7 @@ func convertHashRates(m map[string]any, input bool) error {
 				return err
 			}
 			text = strings.TrimSpace(text)
-			if !wallet.ValidDisplayAmount(text) {
+			if text != "0" && !wallet.ValidDisplayAmount(text) {
 				return fmt.Errorf("%s 必须为大于0的十进制倍率，最多18位小数", rateKey)
 			}
 			r, ok := new(big.Rat).SetString(text)
@@ -61,7 +61,7 @@ func convertHashRates(m map[string]any, input bool) error {
 			if err != nil {
 				return err
 			}
-			if n <= 0 || d <= 0 {
+			if n < 0 || d <= 0 {
 				return fmt.Errorf("%s 倍率配置无效", rateKey)
 			}
 			r := new(big.Rat).SetFrac64(n, d)

@@ -131,7 +131,7 @@ func updateLuluRoomPlayConfigTx(ctx context.Context, tx pgx.Tx, input LuluRoomPl
 	for i := range input.CurrencyConfigs {
 		item := &input.CurrencyConfigs[i]
 		item.Currency = strings.ToUpper(strings.TrimSpace(item.Currency))
-		if item.Currency == "" || item.PayoutMultiplier <= 0 || item.PayoutDivisor <= 0 || item.MinStakeMinor <= 0 || item.MaxStakeMinor < item.MinStakeMinor {
+		if item.Currency == "" || !validLuluConfigAmounts(item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor) {
 			return ErrInvalidLuluPlayConfig
 		}
 		if _, ok := seen[item.Currency]; ok {
@@ -155,6 +155,9 @@ func updateLuluRoomPlayConfigTx(ctx context.Context, tx pgx.Tx, input LuluRoomPl
 		return err
 	}
 	for _, item := range input.CurrencyConfigs {
+		if zeroLuluConfig(item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor) {
+			continue
+		}
 		if _, err = tx.Exec(ctx, `INSERT INTO lulu_room_play_currency_configs(game_type_id,room_id,play_code,currency,payout_multiplier,payout_divisor,min_stake_minor,max_stake_minor)
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, gameID, input.RoomID, input.PlayCode, item.Currency, item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor); err != nil {
 			return err
@@ -216,7 +219,7 @@ func updateLuluPrimeTimeConfigTx(ctx context.Context, tx pgx.Tx, input LuluPrime
 	for i := range input.CurrencyConfigs {
 		item := &input.CurrencyConfigs[i]
 		item.Currency = strings.ToUpper(strings.TrimSpace(item.Currency))
-		if item.Currency == "" || item.PayoutMultiplier <= 0 || item.PayoutDivisor <= 0 || item.MinStakeMinor <= 0 || item.MaxStakeMinor < item.MinStakeMinor {
+		if item.Currency == "" || !validLuluConfigAmounts(item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor) || (item.Enabled && zeroLuluConfig(item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor)) {
 			return ErrLuluPrimeTimeConfigInvalid
 		}
 		if _, ok := seen[item.Currency]; ok {
@@ -240,6 +243,9 @@ func updateLuluPrimeTimeConfigTx(ctx context.Context, tx pgx.Tx, input LuluPrime
 		return err
 	}
 	for _, item := range input.CurrencyConfigs {
+		if zeroLuluConfig(item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor) {
+			continue
+		}
 		if _, err = tx.Exec(ctx, `INSERT INTO lulu_prime_time_configs(game_type_id,room_id,play_code,currency,payout_multiplier,payout_divisor,min_stake_minor,max_stake_minor,enabled)
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, gameID, input.RoomID, input.PlayCode, item.Currency, item.PayoutMultiplier, item.PayoutDivisor, item.MinStakeMinor, item.MaxStakeMinor, item.Enabled); err != nil {
 			return err
@@ -251,14 +257,25 @@ func updateLuluPrimeTimeConfigTx(ctx context.Context, tx pgx.Tx, input LuluPrime
 // GetLuluPrimeTimeConfigs returns every stored prime-time override keyed by
 // game type, room, and play code. Enabled=false rows are included so the
 // back office can display and re-enable them.
+func zeroLuluConfig(multiplier, divisor, min, max int64) bool {
+	return multiplier == 0 && divisor == 0 && min == 0 && max == 0
+}
+func validLuluConfigAmounts(multiplier, divisor, min, max int64) bool {
+	return zeroLuluConfig(multiplier, divisor, min, max) || (multiplier > 0 && divisor > 0 && min > 0 && max >= min)
+}
+
 func (service *Service) GetLuluPrimeTimeConfigs(ctx context.Context) ([]LuluPrimeTimeConfigUpdate, error) {
 	rows, err := service.pool.Query(ctx, `
-		SELECT gt.code,r.id::text,c.play_code,c.currency,c.payout_multiplier,c.payout_divisor,c.min_stake_minor,c.max_stake_minor,c.enabled
-		FROM lulu_prime_time_configs c
-		JOIN game_types gt ON gt.id=c.game_type_id
-		JOIN game_rooms r ON r.id=c.room_id
+		SELECT gt.code,r.id::text,p.code,cur.code,COALESCE(c.payout_multiplier,0),COALESCE(c.payout_divisor,0),COALESCE(c.min_stake_minor,0),COALESCE(c.max_stake_minor,0),COALESCE(c.enabled,false)
+		FROM game_types gt
+		JOIN game_room_types rt ON rt.game_type_id=gt.id
+		JOIN game_rooms r ON r.id=rt.room_id
+		JOIN lulu_play_configs p ON p.game_type_id=gt.id AND p.code IN ('odd_even','dodge')
+		CROSS JOIN currencies cur
+		LEFT JOIN lulu_prime_time_configs c ON c.game_type_id=gt.id AND c.room_id=r.id AND c.play_code=p.code AND c.currency=cur.code
 		WHERE gt.code='lulu-xdy'
-		ORDER BY gt.code,r.sort_order,r.id,c.play_code,c.currency`)
+		AND cur.category <> 'stamina' AND (cur.enabled OR c.currency IS NOT NULL)
+		ORDER BY gt.code,r.sort_order,r.id,p.code,cur.code`)
 	if err != nil {
 		return nil, err
 	}
@@ -292,15 +309,17 @@ func (service *Service) GetLuluMenus(ctx context.Context) (LuluMenus, error) {
 	rows, err := service.pool.Query(ctx, `
 		SELECT gt.code,gt.name,r.id::text,r.code,r.name,r.sort_order,
 			p.code,p.name,p.outcomes,p.dodge_mode,
-			c.currency,c.payout_multiplier,c.payout_divisor,c.min_stake_minor,c.max_stake_minor
+			cur.code,COALESCE(c.payout_multiplier,0),COALESCE(c.payout_divisor,0),COALESCE(c.min_stake_minor,0),COALESCE(c.max_stake_minor,0)
 		FROM game_types gt
 		JOIN game_room_types rt ON rt.game_type_id=gt.id
 		JOIN game_rooms r ON r.id=rt.room_id AND r.enabled=true
 		JOIN lulu_play_configs p ON p.game_type_id=gt.id AND p.enabled=true
-		JOIN lulu_room_play_currency_configs c ON c.game_type_id=gt.id AND c.room_id=r.id AND c.play_code=p.code
+		CROSS JOIN currencies cur
+		LEFT JOIN lulu_room_play_currency_configs c ON c.game_type_id=gt.id AND c.room_id=r.id AND c.play_code=p.code AND c.currency=cur.code
 		WHERE gt.enabled=true AND gt.rules->>'source'='lulu_ws'
+			AND cur.category <> 'stamina' AND (cur.enabled OR c.currency IS NOT NULL)
 			AND gt.rules->'extras'->>'lulu_shared'='true'
-		ORDER BY gt.code,r.sort_order,r.id,p.sort_order,p.code,c.currency`)
+		ORDER BY gt.code,r.sort_order,r.id,p.sort_order,p.code,cur.code`)
 	if err != nil {
 		return LuluMenus{}, err
 	}

@@ -118,6 +118,23 @@ func (s *Service) ListAdminBets(ctx context.Context, q BetQuery) ([]AdminBet, er
 	return out, rows.Err()
 }
 
+// CountAdminBets uses the same filters as ListAdminBets, without pagination.
+func (s *Service) CountAdminBets(ctx context.Context, q BetQuery) (int64, error) {
+	if q.PlayerType != "" && q.PlayerType != "all" && q.PlayerType != "real" && q.PlayerType != "virtual" {
+		return 0, ErrInvalidPlayerType
+	}
+	var total int64
+	err := s.pool.QueryRow(ctx, `SELECT count(*)
+		FROM bets b JOIN users u ON u.id=b.user_id JOIN wallets w ON w.id=b.wallet_id
+		JOIN currencies c ON c.code=w.currency
+		JOIN rounds r ON r.id=b.round_id JOIN game_types gt ON gt.id=r.game_type_id
+		WHERE ($1='' OR u.public_id::text=$1 OR u.login_name ILIKE '%'||$1||'%')
+		AND ($2='' OR gt.code=$2) AND ($3='' OR w.currency=$3) AND ($4='' OR b.status=$4)
+		AND ($5::timestamptz IS NULL OR b.created_at >= $5) AND ($6::timestamptz IS NULL OR b.created_at < $6)
+		AND ($7='' OR $7='all' OR ($7='real' AND NOT u.is_virtual) OR ($7='virtual' AND u.is_virtual))`, q.User, q.GameType, q.Currency, q.Status, nullTime(q.From), nullTime(q.To), q.PlayerType).Scan(&total)
+	return total, err
+}
+
 func payoutRate(multiplier, divisor int64) string {
 	if multiplier <= 0 || divisor <= 0 {
 		return ""

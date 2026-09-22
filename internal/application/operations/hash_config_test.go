@@ -33,6 +33,21 @@ func TestValidateHashConfigUpdateRequiresFixedRoomsAndValidLimits(t *testing.T) 
 	if err := validateHashConfigUpdate(input); err != nil {
 		t.Fatalf("valid fixed config: %v", err)
 	}
+	zero := HashCurrencyConfig{Currency: "NEW", GuessDivisor: 1, DodgeDivisor: 1, RoadDivisor: 1}
+	input.Rooms[0].CurrencyConfigs = append(input.Rooms[0].CurrencyConfigs, zero)
+	if err := validateHashConfigUpdate(input); err != nil {
+		t.Fatalf("zero placeholder rejected: %v", err)
+	}
+	input.Rooms[0].CurrencyConfigs[1].GuessMaxStakeMinor = 100
+	if err := validateHashConfigUpdate(input); !errors.Is(err, ErrInvalidHashConfig) {
+		t.Fatalf("partial zero configuration accepted: %v", err)
+	}
+	input.Rooms[0].CurrencyConfigs[1] = zero
+	input.Rooms[0].CurrencyConfigs = append(input.Rooms[0].CurrencyConfigs, zero)
+	if err := validateHashConfigUpdate(input); !errors.Is(err, ErrInvalidHashConfig) {
+		t.Fatalf("duplicate zero configuration accepted: %v", err)
+	}
+	input.Rooms[0].CurrencyConfigs = input.Rooms[0].CurrencyConfigs[:1]
 
 	invalidRoom := input
 	invalidRoom.Rooms = append([]HashRoomConfig(nil), input.Rooms...)

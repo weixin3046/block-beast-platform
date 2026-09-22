@@ -340,11 +340,14 @@ func (service *Service) Balance(ctx context.Context, userID string, currency str
 	return info, nil
 }
 
-// Balances 查询用户所有币种余额。
+// Balances 查询已启用币种和用户已有钱包余额；未创建的钱包按零余额展示。
 func (service *Service) Balances(ctx context.Context, userID string) ([]BalanceInfo, error) {
 	rows, err := service.pool.Query(ctx, `
-		SELECT w.user_id, w.currency, w.available_minor, w.frozen_minor,c.decimals
-		FROM wallets w JOIN currencies c ON c.code=w.currency WHERE w.user_id = $1 ORDER BY w.currency`, userID)
+		SELECT u.id, c.code, COALESCE(w.available_minor, 0), COALESCE(w.frozen_minor, 0), c.decimals
+		FROM users u CROSS JOIN currencies c
+		LEFT JOIN wallets w ON w.user_id = u.id AND w.currency = c.code
+		WHERE u.id = $1 AND (c.enabled OR w.user_id IS NOT NULL)
+		ORDER BY c.code`, userID)
 	if err != nil {
 		return nil, err
 	}
